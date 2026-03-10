@@ -3,6 +3,7 @@ import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from './hooks/useAuth'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
+import PermRoute from './components/PermRoute'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -34,13 +35,13 @@ export default function App() {
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
-            <Route path="properties" element={<Properties />} />
-            <Route path="properties/:id" element={<PropertyDetail />} />
+            <Route path="properties" element={<PermRoute permission="properties"><Properties /></PermRoute>} />
+            <Route path="properties/:id" element={<PermRoute permission="properties"><PropertyDetail /></PermRoute>} />
             <Route path="tools" element={<Tools />} />
             <Route path="tools/:slug" element={<ToolView />} />
             <Route path="files" element={<Files />} />
-            <Route path="llcs" element={<LLCs />} />
-            <Route path="llcs/:id" element={<LLCDetail />} />
+            <Route path="llcs" element={<PermRoute permission="llcs"><LLCs /></PermRoute>} />
+            <Route path="llcs/:id" element={<PermRoute permission="llcs"><LLCDetail /></PermRoute>} />
             <Route
               path="admin"
               element={

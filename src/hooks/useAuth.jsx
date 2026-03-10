@@ -39,8 +39,14 @@ export function AuthProvider({ children }) {
 
   const isAdmin = profile?.role === 'admin'
 
+  // Admins can access everything. Other users need explicit flags.
+  const permissions = {
+    properties: isAdmin || !!profile?.can_view_properties,
+    llcs: isAdmin || !!profile?.can_view_llcs,
+  }
+
   return (
-    <AuthContext.Provider value={{ session, profile, loading, isAdmin }}>
+    <AuthContext.Provider value={{ session, profile, loading, isAdmin, permissions }}>
       {children}
     </AuthContext.Provider>
   )

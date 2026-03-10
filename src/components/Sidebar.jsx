@@ -8,14 +8,6 @@ import { useAuth } from '../hooks/useAuth'
 import { useAccessLog } from '../hooks/useAccessLog'
 import toast from 'react-hot-toast'
 
-const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/properties', icon: Building2, label: 'Properties' },
-  { to: '/llcs', icon: Landmark, label: 'LLCs' },
-  { to: '/tools', icon: Wrench, label: 'Tools' },
-  { to: '/files', icon: FolderOpen, label: 'Files' },
-]
-
 const adminItems = [
   { to: '/admin/users', icon: Users, label: 'Users' },
   { to: '/admin/logs', icon: ScrollText, label: 'Access Logs' },
@@ -30,7 +22,7 @@ const linkClass = ({ isActive }) =>
   }`
 
 export default function Sidebar({ open, onClose }) {
-  const { isAdmin } = useAuth()
+  const { isAdmin, permissions } = useAuth()
   const { log } = useAccessLog()
   const navigate = useNavigate()
 
@@ -40,6 +32,14 @@ export default function Sidebar({ open, onClose }) {
     toast.success('Logged out')
     navigate('/login')
   }
+
+  const navItems = [
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },
+    permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
+    { to: '/tools', icon: Wrench, label: 'Tools' },
+    { to: '/files', icon: FolderOpen, label: 'Files' },
+  ].filter(Boolean)
 
   return (
     <>

@@ -13,6 +13,8 @@ create table if not exists public.profiles (
   full_name text,
   role text not null default 'member' check (role in ('admin', 'member')),
   is_active boolean not null default true,
+  can_view_properties boolean not null default false,
+  can_view_llcs boolean not null default false,
   last_login timestamptz,
   created_at timestamptz not null default now()
 );
@@ -200,3 +202,12 @@ create policy "Admins can delete pages"
 -- UPDATE public.profiles
 -- SET role = 'admin'
 -- WHERE email = 'your-email@example.com';
+
+-- ────────────────────────────────────────────────────────────
+-- EXISTING DATABASE MIGRATION
+-- If the profiles table already exists, run these to add the
+-- new permission columns (safe to run multiple times):
+-- ────────────────────────────────────────────────────────────
+-- ALTER TABLE public.profiles
+--   ADD COLUMN IF NOT EXISTS can_view_properties boolean NOT NULL DEFAULT false,
+--   ADD COLUMN IF NOT EXISTS can_view_llcs boolean NOT NULL DEFAULT false;
