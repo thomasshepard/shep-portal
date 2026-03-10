@@ -78,9 +78,9 @@ export default function ExpenseForm({ expense, flocks, onClose, onSaved }) {
 
     let result
     if (editing) {
-      result = await updateRecord('Chicken Expenses', expense.id, fields, CHICKENS_BASE_ID)
+      result = await updateRecord('Chicken expenses', expense.id, fields, CHICKENS_BASE_ID)
     } else {
-      result = await createRecord('Chicken Expenses', fields, CHICKENS_BASE_ID)
+      result = await createRecord('Chicken expenses', fields, CHICKENS_BASE_ID)
     }
 
     if (result.error) {

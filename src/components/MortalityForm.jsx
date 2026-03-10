@@ -29,7 +29,7 @@ export default function MortalityForm({ flock, onClose, onSaved }) {
     setSaving(true)
 
     // 1. Create mortality log record
-    const { error: logErr } = await createRecord('Mortality Log', {
+    const { error: logErr } = await createRecord('Mortality log', {
       Flock: [{ id: flock.id }],
       Date: form.date,
       Count: count,

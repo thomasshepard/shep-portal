@@ -77,9 +77,9 @@ export default function FeedingScheduleForm({ flock, existingSchedule, onClose, 
 
       let result
       if (row.id) {
-        result = await updateRecord('Feeding Schedule', row.id, fields, CHICKENS_BASE_ID)
+        result = await updateRecord('Feeding schedule', row.id, fields, CHICKENS_BASE_ID)
       } else {
-        result = await createRecord('Feeding Schedule', fields, CHICKENS_BASE_ID)
+        result = await createRecord('Feeding schedule', fields, CHICKENS_BASE_ID)
       }
       if (result.error) errorCount++
     }
@@ -97,7 +97,7 @@ export default function FeedingScheduleForm({ flock, existingSchedule, onClose, 
     if (!confirm('Delete the entire feeding schedule for this flock?')) return
     setSaving(true)
     for (const row of rows.filter(r => r.id)) {
-      await deleteRecord('Feeding Schedule', row.id, CHICKENS_BASE_ID)
+      await deleteRecord('Feeding schedule', row.id, CHICKENS_BASE_ID)
     }
     toast.success('Schedule cleared')
     onSaved()
@@ -109,7 +109,7 @@ export default function FeedingScheduleForm({ flock, existingSchedule, onClose, 
       <div className="bg-white rounded-xl w-full max-w-2xl shadow-xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
-            <h2 className="font-semibold text-gray-900">Edit Feeding Schedule</h2>
+            <h2 className="font-semibold text-gray-900">Edit Feeding schedule</h2>
             <p className="text-xs text-gray-500">{flock.fields.Name}</p>
           </div>
           <div className="flex items-center gap-3">

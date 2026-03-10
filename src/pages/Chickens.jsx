@@ -238,9 +238,9 @@ export default function Chickens() {
     setLoading(true)
     const [f, s, m, e] = await Promise.all([
       fetchAllRecords('Flocks', { sort: { field: 'Hatch Date', direction: 'desc' } }, CHICKENS_BASE_ID),
-      fetchAllRecords('Feeding Schedule', {}, CHICKENS_BASE_ID),
-      fetchAllRecords('Mortality Log', { sort: { field: 'Date', direction: 'desc' } }, CHICKENS_BASE_ID),
-      fetchAllRecords('Chicken Expenses', { sort: { field: 'Date', direction: 'desc' } }, CHICKENS_BASE_ID),
+      fetchAllRecords('Feeding schedule', {}, CHICKENS_BASE_ID),
+      fetchAllRecords('Mortality log', { sort: { field: 'Date', direction: 'desc' } }, CHICKENS_BASE_ID),
+      fetchAllRecords('Chicken expenses', { sort: { field: 'Date', direction: 'desc' } }, CHICKENS_BASE_ID),
     ])
     const flockData = f.data || []
     setFlocks(flockData)
@@ -282,14 +282,14 @@ export default function Chickens() {
 
   async function handleDeleteMortality(record) {
     if (!confirm('Delete this mortality record?')) return
-    const { error } = await deleteRecord('Mortality Log', record.id, CHICKENS_BASE_ID)
+    const { error } = await deleteRecord('Mortality log', record.id, CHICKENS_BASE_ID)
     if (error) toast.error(error)
     else { toast.success('Record deleted'); loadAll() }
   }
 
   async function handleDeleteExpense(record) {
     if (!confirm('Delete this expense?')) return
-    const { error } = await deleteRecord('Chicken Expenses', record.id, CHICKENS_BASE_ID)
+    const { error } = await deleteRecord('Chicken expenses', record.id, CHICKENS_BASE_ID)
     if (error) toast.error(error)
     else { toast.success('Expense deleted'); loadAll() }
   }
