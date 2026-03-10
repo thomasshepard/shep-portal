@@ -108,6 +108,7 @@ alter table public.properties enable row level security;
 alter table public.pages enable row level security;
 
 -- Helper function to check admin role
+-- security definer lets it bypass RLS when reading profiles
 create or replace function public.is_admin()
 returns boolean language sql security definer as $$
   select exists (
@@ -116,7 +117,7 @@ returns boolean language sql security definer as $$
   );
 $$;
 
--- profiles policies
+-- ── profiles ──────────────────────────────────────────────
 create policy "Users can read own profile"
   on public.profiles for select
   using (auth.uid() = id or public.is_admin());
@@ -125,7 +126,7 @@ create policy "Admins can update profiles"
   on public.profiles for update
   using (public.is_admin());
 
--- access_logs policies
+-- ── access_logs ───────────────────────────────────────────
 create policy "Authenticated users can insert logs"
   on public.access_logs for insert
   with check (auth.role() = 'authenticated');
@@ -134,22 +135,44 @@ create policy "Admins can read logs"
   on public.access_logs for select
   using (public.is_admin());
 
--- properties policies
+-- ── properties ────────────────────────────────────────────
+-- All authenticated users can read
 create policy "Authenticated users can read properties"
   on public.properties for select
   using (auth.role() = 'authenticated');
 
-create policy "Admins can manage properties"
-  on public.properties for all
+-- Admins get explicit INSERT / UPDATE / DELETE policies
+-- (using 'for all' with only a 'using' clause is ambiguous for
+--  INSERT in some Supabase versions; explicit policies are safer)
+create policy "Admins can insert properties"
+  on public.properties for insert
+  with check (public.is_admin());
+
+create policy "Admins can update properties"
+  on public.properties for update
   using (public.is_admin());
 
--- pages policies
+create policy "Admins can delete properties"
+  on public.properties for delete
+  using (public.is_admin());
+
+-- ── pages ─────────────────────────────────────────────────
+-- All authenticated users can read
 create policy "Authenticated users can read active pages"
   on public.pages for select
   using (auth.role() = 'authenticated');
 
-create policy "Admins can manage pages"
-  on public.pages for all
+-- Admins get explicit INSERT / UPDATE / DELETE policies
+create policy "Admins can insert pages"
+  on public.pages for insert
+  with check (public.is_admin());
+
+create policy "Admins can update pages"
+  on public.pages for update
+  using (public.is_admin());
+
+create policy "Admins can delete pages"
+  on public.pages for delete
   using (public.is_admin());
 
 -- ────────────────────────────────────────────────────────────
