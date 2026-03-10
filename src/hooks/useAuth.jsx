@@ -43,6 +43,7 @@ export function AuthProvider({ children }) {
   const permissions = {
     properties: isAdmin || !!profile?.can_view_properties,
     llcs: isAdmin || !!profile?.can_view_llcs,
+    chickens: isAdmin || !!profile?.can_view_chickens,
   }
 
   return (

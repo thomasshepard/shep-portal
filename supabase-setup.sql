@@ -15,6 +15,7 @@ create table if not exists public.profiles (
   is_active boolean not null default true,
   can_view_properties boolean not null default false,
   can_view_llcs boolean not null default false,
+  can_view_chickens boolean not null default false,
   last_login timestamptz,
   created_at timestamptz not null default now()
 );
@@ -211,3 +212,6 @@ create policy "Admins can delete pages"
 -- ALTER TABLE public.profiles
 --   ADD COLUMN IF NOT EXISTS can_view_properties boolean NOT NULL DEFAULT false,
 --   ADD COLUMN IF NOT EXISTS can_view_llcs boolean NOT NULL DEFAULT false;
+
+-- Add chickens permission (run this if profiles table already existed):
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS can_view_chickens boolean DEFAULT false;

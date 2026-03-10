@@ -1,8 +1,10 @@
 const BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID
 const PAT = import.meta.env.VITE_AIRTABLE_PAT
 
-function baseUrl(tableName) {
-  return `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(tableName)}`
+export const CHICKENS_BASE_ID = import.meta.env.VITE_AIRTABLE_CHICKENS_BASE_ID
+
+function buildUrl(tableName, baseId) {
+  return `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}`
 }
 
 function headers() {
@@ -16,9 +18,10 @@ export function airtableConfigured() {
   return !!(BASE_ID && PAT)
 }
 
-/** Fetch all records from a table, handling Airtable's 100-record pagination. */
-export async function fetchAllRecords(tableName, params = {}) {
-  if (!airtableConfigured()) return { data: null, error: 'Airtable is not configured.' }
+/** Fetch all records from a table, handling Airtable's 100-record pagination.
+ *  Pass baseId to use a different base (e.g. CHICKENS_BASE_ID). */
+export async function fetchAllRecords(tableName, params = {}, baseId = BASE_ID) {
+  if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }
   try {
     const records = []
     let offset = undefined
@@ -26,10 +29,13 @@ export async function fetchAllRecords(tableName, params = {}) {
       const query = new URLSearchParams()
       if (offset) query.set('offset', offset)
       if (params.filterByFormula) query.set('filterByFormula', params.filterByFormula)
-      if (params.sort) query.set('sort[0][field]', params.sort.field), query.set('sort[0][direction]', params.sort.direction || 'asc')
+      if (params.sort) {
+        query.set('sort[0][field]', params.sort.field)
+        query.set('sort[0][direction]', params.sort.direction || 'asc')
+      }
       if (params.fields) params.fields.forEach((f, i) => query.set(`fields[${i}]`, f))
 
-      const res = await fetch(`${baseUrl(tableName)}?${query}`, { headers: headers() })
+      const res = await fetch(`${buildUrl(tableName, baseId)}?${query}`, { headers: headers() })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         return { data: null, error: err?.error?.message || `HTTP ${res.status}` }
@@ -46,10 +52,10 @@ export async function fetchAllRecords(tableName, params = {}) {
 }
 
 /** Create a new record. */
-export async function createRecord(tableName, fields) {
-  if (!airtableConfigured()) return { data: null, error: 'Airtable is not configured.' }
+export async function createRecord(tableName, fields, baseId = BASE_ID) {
+  if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }
   try {
-    const res = await fetch(baseUrl(tableName), {
+    const res = await fetch(buildUrl(tableName, baseId), {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({ fields }),
@@ -63,10 +69,10 @@ export async function createRecord(tableName, fields) {
 }
 
 /** Update an existing record by ID. */
-export async function updateRecord(tableName, recordId, fields) {
-  if (!airtableConfigured()) return { data: null, error: 'Airtable is not configured.' }
+export async function updateRecord(tableName, recordId, fields, baseId = BASE_ID) {
+  if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }
   try {
-    const res = await fetch(`${baseUrl(tableName)}/${recordId}`, {
+    const res = await fetch(`${buildUrl(tableName, baseId)}/${recordId}`, {
       method: 'PATCH',
       headers: headers(),
       body: JSON.stringify({ fields }),
@@ -80,10 +86,10 @@ export async function updateRecord(tableName, recordId, fields) {
 }
 
 /** Delete a record by ID. */
-export async function deleteRecord(tableName, recordId) {
-  if (!airtableConfigured()) return { data: null, error: 'Airtable is not configured.' }
+export async function deleteRecord(tableName, recordId, baseId = BASE_ID) {
+  if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }
   try {
-    const res = await fetch(`${baseUrl(tableName)}/${recordId}`, {
+    const res = await fetch(`${buildUrl(tableName, baseId)}/${recordId}`, {
       method: 'DELETE',
       headers: headers(),
     })
@@ -109,7 +115,6 @@ export function fmtPercent(val) {
 
 export function fmtDate(val) {
   if (!val) return '—'
-  // Airtable returns dates as YYYY-MM-DD; parse without timezone shift
   const [y, m, d] = val.split('-')
   if (!y || !m || !d) return val
   return `${m}/${d}/${y}`

@@ -14,6 +14,7 @@ import ToolView from './pages/ToolView'
 import Files from './pages/Files'
 import LLCs from './pages/LLCs'
 import LLCDetail from './pages/LLCDetail'
+import Chickens from './pages/Chickens'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="files" element={<Files />} />
             <Route path="llcs" element={<PermRoute permission="llcs"><LLCs /></PermRoute>} />
             <Route path="llcs/:id" element={<PermRoute permission="llcs"><LLCDetail /></PermRoute>} />
+            <Route path="chickens" element={<PermRoute permission="chickens"><Chickens /></PermRoute>} />
             <Route
               path="admin"
               element={
