@@ -11,6 +11,8 @@ import PropertyDetail from './pages/PropertyDetail'
 import Tools from './pages/Tools'
 import ToolView from './pages/ToolView'
 import Files from './pages/Files'
+import LLCs from './pages/LLCs'
+import LLCDetail from './pages/LLCDetail'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
@@ -37,6 +39,8 @@ export default function App() {
             <Route path="tools" element={<Tools />} />
             <Route path="tools/:slug" element={<ToolView />} />
             <Route path="files" element={<Files />} />
+            <Route path="llcs" element={<LLCs />} />
+            <Route path="llcs/:id" element={<LLCDetail />} />
             <Route
               path="admin"
               element={

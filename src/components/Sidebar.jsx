@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Building2, Wrench, FolderOpen,
+  LayoutDashboard, Building2, Landmark, Wrench, FolderOpen,
   Users, ScrollText, FileCode, X, LogOut,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -11,6 +11,7 @@ import toast from 'react-hot-toast'
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/properties', icon: Building2, label: 'Properties' },
+  { to: '/llcs', icon: Landmark, label: 'LLCs' },
   { to: '/tools', icon: Wrench, label: 'Tools' },
   { to: '/files', icon: FolderOpen, label: 'Files' },
 ]

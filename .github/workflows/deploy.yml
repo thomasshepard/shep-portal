@@ -35,6 +35,8 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_AIRTABLE_PAT: ${{ secrets.VITE_AIRTABLE_PAT }}
+          VITE_AIRTABLE_BASE_ID: ${{ secrets.VITE_AIRTABLE_BASE_ID }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
