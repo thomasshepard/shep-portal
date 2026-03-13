@@ -194,6 +194,7 @@ export default function Properties() {
           const sold = isSold(prop)
           const propUnitIds = pf['Rental Units'] || []
           const units = propUnitIds.map(uid => unitMap[uid]).filter(Boolean)
+          const isPrimaryResidence = pf['Investment Type'] === 'Primary Residence'
           const occupiedPropCount = units.filter(u => occupiedUnitIds.has(u.id)).length
 
           const propMaint = maintByProperty[prop.id] || []
@@ -251,7 +252,7 @@ export default function Properties() {
                 </div>
               </div>
 
-              {units.length > 0 && (
+              {units.length > 0 && !isPrimaryResidence && (
                 <p className="text-sm text-gray-500 mb-3">{occupiedPropCount}/{units.length} units occupied</p>
               )}
 

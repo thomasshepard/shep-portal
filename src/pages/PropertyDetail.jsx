@@ -193,6 +193,7 @@ export default function PropertyDetail() {
   if (!property) return <div className="p-8 text-center text-gray-500">Property not found.</div>
 
   const f = property.fields || {}
+  const isPrimaryResidence = f['Investment Type'] === 'Primary Residence'
 
   // Build lookup maps
   const tenantMap = {}
@@ -244,22 +245,22 @@ export default function PropertyDetail() {
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="font-semibold text-gray-800 mb-4">Financial Overview</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            <FinRow label="Market Value" value={fmtCurrency(f['Est Market Value'])} />
-            <FinRow label="Purchase Price" value={fmtCurrency(f['Purchase Price'])} />
-            <FinRow label="Date Acquired" value={fmtDate(f['Date Acquired'])} />
-            <FinRow label="Mortgage Amount" value={fmtCurrency(f['Mortgage Amount'])} />
-            <FinRow label="Equity" value={fmtCurrency(f['Equity'])} />
-            <FinRow label="LTV" value={f['LTV'] != null ? fmtPercent(f['LTV'] * 100) : '—'} />
-            <FinRow label="Return on Equity" value={f['Return on Equity'] != null ? fmtPercent(f['Return on Equity'] * 100) : '—'} />
-            <FinRow label="Monthly PI" value={fmtCurrency(f['Monthly PI (from Current Loans)'])} />
-            <FinRow label="Est. Revenue" value={fmtCurrency(f['Estimated Revenue'])} />
-            <FinRow label="Cash Flow" value={fmtCurrency((f['Estimated Revenue'] || 0) - (f['Monthly PI (from Current Loans)'] || 0))} />
-            <FinRow label="HELOC (75%)" value={fmtCurrency(f['HELOC (75%)'])} />
-            <FinRow label="HELOC (80%)" value={fmtCurrency(f['HELOC (80%)'])} />
-            <FinRow label="Selling Cost" value={fmtCurrency(f['Selling Cost'])} />
-            <FinRow label="Accessible Equity" value={fmtCurrency(f['Accessible Equity (if sold)'])} />
-            <FinRow label="2024 Taxes" value={fmtCurrency(f['2024 Taxes'])} />
-            <FinRow label="Title In Name of" value={f['Title In Name of'] || '—'} />
+            <FinRow label="Market Value" value={fmtCurrency(safeNum(f['Est Market Value']))} />
+            <FinRow label="Purchase Price" value={fmtCurrency(safeNum(f['Purchase Price']))} />
+            <FinRow label="Date Acquired" value={fmtDate(safeVal(f['Date Acquired']))} />
+            <FinRow label="Mortgage Amount" value={fmtCurrency(safeNum(f['Mortgage Amount']))} />
+            <FinRow label="Equity" value={fmtCurrency(safeNum(f['Equity']))} />
+            <FinRow label="LTV" value={safeNum(f['LTV']) != null ? fmtPercent(safeNum(f['LTV']) * 100) : '—'} />
+            <FinRow label="Return on Equity" value={safeNum(f['Return on Equity']) != null ? fmtPercent(safeNum(f['Return on Equity']) * 100) : '—'} />
+            <FinRow label="Monthly PI" value={fmtCurrency(safeNum(f['Monthly PI (from Current Loans)']))} />
+            <FinRow label="Est. Revenue" value={fmtCurrency(safeNum(f['Estimated Revenue']))} />
+            <FinRow label="Cash Flow" value={fmtCurrency((safeNum(f['Estimated Revenue']) || 0) - (safeNum(f['Monthly PI (from Current Loans)']) || 0))} />
+            <FinRow label="HELOC (75%)" value={fmtCurrency(safeNum(f['HELOC (75%)']))} />
+            <FinRow label="HELOC (80%)" value={fmtCurrency(safeNum(f['HELOC (80%)']))} />
+            <FinRow label="Selling Cost" value={fmtCurrency(safeNum(f['Selling Cost']))} />
+            <FinRow label="Accessible Equity" value={fmtCurrency(safeNum(f['Accessible Equity (if sold)']))} />
+            <FinRow label="2024 Taxes" value={fmtCurrency(safeNum(f['2024 Taxes']))} />
+            <FinRow label="Title In Name of" value={safeVal(f['Title In Name of'])} />
           </div>
           {f.Notes && (
             <div className="mt-4 p-3 bg-gray-50 rounded-lg">
@@ -284,14 +285,15 @@ export default function PropertyDetail() {
                   <tbody className="divide-y divide-gray-100">
                     {loans.map(loan => {
                       const lf = loan.fields || {}
-                      const rate = lf.Rate != null ? (lf.Rate < 1 ? fmtPercent(lf.Rate * 100) : fmtPercent(lf.Rate)) : '—'
+                      const rateNum = safeNum(lf.Rate)
+                      const rate = rateNum != null ? (rateNum < 1 ? fmtPercent(rateNum * 100) : fmtPercent(rateNum)) : '—'
                       return (
                         <tr key={loan.id}>
-                          <td className="px-3 py-2">{lf.Name || '—'}</td>
-                          <td className="px-3 py-2 text-right">{fmtCurrency(lf['Current Amount'])}</td>
-                          <td className="px-3 py-2 text-right">{fmtCurrency(lf['Monthly PI'])}</td>
-                          <td className="px-3 py-2">{rate} {lf['Rate Fixed/Variable'] || ''}</td>
-                          <td className="px-3 py-2">{fmtDate(lf['Maturity Date'])}</td>
+                          <td className="px-3 py-2">{safeVal(lf.Name)}</td>
+                          <td className="px-3 py-2 text-right">{fmtCurrency(safeNum(lf['Current Amount']))}</td>
+                          <td className="px-3 py-2 text-right">{fmtCurrency(safeNum(lf['Monthly PI']))}</td>
+                          <td className="px-3 py-2">{rate} {safeVal(lf['Rate Fixed/Variable'], '')}</td>
+                          <td className="px-3 py-2">{fmtDate(safeVal(lf['Maturity Date']))}</td>
                         </tr>
                       )
                     })}
@@ -304,10 +306,12 @@ export default function PropertyDetail() {
       )}
 
       {/* Alerts — compact, scoped to this property */}
-      <AlertsPanel alerts={alerts} onDismiss={dismiss} onRestore={restore} propertyFilter={id} compact />
+      {!isPrimaryResidence && (
+        <AlertsPanel alerts={alerts} onDismiss={dismiss} onRestore={restore} propertyFilter={id} compact />
+      )}
 
-      {/* Units & Tenants */}
-      <div ref={unitsRef} className="bg-white rounded-xl border border-gray-200 p-5">
+      {/* Units & Tenants — hidden for Primary Residence */}
+      {!isPrimaryResidence && <div ref={unitsRef} className="bg-white rounded-xl border border-gray-200 p-5">
         <h2 className="font-semibold text-gray-800 mb-4">Units & Tenants</h2>
         <div className="space-y-4">
           {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
@@ -475,10 +479,10 @@ export default function PropertyDetail() {
             )
           })}
         </div>
-      </div>
+      </div>}
 
-      {/* Invoices & Payments */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
+      {/* Invoices & Payments — hidden for Primary Residence */}
+      {!isPrimaryResidence && <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-gray-800">Invoices & Payments</h2>
           <button
@@ -572,7 +576,7 @@ export default function PropertyDetail() {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Maintenance */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -837,6 +841,31 @@ export default function PropertyDetail() {
     </div>
   )
 }
+
+// Safely unwrap Airtable formula/rollup/lookup values that can return
+// {specialValue: "NaN"}, {error: "#ERROR!"}, or arrays of linked record objects.
+function safeVal(val, fallback = '—') {
+  if (val === null || val === undefined) return fallback
+  if (typeof val === 'object') {
+    if (Array.isArray(val)) {
+      const parts = val.map(v => (typeof v === 'object' ? v?.name || v?.id || '' : String(v))).filter(Boolean)
+      return parts.length ? parts.join(', ') : fallback
+    }
+    // {specialValue: "NaN"}, {error: "#ERROR!"}, linked record object
+    return val.name || val.id || fallback
+  }
+  return val
+}
+
+// Returns a number or null; never returns an object/NaN from formula fields.
+function safeNum(val) {
+  if (val === null || val === undefined || typeof val === 'object') return null
+  const n = Number(val)
+  return isNaN(n) ? null : n
+}
+
+// TODO: Add escrow tracking fields (taxes through escrow, insurance through escrow)
+// These would be boolean fields on the Property table in Airtable
 
 function FinRow({ label, value }) {
   return (
