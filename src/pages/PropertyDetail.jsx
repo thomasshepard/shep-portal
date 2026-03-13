@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import PaymentForm from '../components/PaymentForm'
 import MaintenanceForm from '../components/MaintenanceForm'
 import AddTenantWorkflow from '../components/AddTenantWorkflow'
+import EditTenantModal from '../components/EditTenantModal'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -50,7 +51,8 @@ export default function PropertyDetail() {
   const [paymentModal, setPaymentModal] = useState(null)
   const [maintModal, setMaintModal] = useState(null)
   const [expandedMaint, setExpandedMaint] = useState(new Set())
-  const [addTenantModal, setAddTenantModal] = useState(null) // null | 'picker' | unit record
+  const [addTenantUnit, setAddTenantUnit] = useState(null)   // rental unit record or null
+  const [editTenantData, setEditTenantData] = useState(null) // { tenant, lease } or null
   const unitsRef = useRef(null)
 
   useEffect(() => { load() }, [id])
@@ -66,6 +68,7 @@ export default function PropertyDetail() {
   async function load() {
     setLoading(true)
     try {
+      // 1. Fetch the Property record
       const propRes = await fetchAllRecords('Property', { filterByFormula: `RECORD_ID()="${id}"` }, PM_BASE_ID)
       if (propRes.error) throw new Error(propRes.error)
       const prop = propRes.data?.[0]
@@ -79,6 +82,7 @@ export default function PropertyDetail() {
       const utilIds = f['Utilities'] || []
       const invPayIds = f['Invoices Payments'] || []
 
+      // 2. Fetch Rental Units + other property-linked data in parallel
       const [unitsRes, invPayRes, maintRes, utilRes, loansRes, billsRes] = await Promise.all([
         unitIds.length > 0
           ? fetchAllRecords('Rental Units', { filterByFormula: recordIdFilter(unitIds) }, PM_BASE_ID)
@@ -106,25 +110,34 @@ export default function PropertyDetail() {
       setLoans(loansRes.data || [])
       setBills(billsRes.data || [])
 
+      // 3. Fetch Lease Agreements for all units
       const leaseIds = [...new Set(units.flatMap(u => u.fields?.['Lease Agreements'] || []))]
-      if (leaseIds.length > 0) {
-        const leasesRes = await fetchAllRecords('Lease Agreements', { filterByFormula: recordIdFilter(leaseIds) }, PM_BASE_ID)
-        const leasesData = leasesRes.data || []
-        setLeases(leasesData)
-
-        const tenantIds = [...new Set(leasesData.flatMap(l => l.fields?.['Tenant Management'] || []))]
-        const leaseInvIds = [...new Set(leasesData.flatMap(l => l.fields?.['Lease Invoice'] || []))]
-        const [tenantsRes, leaseInvRes] = await Promise.all([
-          tenantIds.length > 0
-            ? fetchAllRecords('Tenants', { filterByFormula: recordIdFilter(tenantIds) }, PM_BASE_ID)
-            : Promise.resolve({ data: [] }),
-          leaseInvIds.length > 0
-            ? fetchAllRecords('Lease Invoice', { filterByFormula: recordIdFilter(leaseInvIds) }, PM_BASE_ID)
-            : Promise.resolve({ data: [] }),
-        ])
-        setTenants(tenantsRes.data || [])
-        setLeaseInvoices(leaseInvRes.data || [])
+      if (leaseIds.length === 0) {
+        setLeases([])
+        setTenants([])
+        setLeaseInvoices([])
+        return
       }
+
+      const leasesRes = await fetchAllRecords('Lease Agreements', { filterByFormula: recordIdFilter(leaseIds) }, PM_BASE_ID)
+      const leasesData = leasesRes.data || []
+      setLeases(leasesData)
+
+      // 4. Fetch Tenants from active leases (Status != "Closed")
+      const activeLeases = leasesData.filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
+      const tenantIds = [...new Set(activeLeases.flatMap(l => l.fields?.['Tenant Management'] || []))]
+      const leaseInvIds = [...new Set(leasesData.flatMap(l => l.fields?.['Lease Invoice'] || []))]
+
+      const [tenantsRes, leaseInvRes] = await Promise.all([
+        tenantIds.length > 0
+          ? fetchAllRecords('Tenants', { filterByFormula: recordIdFilter(tenantIds) }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
+        leaseInvIds.length > 0
+          ? fetchAllRecords('Lease Invoice', { filterByFormula: recordIdFilter(leaseInvIds) }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
+      ])
+      setTenants(tenantsRes.data || [])
+      setLeaseInvoices(leaseInvRes.data || [])
     } catch (e) {
       toast.error('Failed to load property: ' + e.message)
     } finally {
@@ -172,21 +185,14 @@ export default function PropertyDetail() {
   if (!property) return <div className="p-8 text-center text-gray-500">Property not found.</div>
 
   const f = property.fields || {}
-  const tenantMap = {}
-  tenants.forEach(t => { tenantMap[t.id] = t })
-  const leaseMap = {}
-  leases.forEach(l => { leaseMap[l.id] = l })
-  const leaseInvMap = {}
-  leaseInvoices.forEach(li => { leaseInvMap[li.id] = li })
 
-  const vacantUnits = rentalUnits.filter(u => {
-    const unitLeases = (u.fields?.['Lease Agreements'] || []).map(lid => leaseMap[lid]).filter(Boolean)
-    const hasActive = unitLeases.some(l => {
-      const s = (l.fields?.Status || '').toLowerCase()
-      return s === 'active' || s === 'open' || l.fields?.['Lease Active'] === 1
-    })
-    return !hasActive && (u.fields?.Status || '').toLowerCase() !== 'occupied'
-  })
+  // Build lookup maps
+  const tenantMap = {}
+  tenants.forEach(t => { if (t?.id) tenantMap[t.id] = t })
+  const leaseMap = {}
+  leases.forEach(l => { if (l?.id) leaseMap[l.id] = l })
+  const leaseInvMap = {}
+  leaseInvoices.forEach(li => { if (li?.id) leaseInvMap[li.id] = li })
 
   function toggleMaint(mid) {
     setExpandedMaint(prev => {
@@ -295,163 +301,153 @@ export default function PropertyDetail() {
         <div className="space-y-4">
           {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
           {rentalUnits.map(unit => {
-            const uf = unit.fields || {}
-            const unitLeases = (uf['Lease Agreements'] || []).map(lid => leaseMap[lid]).filter(Boolean)
-            const activeLease = unitLeases.find(l => {
-              const s = (l.fields?.Status || '').toLowerCase()
-              return s === 'active' || s === 'open' || l.fields?.['Lease Active'] === 1
-            })
-            const isOccupied = !!activeLease || (uf.Status || '').toLowerCase() === 'occupied'
+            const uf = unit?.fields || {}
+            const unitLeases = (uf['Lease Agreements'] || [])
+              .map(lid => leaseMap[lid])
+              .filter(Boolean)
 
+            // Lease-centric occupancy: occupied if any lease is not "Closed"
+            const activeLease = unitLeases.find(l =>
+              (l.fields?.Status || '').toLowerCase() !== 'closed'
+            )
+            const isOccupied = !!activeLease
+
+            // — VACANT CARD —
             if (!isOccupied) {
               return (
-                <div key={unit.id} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
+                <div key={unit.id} className="border-2 border-orange-200 rounded-xl p-4 bg-orange-50">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-gray-800">{uf.Name || 'Unit'}</span>
-                      <span className="bg-orange-200 text-orange-800 text-xs font-bold px-2 py-0.5 rounded-full">VACANT</span>
+                      <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">VACANT</span>
                     </div>
                     {isAdmin && (
                       <button
-                        onClick={() => setAddTenantModal(unit)}
+                        onClick={() => setAddTenantUnit(unit)}
                         className="flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-700"
                       >
                         <Plus size={14} /> Add Tenant
                       </button>
                     )}
                   </div>
-                  {uf['Estimated Income'] > 0 && (
-                    <p className="text-sm text-orange-700 mt-1.5 font-medium">Potential Income: {fmtCurrency(uf['Estimated Income'])}/mo</p>
+                  {(uf['Estimated Income'] > 0) && (
+                    <p className="text-sm text-orange-700 mt-2 font-medium">
+                      Potential: {fmtCurrency(uf['Estimated Income'])}/mo
+                    </p>
                   )}
-                  {uf.Notes && <p className="text-xs text-gray-500 mt-1">{uf.Notes}</p>}
                 </div>
               )
             }
 
-            // Unit is occupied but lease data didn't load (deleted/inaccessible lease, or Status set manually)
-            if (!activeLease) {
-              return (
-                <div key={unit.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-gray-800">{uf.Name || 'Unit'}</span>
-                    <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">Occupied</span>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">Lease details not available</p>
-                </div>
-              )
-            }
-
+            // — OCCUPIED CARD —
             const lf = activeLease.fields || {}
-            const tenant = tenantMap[(lf['Tenant Management'] || [])[0]]
+            const tenantId = (lf['Tenant Management'] || [])[0]
+            const tenant = tenantId ? tenantMap[tenantId] : null
             const tf = tenant?.fields || {}
-            const lifecycle = (lf['Tenant Lifecycle (from Tenant Management)'] || [])[0] || tf['Tenant Lifecycle']
+
+            const rent = lf['Rent Amount'] || lf['Lease Amount'] || 0
+            const petDog = lf['Pet Rent (Dog)'] || 0
+            const petCat = lf['Pet Rent (Cat)'] || 0
+            const otherFees = lf['Other Fees to Tenant'] || 0
+            const months = lf['Months on Lease']
+            const monthsRemaining = lf['Months Remaining on Lease']
+            const remainingColor = monthsRemaining <= 0 ? 'text-red-600' : monthsRemaining <= 3 ? 'text-orange-500' : monthsRemaining <= 6 ? 'text-yellow-600' : 'text-gray-700'
+
+            const leaseTermLabel = months === 1 ? 'Month-to-month' : months ? `${months} months` : null
             const latestLeaseInv = leaseInvMap[(lf['Lease Invoice'] || []).at(-1)]
 
             return (
-              <div key={unit.id} className="border border-gray-200 rounded-lg p-4">
-                {/* Top row: unit name + tenant name + lease doc */}
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-gray-600 text-sm">{uf.Name || 'Unit'}</span>
-                      {lifecycle && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${lifecycle === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                          {lifecycle}
-                        </span>
+              <div key={unit.id} className="border border-gray-200 rounded-xl p-4 space-y-3">
+                {/* Row 1: Unit name + Occupied badge */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-gray-800">{uf.Name || 'Unit'}</span>
+                    <span className="bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded-full">Occupied</span>
+                    {lf.Status && lf.Status !== 'Open' && (
+                      <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{lf.Status}</span>
+                    )}
+                  </div>
+                  {isAdmin && (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => setEditTenantData({ tenant, lease: activeLease })}
+                        className="flex items-center gap-1 text-xs text-gray-500 border border-gray-300 rounded-lg px-2 py-1.5 hover:bg-gray-50"
+                      >
+                        <Edit2 size={12} /> Edit Tenant
+                      </button>
+                      <button
+                        disabled
+                        title="Coming soon"
+                        className="flex items-center gap-1 text-xs text-gray-400 border border-gray-200 rounded-lg px-2 py-1.5 cursor-not-allowed"
+                      >
+                        Move Out
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Row 2: Tenant name */}
+                <div>
+                  <p className="text-lg font-bold text-gray-900">{tf.Name || 'Unknown Tenant'}</p>
+                  {tenant && (
+                    <div className="flex items-center gap-4 mt-1 flex-wrap">
+                      {tf['Phone number'] && (
+                        <a href={`tel:${tf['Phone number']}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                          <Phone size={13} /> {tf['Phone number']}
+                        </a>
+                      )}
+                      {tf.Email && (
+                        <a href={`mailto:${tf.Email}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                          <Mail size={13} /> {tf.Email}
+                        </a>
                       )}
                     </div>
-                    {tenant && <p className="text-base font-bold text-gray-900 mt-0.5">{tf.Name}</p>}
-                    {(() => {
-                      const months = lf['Months on Lease']
-                      if (!months) return null
-                      if (months === 1) return <p className="text-xs text-gray-500 mt-0.5">Month-to-Month</p>
-                      const startStr = lf['Start Date'] ? new Date(lf['Start Date'] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
-                      const endStr = lf['End Date'] ? new Date(lf['End Date'] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
-                      if (!startStr || !endStr) return null
-                      return <p className="text-xs text-gray-500 mt-0.5">{months}-month lease: {startStr} – {endStr}</p>
-                    })()}
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className="text-lg font-bold text-gray-900">{fmtCurrency(lf['Rent Amount'] || lf['Lease Amount'])}</span>
-                    {lf['Google Drive'] ? (
-                      <a href={lf['Google Drive']} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1 border border-blue-200 rounded px-2 py-1">
-                        <ExternalLink size={12} /> View Lease
-                      </a>
-                    ) : (
-                      <span className="text-xs text-gray-400 border border-gray-200 rounded px-2 py-1">No lease doc</span>
-                    )}
-                  </div>
+                  )}
                 </div>
 
-                {/* Contact info */}
-                {tenant && (
-                  <div className="flex items-center gap-4 text-sm mb-3 flex-wrap">
-                    {tf['Phone number'] && (
-                      <a href={`tel:${tf['Phone number']}`} className="flex items-center gap-1.5 text-blue-600 hover:underline font-medium">
-                        <Phone size={14} /> {tf['Phone number']}
-                      </a>
-                    )}
-                    {tf.Email && (
-                      <a href={`mailto:${tf.Email}`} className="flex items-center gap-1.5 text-blue-600 hover:underline">
-                        <Mail size={14} /> {tf.Email}
-                      </a>
-                    )}
-                  </div>
-                )}
+                {/* Row 3: Rent + Terms */}
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <span className="text-xl font-bold text-gray-900">{fmtCurrency(rent)}<span className="text-sm font-normal text-gray-500">/mo</span></span>
+                  {lf.Terms && <span className="text-sm text-gray-500">{lf.Terms}</span>}
+                  {petDog > 0 && <span className="text-sm text-gray-500">+ {fmtCurrency(petDog)} dog</span>}
+                  {petCat > 0 && <span className="text-sm text-gray-500">+ {fmtCurrency(petCat)} cat</span>}
+                  {otherFees > 0 && <span className="text-sm text-gray-500">+ {fmtCurrency(otherFees)} fees</span>}
+                </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                  <div>
-                    <p className="text-xs text-gray-400">Lease Start</p>
-                    <p className="font-medium">{fmtDate(lf['Start Date'])}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Lease End</p>
-                    <p className="font-medium">
-                      {fmtDate(lf['End Date'])}
-                      {lf['End Date'] && (() => {
-                        const days = Math.ceil((new Date(lf['End Date']) - new Date()) / 86400000)
-                        return days >= 0
-                          ? <span className={`ml-1 text-xs ${days < 30 ? 'text-red-500' : days < 90 ? 'text-amber-500' : 'text-gray-400'}`}>({days}d)</span>
-                          : <span className="ml-1 text-xs text-red-500">(expired)</span>
-                      })()}
+                {/* Row 4: Lease dates */}
+                <div className="text-sm text-gray-600 space-y-0.5">
+                  {(lf['Start Date'] || lf['End Date']) && (
+                    <p>
+                      Lease: {fmtDate(lf['Start Date'])} → {fmtDate(lf['End Date'])}
+                      {leaseTermLabel && <span className="text-gray-400"> ({leaseTermLabel})</span>}
                     </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Mo. Remaining</p>
-                    <p className="font-medium">{lf['Months Remaining on Lease'] ?? '—'}</p>
-                  </div>
-                  {lf['Pet Rent'] > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-400">Pet Rent</p>
-                      <p className="font-medium">{fmtCurrency(lf['Pet Rent'])}</p>
-                    </div>
                   )}
-                  {lf['Other Fees to Tenant'] > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-400">Other Fees</p>
-                      <p className="font-medium">{fmtCurrency(lf['Other Fees to Tenant'])}</p>
-                    </div>
-                  )}
-                  {lf['Managed by'] && (
-                    <div>
-                      <p className="text-xs text-gray-400">Managed By</p>
-                      <p className="font-medium">{lf['Managed by']}</p>
-                    </div>
-                  )}
-                  {lf.Terms && (
-                    <div>
-                      <p className="text-xs text-gray-400">Terms</p>
-                      <p className="font-medium">{lf.Terms}</p>
-                    </div>
+                  {monthsRemaining != null && (
+                    <p>
+                      Remaining: <span className={`font-semibold ${remainingColor}`}>
+                        {monthsRemaining <= 0 ? 'Expired' : `${monthsRemaining} month${monthsRemaining !== 1 ? 's' : ''}`}
+                      </span>
+                    </p>
                   )}
                 </div>
 
-                {!isVA && tf['Stripe Customer ID'] && (
-                  <p className="text-xs text-gray-400 mt-2">Stripe Customer: {tf['Stripe Customer ID']}</p>
-                )}
+                {/* Row 5: Stripe + Lease doc */}
+                <div className="flex items-center gap-3 flex-wrap text-sm">
+                  {tf['Stripe Customer ID'] && (
+                    <span className="text-xs text-gray-400">Stripe: {tf['Stripe Customer ID']}</span>
+                  )}
+                  {lf['Google Drive'] ? (
+                    <a href={lf['Google Drive']} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:underline border border-blue-200 rounded px-2 py-1">
+                      <ExternalLink size={11} /> View Lease Doc
+                    </a>
+                  ) : (
+                    <span className="text-xs text-gray-400 border border-gray-200 rounded px-2 py-1">No lease doc</span>
+                  )}
+                </div>
 
+                {/* Latest invoice */}
                 {latestLeaseInv && (
-                  <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-3 text-xs flex-wrap">
+                  <div className="pt-2 border-t border-gray-100 flex items-center gap-3 text-xs flex-wrap">
                     <span className="text-gray-400">Latest Invoice:</span>
                     <span className={`px-1.5 py-0.5 rounded-full ${latestLeaseInv.fields?.Status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
                       {latestLeaseInv.fields?.Status}
@@ -760,7 +756,7 @@ export default function PropertyDetail() {
               <ModalField label="Status">
                 <select value={editForm.Status || ''} onChange={e => setEditForm(ef => ({ ...ef, Status: e.target.value }))} className={inp}>
                   <option value="">Select...</option>
-                  {['Active', 'Rehab', 'Listed', 'Sold', 'Pending', 'Vacant'].map(s => (
+                  {['Active', 'Owned', 'Rehab', 'Listed', 'Sold', 'Pending', 'Vacant'].map(s => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>
@@ -808,14 +804,23 @@ export default function PropertyDetail() {
         />
       )}
 
-      {addTenantModal && (
+      {addTenantUnit && (
         <AddTenantWorkflow
           propertyId={id}
-          propertyAddress={f.Address || ''}
-          unit={addTenantModal === 'picker' ? null : addTenantModal}
-          vacantUnits={vacantUnits}
-          onClose={() => setAddTenantModal(null)}
+          propertyName={f.Address || ''}
+          unitId={addTenantUnit.id}
+          unitName={addTenantUnit.fields?.Name || 'Unit'}
+          onClose={() => setAddTenantUnit(null)}
           onSuccess={handleWorkflowSuccess}
+        />
+      )}
+
+      {editTenantData && (
+        <EditTenantModal
+          tenant={editTenantData.tenant}
+          lease={editTenantData.lease}
+          onSaved={load}
+          onClose={() => setEditTenantData(null)}
         />
       )}
     </div>

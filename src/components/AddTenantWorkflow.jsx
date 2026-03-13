@@ -30,30 +30,6 @@ const LEASE_TERM_OPTIONS = [
   { label: 'Other', value: 'other', months: null },
 ]
 
-const emptyTenant = {
-  Name: '',
-  Email: '',
-  'Phone number': '',
-  'Name - Secondary': '',
-  'Email - Secondary': '',
-  'Phone number - Secondary': '',
-  'Stripe Customer ID': '',
-}
-
-const emptyLease = {
-  Name: '',
-  'Rent Amount': '',
-  'Start Date': '',
-  'End Date': '',
-  Terms: '',
-  'Google Drive': '',
-  'Pet Rent (Cat)': '',
-  'Pet Rent (Dog)': '',
-  'Other Fees to Tenant': '',
-  'Managed by': '',
-  Note: '',
-}
-
 function getMonthsFromTerm(term, custom) {
   if (term === 'mtm') return 1
   if (term === 'other') return parseInt(custom) || 0
@@ -70,60 +46,61 @@ function calcEndDate(startDate, months) {
 
 /**
  * Props:
- *   propertyId      — Airtable record ID of the property
- *   propertyAddress — display string
- *   unit            — rental unit record (pre-selected) OR null (header button)
- *   vacantUnits     — array of vacant rental unit records (for unit picker when unit is null)
- *   onClose         — fn
- *   onSuccess       — fn called after successful creation to trigger data reload
+ *   propertyId    — Airtable Property record ID
+ *   propertyName  — display string
+ *   unitId        — Airtable Rental Unit record ID
+ *   unitName      — display string
+ *   onClose       — fn
+ *   onSuccess     — fn called after successful creation
  */
-export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, vacantUnits = [], onClose, onSuccess }) {
+export default function AddTenantWorkflow({ propertyId, propertyName, unitId, unitName, onClose, onSuccess }) {
   const [step, setStep] = useState(1)
-  const [selectedUnitId, setSelectedUnitId] = useState(unit?.id || '')
-  const [tenantData, setTenantData] = useState(emptyTenant)
-  const [leaseData, setLeaseData] = useState(emptyLease)
+
+  const [tenantData, setTenantData] = useState({
+    Name: '', Email: '', 'Phone number': '',
+    'Name - Secondary': '', 'Email - Secondary': '', 'Phone number - Secondary': '',
+    'Stripe Customer ID': '',
+  })
+
+  const [leaseData, setLeaseData] = useState({
+    Name: '', 'Rent Amount': '', 'Start Date': '', 'End Date': '',
+    Terms: '', 'Google Drive': '', 'Pet Rent (Dog)': '', 'Pet Rent (Cat)': '',
+    'Other Fees to Tenant': '', 'Managed by': '', Note: '',
+  })
+
   const [leaseTerm, setLeaseTerm] = useState('')
   const [leaseTermCustom, setLeaseTermCustom] = useState('')
   const [executing, setExecuting] = useState(false)
   const [execSteps, setExecSteps] = useState([])
-  const [done, setDone] = useState(false)
 
-  const selectedUnit = unit || vacantUnits.find(u => u.id === selectedUnitId)
-  const unitName = selectedUnit?.fields?.Name || 'Selected Unit'
-
-  function setT(key, val) { setTenantData(prev => ({ ...prev, [key]: val })) }
-  function setL(key, val) { setLeaseData(prev => ({ ...prev, [key]: val })) }
+  function setT(k, v) { setTenantData(prev => ({ ...prev, [k]: v })) }
+  function setL(k, v) { setLeaseData(prev => ({ ...prev, [k]: v })) }
 
   function handleTermChange(val) {
     setLeaseTerm(val)
     const opt = LEASE_TERM_OPTIONS.find(o => o.value === val)
-    const months = opt?.months
-    if (months) {
-      const end = calcEndDate(leaseData['Start Date'], months)
-      if (end) setL('End Date', end)
+    if (opt?.months && leaseData['Start Date']) {
+      setL('End Date', calcEndDate(leaseData['Start Date'], opt.months))
     }
   }
 
   function handleStartDateChange(val) {
     setL('Start Date', val)
     const months = getMonthsFromTerm(leaseTerm, leaseTermCustom)
-    if (months && val) {
-      setL('End Date', calcEndDate(val, months))
-    }
+    if (months && val) setL('End Date', calcEndDate(val, months))
   }
 
   function handleTermCustomChange(val) {
     setLeaseTermCustom(val)
     const months = parseInt(val) || 0
-    if (months && leaseData['Start Date']) {
-      setL('End Date', calcEndDate(leaseData['Start Date'], months))
-    }
+    if (months && leaseData['Start Date']) setL('End Date', calcEndDate(leaseData['Start Date'], months))
   }
 
   function validateStep1() {
-    if (!selectedUnitId) { toast.error('Please select a unit'); return false }
     if (!tenantData.Name.trim()) { toast.error('Name is required'); return false }
     if (!tenantData.Email.trim()) { toast.error('Email is required'); return false }
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRe.test(tenantData.Email)) { toast.error('Enter a valid email'); return false }
     return true
   }
 
@@ -166,14 +143,13 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
     setExecuting(true)
     setExecSteps([])
 
-    // Step 1: Create Tenant
+    // 1. Create Tenant (no "Property" field — tenant's unit is determined through lease)
     addExecStep('Creating tenant record…', 'loading')
     const tenantFields = {
       Name: tenantData.Name,
       Email: tenantData.Email,
       'Application Status': 'Active',
       'Tenant Lifecycle': 'Active',
-      Property: [selectedUnitId],   // "Property" on Tenants links to Rental Units, not Property table
     }
     if (tenantData['Phone number']) tenantFields['Phone number'] = tenantData['Phone number']
     if (tenantData['Name - Secondary']) tenantFields['Name - Secondary'] = tenantData['Name - Secondary']
@@ -191,33 +167,31 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
     const tenantId = tenantRes.data.id
     addExecStep('Creating tenant record…', 'success')
 
-    // Step 2: Create Lease Agreement
+    // 2. Create Lease Agreement
+    // "Property" field on Lease links to Rental Units (not Property table)
     addExecStep('Creating lease agreement…', 'loading')
     const rentAmount = parseFloat(leaseData['Rent Amount']) || 0
+    const months = getMonthsFromTerm(leaseTerm, leaseTermCustom)
     const leaseFields = {
       Name: leaseData.Name,
       Email: tenantData.Email,
       Status: 'Open',
-      Property: [propertyId],
-      'Tenant Management': [tenantId],
       'Rent Amount': rentAmount,
-      'Lease Amount': rentAmount,  // always set equal to Rent Amount
+      'Lease Amount': rentAmount,
+      'Property': [unitId],            // links to Rental Unit record
+      'Tenant Management': [tenantId],
     }
-    const months = getMonthsFromTerm(leaseTerm, leaseTermCustom)
     if (months) leaseFields['Months on Lease'] = months
-
-    const currencyKeys = ['Pet Rent (Cat)', 'Pet Rent (Dog)', 'Other Fees to Tenant']
-    currencyKeys.forEach(k => {
-      if (leaseData[k] !== '') leaseFields[k] = parseFloat(leaseData[k]) || 0
-    })
     const textKeys = ['Terms', 'Google Drive', 'Managed by', 'Note', 'Start Date', 'End Date']
     textKeys.forEach(k => { if (leaseData[k]) leaseFields[k] = leaseData[k] })
+    const numKeys = ['Pet Rent (Dog)', 'Pet Rent (Cat)', 'Other Fees to Tenant']
+    numKeys.forEach(k => { if (leaseData[k] !== '') leaseFields[k] = parseFloat(leaseData[k]) || 0 })
 
     const leaseRes = await createRecord('Lease Agreements', leaseFields, PM_BASE_ID)
     if (leaseRes.error) {
       addExecStep('Creating lease agreement…', 'error')
       setExecSteps(prev => [...prev, {
-        msg: `${leaseRes.error} — Tenant was created (${tenantId}) but lease creation failed. You can add the lease manually.`,
+        msg: `${leaseRes.error} — Tenant created (${tenantId}) but lease failed. Add lease manually.`,
         status: 'detail',
       }])
       setExecuting(false)
@@ -226,39 +200,21 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
     const leaseId = leaseRes.data.id
     addExecStep('Creating lease agreement…', 'success')
 
-    // Step 3: Update Rental Unit
-    addExecStep('Updating rental unit…', 'loading')
-    const existingLeaseIds = selectedUnit?.fields?.['Lease Agreements'] || []
-    const unitRes = await updateRecord('Rental Units', selectedUnitId, {
-      Status: 'Occupied',
-      'Lease Agreements': [...existingLeaseIds, leaseId],
-    }, PM_BASE_ID)
-    if (unitRes.error) {
-      addExecStep('Updating rental unit…', 'error')
-      setExecSteps(prev => [...prev, { msg: unitRes.error, status: 'detail' }])
-    } else {
-      addExecStep('Updating rental unit…', 'success')
-    }
-
-    // Step 4: Link Tenant to Lease
+    // 3. Link Tenant → Lease (Airtable auto-links the Rental Unit via the Lease's "Property" field)
     addExecStep('Linking tenant to lease…', 'loading')
-    const linkRes = await updateRecord('Tenants', tenantId, {
-      'Lease Agreements': [leaseId],
-    }, PM_BASE_ID)
+    const linkRes = await updateRecord('Tenants', tenantId, { 'Lease Agreements': [leaseId] }, PM_BASE_ID)
     if (linkRes.error) {
       addExecStep('Linking tenant to lease…', 'error')
     } else {
       addExecStep('Linking tenant to lease…', 'success')
     }
 
-    setDone(true)
-    setExecuting(false)
     toast.success(`${tenantData.Name} added to ${unitName}!`)
     onClose()
     onSuccess()
   }
 
-  const showFooter = !executing && !done
+  const showFooter = !executing
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -267,8 +223,7 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
           <h2 className="font-semibold text-gray-900">
-            {executing || done
-              ? 'Creating Tenant…'
+            {executing ? 'Creating Tenant…'
               : step === 1 ? 'New Tenant — Step 1 of 3: Tenant Info'
               : step === 2 ? 'New Tenant — Step 2 of 3: Lease Details'
               : 'New Tenant — Step 3 of 3: Review & Confirm'}
@@ -279,7 +234,7 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
         </div>
 
         {/* Step indicator */}
-        {!executing && !done && (
+        {!executing && (
           <div className="flex items-center gap-2 px-6 py-3 border-b border-gray-100 flex-shrink-0">
             {[1, 2, 3].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
@@ -291,38 +246,25 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
                 {i < 2 && <div className={`h-px w-8 ${step > s ? 'bg-green-400' : 'bg-gray-200'}`} />}
               </div>
             ))}
-            <span className="text-xs text-gray-500 ml-2">
-              {propertyAddress}{selectedUnit ? ` — ${unitName}` : ''}
-            </span>
+            <span className="text-xs text-gray-500 ml-2">{propertyName} — {unitName}</span>
           </div>
         )}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
 
-          {/* Step 1: Tenant Info */}
+          {/* Step 1 */}
           {step === 1 && (
             <div className="space-y-4">
-              {!unit ? (
-                <FormField label="Unit *">
-                  <select value={selectedUnitId} onChange={e => setSelectedUnitId(e.target.value)} className={inp} required>
-                    <option value="">Select a vacant unit…</option>
-                    {vacantUnits.map(u => (
-                      <option key={u.id} value={u.id}>{u.fields?.Name || u.id}</option>
-                    ))}
-                  </select>
-                </FormField>
-              ) : (
-                <div className="bg-blue-50 text-blue-700 text-sm px-3 py-2 rounded-lg">
-                  Adding tenant to: <strong>{unitName}</strong>
-                </div>
-              )}
+              <div className="bg-blue-50 text-blue-700 text-sm px-3 py-2 rounded-lg">
+                Adding tenant to: <strong>{unitName}</strong>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField label="Full Name *">
-                  <input type="text" required value={tenantData.Name} onChange={e => setT('Name', e.target.value)} className={inp} placeholder="Jane Smith" />
+                  <input type="text" value={tenantData.Name} onChange={e => setT('Name', e.target.value)} className={inp} placeholder="Jane Smith" />
                 </FormField>
                 <FormField label="Email *">
-                  <input type="email" required value={tenantData.Email} onChange={e => setT('Email', e.target.value)} className={inp} placeholder="jane@example.com" />
+                  <input type="email" value={tenantData.Email} onChange={e => setT('Email', e.target.value)} className={inp} placeholder="jane@example.com" />
                 </FormField>
                 <FormField label="Phone">
                   <input type="tel" value={tenantData['Phone number']} onChange={e => setT('Phone number', e.target.value)} className={inp} placeholder="555-0123" />
@@ -346,15 +288,15 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
             </div>
           )}
 
-          {/* Step 2: Lease Details */}
+          {/* Step 2 */}
           {step === 2 && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField label="Lease Name *">
-                  <input type="text" required value={leaseData.Name} onChange={e => setL('Name', e.target.value)} className={inp} />
+                  <input type="text" value={leaseData.Name} onChange={e => setL('Name', e.target.value)} className={inp} />
                 </FormField>
                 <FormField label="Rent Amount *">
-                  <input type="number" step="0.01" min="0" required value={leaseData['Rent Amount']} onChange={e => setL('Rent Amount', e.target.value)} className={inp} placeholder="Monthly rent" />
+                  <input type="number" step="0.01" min="0" value={leaseData['Rent Amount']} onChange={e => setL('Rent Amount', e.target.value)} className={inp} placeholder="Monthly rent" />
                 </FormField>
                 <FormField label="Lease Term">
                   <select value={leaseTerm} onChange={e => handleTermChange(e.target.value)} className={inp}>
@@ -368,13 +310,13 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
                   </FormField>
                 )}
                 <FormField label="Start Date *">
-                  <input type="date" required value={leaseData['Start Date']} onChange={e => handleStartDateChange(e.target.value)} className={inp} />
+                  <input type="date" value={leaseData['Start Date']} onChange={e => handleStartDateChange(e.target.value)} className={inp} />
                 </FormField>
                 <FormField label="End Date *">
-                  <input type="date" required value={leaseData['End Date']} onChange={e => setL('End Date', e.target.value)} className={inp} />
+                  <input type="date" value={leaseData['End Date']} onChange={e => setL('End Date', e.target.value)} className={inp} />
                 </FormField>
                 <FormField label="Terms *">
-                  <select value={leaseData.Terms} onChange={e => setL('Terms', e.target.value)} className={inp} required>
+                  <select value={leaseData.Terms} onChange={e => setL('Terms', e.target.value)} className={inp}>
                     <option value="">Select terms…</option>
                     {TERMS_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
@@ -407,7 +349,7 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
           )}
 
           {/* Step 3: Review */}
-          {step === 3 && !executing && !done && (
+          {step === 3 && !executing && (
             <div className="space-y-5">
               <ReviewSection title="Tenant">
                 <ReviewRow label="Name" value={tenantData.Name} />
@@ -420,31 +362,31 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
               </ReviewSection>
               <ReviewSection title="Lease">
                 <ReviewRow label="Name" value={leaseData.Name} />
-                <ReviewRow label="Rent" value={leaseData['Rent Amount'] ? `$${Number(leaseData['Rent Amount']).toLocaleString()}` : '—'} />
+                <ReviewRow label="Rent" value={leaseData['Rent Amount'] ? `$${Number(leaseData['Rent Amount']).toLocaleString()}/mo` : '—'} />
                 {leaseTerm && (
-                  <ReviewRow
-                    label="Lease Term"
-                    value={LEASE_TERM_OPTIONS.find(o => o.value === leaseTerm)?.label + (leaseTerm === 'other' ? ` (${leaseTermCustom} mo)` : '') || ''}
-                  />
+                  <ReviewRow label="Lease Term" value={
+                    LEASE_TERM_OPTIONS.find(o => o.value === leaseTerm)?.label +
+                    (leaseTerm === 'other' && leaseTermCustom ? ` (${leaseTermCustom} mo)` : '')
+                  } />
                 )}
                 <ReviewRow label="Start" value={leaseData['Start Date']} />
                 <ReviewRow label="End" value={leaseData['End Date']} />
                 <ReviewRow label="Terms" value={leaseData.Terms} />
-                {leaseData['Google Drive'] && <ReviewRow label="Lease Doc" value="Linked ↗" />}
+                {leaseData['Google Drive'] && <ReviewRow label="Lease Doc" value="Linked" />}
                 {leaseData['Managed by'] && <ReviewRow label="Managed By" value={leaseData['Managed by']} />}
-                {leaseData['Pet Rent (Cat)'] && <ReviewRow label="Pet Rent (Cat)" value={`$${leaseData['Pet Rent (Cat)']}`} />}
                 {leaseData['Pet Rent (Dog)'] && <ReviewRow label="Pet Rent (Dog)" value={`$${leaseData['Pet Rent (Dog)']}`} />}
+                {leaseData['Pet Rent (Cat)'] && <ReviewRow label="Pet Rent (Cat)" value={`$${leaseData['Pet Rent (Cat)']}`} />}
                 {leaseData['Other Fees to Tenant'] && <ReviewRow label="Other Fees" value={`$${leaseData['Other Fees to Tenant']}`} />}
               </ReviewSection>
               <ReviewSection title="Assignment">
-                <ReviewRow label="Property" value={propertyAddress} />
+                <ReviewRow label="Property" value={propertyName} />
                 <ReviewRow label="Unit" value={unitName} />
               </ReviewSection>
             </div>
           )}
 
           {/* Execution progress */}
-          {(executing || done) && (
+          {executing && (
             <div className="space-y-2 py-2">
               {execSteps.map((s, i) => (
                 <div key={i} className={`flex items-start gap-3 text-sm ${s.status === 'detail' ? 'pl-8 text-xs text-gray-500' : ''}`}>
@@ -455,12 +397,7 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
                       {s.status === 'error' && <span className="text-red-500 font-bold text-xs">✗</span>}
                     </span>
                   )}
-                  <span className={
-                    s.status === 'error' ? 'text-red-600' :
-                    s.status === 'success' ? 'text-gray-700' :
-                    s.status === 'detail' ? 'text-gray-500' :
-                    'text-gray-400'
-                  }>
+                  <span className={s.status === 'error' ? 'text-red-600' : s.status === 'detail' ? 'text-gray-500' : s.status === 'success' ? 'text-gray-700' : 'text-gray-400'}>
                     {s.msg}
                   </span>
                 </div>
@@ -477,23 +414,15 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
                 Back
               </button>
             ) : (
-              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-                Cancel
-              </button>
+              <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
             )}
             {step < 3 && (
-              <button
-                onClick={step === 1 ? goToStep2 : goToStep3}
-                className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700"
-              >
+              <button onClick={step === 1 ? goToStep2 : goToStep3} className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700">
                 Next →
               </button>
             )}
             {step === 3 && (
-              <button
-                onClick={execute}
-                className="px-5 py-2 bg-green-600 text-white text-sm rounded-lg font-medium hover:bg-green-700"
-              >
+              <button onClick={execute} className="px-5 py-2 bg-green-600 text-white text-sm rounded-lg font-medium hover:bg-green-700">
                 Create Tenant
               </button>
             )}
