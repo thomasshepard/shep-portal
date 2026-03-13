@@ -49,6 +49,7 @@ export function AuthProvider({ children }) {
     manageMaintenance: isAdmin || isVA,
     logPayments: isAdmin || isVA,
     documents: isAdmin || !!profile?.can_view_documents,
+    deals: isAdmin || isVA || !!profile?.can_view_deals,
   }
 
   return (

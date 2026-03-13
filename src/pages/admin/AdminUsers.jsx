@@ -21,6 +21,8 @@ const emptyForm = {
   can_view_properties: false,
   can_view_llcs: false,
   can_view_chickens: false,
+  can_view_documents: false,
+  can_view_deals: false,
 }
 
 export default function AdminUsers() {
@@ -90,6 +92,8 @@ export default function AdminUsers() {
           can_view_properties: form.can_view_properties,
           can_view_llcs: form.can_view_llcs,
           can_view_chickens: form.can_view_chickens,
+          can_view_documents: form.can_view_documents,
+          can_view_deals: form.can_view_deals,
         })
         .eq('id', newUserId)
       if (!profileErr) { profileUpdated = true; break }
@@ -181,6 +185,8 @@ export default function AdminUsers() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Properties</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">LLCs</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Chickens</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Documents</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Deals</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -234,6 +240,20 @@ export default function AdminUsers() {
                         onChange={() => togglePerm(u, 'can_view_chickens')}
                       />
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_documents}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_documents')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_deals}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_deals')}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => handleDelete(u)}
@@ -252,7 +272,7 @@ export default function AdminUsers() {
       </div>
 
       <div className="text-xs text-gray-400 space-y-0.5">
-        <p>• <strong>Properties</strong>, <strong>LLCs</strong>, and <strong>Chickens</strong> toggles control which sections each user can see.</p>
+        <p>• <strong>Properties</strong>, <strong>LLCs</strong>, <strong>Chickens</strong>, <strong>Documents</strong>, and <strong>Facebook Deals</strong> toggles control which sections each user can see.</p>
         <p>• Admin users always have full access — their toggles are locked.</p>
         <p>• <strong>Active/Inactive</strong> is a soft flag. To fully block access, also disable the account in Supabase Auth dashboard.</p>
         <p>• <strong>Delete</strong> permanently removes the account. Requires the <code>delete-user</code> edge function to be deployed.</p>
@@ -340,6 +360,24 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Chickens</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_documents}
+                        onChange={e => setField('can_view_documents', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Documents</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_deals}
+                        onChange={e => setField('can_view_deals', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Facebook Deals</span>
                     </label>
                   </div>
                 </div>

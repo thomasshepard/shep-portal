@@ -50,8 +50,8 @@ export default function App() {
             <Route path="llcs/:id" element={<PermRoute permission="llcs"><LLCDetail /></PermRoute>} />
             <Route path="chickens" element={<PermRoute permission="chickens"><Chickens /></PermRoute>} />
             <Route path="documents" element={<PermRoute permission="documents"><Documents /></PermRoute>} />
-            <Route path="deals" element={<PermRoute permission="properties"><Deals /></PermRoute>} />
-            <Route path="deals/search-criteria" element={<PermRoute permission="properties"><DealsSearchCriteria /></PermRoute>} />
+            <Route path="deals" element={<PermRoute permission="deals"><Deals /></PermRoute>} />
+            <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
             <Route
               path="admin"
               element={
