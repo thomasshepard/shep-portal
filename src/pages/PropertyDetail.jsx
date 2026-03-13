@@ -36,7 +36,7 @@ const arr = v => Array.isArray(v) ? v : []
 
 export default function PropertyDetail() {
   const { id } = useParams()
-  const { isAdmin, isVA, profile } = useAuth()
+  const { isAdmin, isVA, permissions, profile } = useAuth()
   const [loading, setLoading] = useState(true)
   const [property, setProperty] = useState(null)
   const [rentalUnits, setRentalUnits] = useState([])
@@ -396,7 +396,7 @@ export default function PropertyDetail() {
                       <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{leaseStatus}</span>
                     )}
                   </div>
-                  {isAdmin && (
+                  {(isAdmin || isVA) && (
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         onClick={() => setEditTenantData({ tenant, lease: activeLease })}

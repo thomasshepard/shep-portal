@@ -45,6 +45,9 @@ export function AuthProvider({ children }) {
     properties: isAdmin || isVA || !!profile?.can_view_properties,
     llcs: isAdmin || !!profile?.can_view_llcs,
     chickens: isAdmin || !!profile?.can_view_chickens,
+    editTenants: isAdmin || isVA,
+    manageMaintenance: isAdmin || isVA,
+    logPayments: isAdmin || isVA,
   }
 
   return (

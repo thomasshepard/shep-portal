@@ -73,21 +73,30 @@ export default function AdminUsers() {
       return
     }
 
-    // Update the auto-created profile with role and permissions
-    const { error: profileErr } = await supabase
-      .from('profiles')
-      .upsert({
-        id: newUserId,
-        email: form.email,
-        full_name: form.full_name,
-        role: form.role,
-        can_view_properties: form.can_view_properties,
-        can_view_llcs: form.can_view_llcs,
-        can_view_chickens: form.can_view_chickens,
-      })
+    // Supabase trigger auto-creates the profile row on signup.
+    // Poll with retries since the trigger may take a moment to fire.
+    let profileUpdated = false
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise(r => setTimeout(r, 300))
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({
+          email: form.email,
+          full_name: form.full_name,
+          role: form.role,
+          can_view_properties: form.can_view_properties,
+          can_view_llcs: form.can_view_llcs,
+          can_view_chickens: form.can_view_chickens,
+        })
+        .eq('id', newUserId)
+      if (!profileErr) { profileUpdated = true; break }
+    }
 
-    if (profileErr) toast.error('User created but profile update failed: ' + profileErr.message)
-    else toast.success(`${form.email} added`)
+    if (!profileUpdated) {
+      toast('User created — set their role manually in the Users table if needed.', { icon: '⚠️' })
+    } else {
+      toast.success(`${form.email} added`)
+    }
 
     setShowAddForm(false)
     setForm(emptyForm)
