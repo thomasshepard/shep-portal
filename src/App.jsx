@@ -20,6 +20,7 @@ import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
 import MaintenanceSubmit from './pages/MaintenanceSubmit'
 import ErrorBoundary from './components/ErrorBoundary'
+import Documents from './pages/Documents'
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
             <Route path="llcs" element={<PermRoute permission="llcs"><LLCs /></PermRoute>} />
             <Route path="llcs/:id" element={<PermRoute permission="llcs"><LLCDetail /></PermRoute>} />
             <Route path="chickens" element={<PermRoute permission="chickens"><Chickens /></PermRoute>} />
+            <Route path="documents" element={<PermRoute permission="documents"><Documents /></PermRoute>} />
             <Route
               path="admin"
               element={

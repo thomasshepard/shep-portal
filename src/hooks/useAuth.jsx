@@ -48,6 +48,7 @@ export function AuthProvider({ children }) {
     editTenants: isAdmin || isVA,
     manageMaintenance: isAdmin || isVA,
     logPayments: isAdmin || isVA,
+    documents: isAdmin || !!profile?.can_view_documents,
   }
 
   return (

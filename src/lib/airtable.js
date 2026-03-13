@@ -3,6 +3,7 @@ const PAT = import.meta.env.VITE_AIRTABLE_PAT
 
 export const CHICKENS_BASE_ID = import.meta.env.VITE_AIRTABLE_CHICKENS_BASE_ID
 export const PM_BASE_ID = import.meta.env.VITE_AIRTABLE_PM_BASE_ID
+export const DOCS_BASE_ID = import.meta.env.VITE_AIRTABLE_DOCS_BASE_ID
 
 function buildUrl(tableName, baseId) {
   return `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}`
