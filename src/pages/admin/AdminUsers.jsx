@@ -57,7 +57,10 @@ export default function AdminUsers() {
     const { data, error: signupErr } = await signupClient.auth.signUp({
       email: form.email,
       password: form.password,
-      options: { data: { full_name: form.full_name } },
+      options: {
+        data: { full_name: form.full_name },
+        emailRedirectTo: 'https://thomasshepard.github.io/shep-portal',
+      },
     })
 
     if (signupErr) {
@@ -95,7 +98,8 @@ export default function AdminUsers() {
     if (!profileUpdated) {
       toast('User created — set their role manually in the Users table if needed.', { icon: '⚠️' })
     } else {
-      toast.success(`${form.email} added`)
+      toast.success(`${form.email} added — share the portal URL with them so they can log in`, { duration: 8000 })
+      navigator.clipboard.writeText('https://thomasshepard.github.io/shep-portal').catch(() => {})
     }
 
     setShowAddForm(false)

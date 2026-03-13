@@ -36,7 +36,7 @@ export default function Sidebar({ open, onClose }) {
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },
-    permissions.properties && { to: '/deals', icon: Tag, label: 'Deals' },
+    permissions.properties && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
     permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
     permissions.chickens && { to: '/chickens', icon: Egg, label: 'Chickens' },
     permissions.documents && { to: '/documents', icon: FileText, label: 'Documents' },

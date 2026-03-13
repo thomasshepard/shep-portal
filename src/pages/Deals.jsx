@@ -1,8 +1,12 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { ShoppingBag, ThumbsDown, RotateCcw, X } from 'lucide-react'
 import { fetchAllRecords, updateRecord, FBM_BASE_ID } from '../lib/airtable'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
+
+const PAT = import.meta.env.VITE_AIRTABLE_PAT
+const PAGE_SIZE = 24
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -80,18 +84,42 @@ function locationLine(f) {
   return parts.join(' · ')
 }
 
-// Build Airtable filterByFormula from current toggle state
-function buildFormula(showDismissed, withinRange, availableOnly) {
+// Build Airtable filterByFormula — score filter is server-side
+function buildFormula(showDismissed, withinRange, availableOnly, scoreFilter) {
   const parts = []
   if (!showDismissed) parts.push('{Dismissed} != TRUE()')
   if (withinRange) parts.push('{Within Range} = TRUE()')
   if (availableOnly) parts.push('OR({Status} = "Available", {Status} = "", BLANK() = {Status})')
+  if (scoreFilter === 'hot')      parts.push('{Deal Score} >= 8')
+  else if (scoreFilter === 'good')     parts.push('AND({Deal Score} >= 6, {Deal Score} < 8)')
+  else if (scoreFilter === 'low')      parts.push('AND({Deal Score} < 6, NOT(BLANK() = {Deal Score}))')
+  else if (scoreFilter === 'unscored') parts.push('BLANK() = {Deal Score}')
   if (parts.length === 0) return ''
   if (parts.length === 1) return parts[0]
   return `AND(${parts.join(', ')})`
 }
 
-// ── Score filter logic ─────────────────────────────────────────────────────────
+// Fetch a single page of matches from Airtable
+async function fetchMatchPage(formula, offset) {
+  const query = new URLSearchParams()
+  query.set('pageSize', String(PAGE_SIZE))
+  query.set('sort[0][field]', 'Date Found')
+  query.set('sort[0][direction]', 'desc')
+  if (formula) query.set('filterByFormula', formula)
+  if (offset) query.set('offset', offset)
+  const res = await fetch(
+    `https://api.airtable.com/v0/${FBM_BASE_ID}/${encodeURIComponent('matches')}?${query}`,
+    { headers: { Authorization: `Bearer ${PAT}` } }
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `HTTP ${res.status}`)
+  }
+  const json = await res.json()
+  return { records: json.records || [], nextOffset: json.offset || null }
+}
+
+// ── Score filter definitions ──────────────────────────────────────────────────
 
 const SCORE_FILTERS = [
   { id: 'all',      label: 'All' },
@@ -100,15 +128,6 @@ const SCORE_FILTERS = [
   { id: 'low',      label: 'Low (1-5)' },
   { id: 'unscored', label: 'Unscored' },
 ]
-
-function matchesScoreFilter(score, filterId) {
-  if (filterId === 'all') return true
-  if (filterId === 'hot') return score != null && score >= 8
-  if (filterId === 'good') return score != null && score >= 6 && score < 8
-  if (filterId === 'low') return score != null && score < 6
-  if (filterId === 'unscored') return score == null
-  return true
-}
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
@@ -124,36 +143,53 @@ export default function Deals() {
   const [itemFilter, setItemFilter] = useState('all')
   const [selected, setSelected] = useState(null)
 
-  useEffect(() => { load() }, [showDismissed, withinRange, availableOnly])
+  // Pagination state
+  const [pageNum, setPageNum] = useState(1)
+  const [nextOffset, setNextOffset] = useState(null)
+  const [prevOffsets, setPrevOffsets] = useState([])
+  const [fetchTrigger, setFetchTrigger] = useState(0)
+  const currentOffsetRef = useRef(undefined)
 
-  async function load() {
+  // Fetch search-items lookup map once on mount
+  useEffect(() => {
+    fetchAllRecords('search-items', {}, FBM_BASE_ID).then(res => {
+      const map = {}
+      arr(res.data).forEach(r => {
+        if (r?.id) map[r.id] = safeStr(r.fields?.['Item Name'], r.id)
+      })
+      setSearchItemMap(map)
+    })
+  }, [])
+
+  // Reset pagination and re-fetch when filter params change
+  useEffect(() => {
+    currentOffsetRef.current = undefined
+    setPageNum(1)
+    setNextOffset(null)
+    setPrevOffsets([])
+    setFetchTrigger(t => t + 1)
+  }, [showDismissed, withinRange, availableOnly, scoreFilter, itemFilter])
+
+  // Fetch current page whenever fetchTrigger increments
+  useEffect(() => {
+    load(currentOffsetRef.current)
+  }, [fetchTrigger]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function load(offset) {
     setLoading(true)
     try {
-      const formula = buildFormula(showDismissed, withinRange, availableOnly)
+      const formula = buildFormula(showDismissed, withinRange, availableOnly, scoreFilter)
       const dismissedFormula = withinRange
         ? 'AND({Dismissed} = TRUE(), {Within Range} = TRUE())'
         : '{Dismissed} = TRUE()'
 
-      const [matchesRes, itemsRes, dismissedRes] = await Promise.all([
-        fetchAllRecords('matches', {
-          filterByFormula: formula,
-          sort: { field: 'Date Found', direction: 'desc' },
-        }, FBM_BASE_ID),
-        fetchAllRecords('search-items', {}, FBM_BASE_ID),
-        fetchAllRecords('matches', {
-          filterByFormula: dismissedFormula,
-          fields: ['Listing ID'],
-        }, FBM_BASE_ID),
+      const [pageResult, dismissedRes] = await Promise.all([
+        fetchMatchPage(formula, offset),
+        fetchAllRecords('matches', { filterByFormula: dismissedFormula, fields: ['Listing ID'] }, FBM_BASE_ID),
       ])
 
-      if (matchesRes.error) throw new Error(matchesRes.error)
-
-      const itemMap = {}
-      arr(itemsRes.data).forEach(r => {
-        if (r?.id) itemMap[r.id] = safeStr(r.fields?.['Item Name'], r.id)
-      })
-      setSearchItemMap(itemMap)
-      setRecords(matchesRes.data || [])
+      setRecords(pageResult.records)
+      setNextOffset(pageResult.nextOffset)
       setDismissedCount(dismissedRes.data?.length || 0)
     } catch (e) {
       toast.error('Failed to load deals: ' + e.message)
@@ -162,6 +198,24 @@ export default function Deals() {
     }
   }
 
+  function goNext() {
+    if (!nextOffset) return
+    setPrevOffsets(p => [...p, currentOffsetRef.current])
+    currentOffsetRef.current = nextOffset
+    setPageNum(p => p + 1)
+    setFetchTrigger(t => t + 1)
+  }
+
+  function goPrev() {
+    if (pageNum <= 1) return
+    const newPrev = [...prevOffsets]
+    currentOffsetRef.current = newPrev.pop()
+    setPrevOffsets(newPrev)
+    setPageNum(p => p - 1)
+    setFetchTrigger(t => t + 1)
+  }
+
+  // Item filter is client-side only (linked record — can't easily formula-filter)
   const allItems = useMemo(() => {
     const s = new Set()
     records.forEach(r => {
@@ -172,17 +226,13 @@ export default function Deals() {
   }, [records, searchItemMap])
 
   const filtered = useMemo(() => {
+    if (itemFilter === 'all') return records
     return records.filter(r => {
-      const score = safeNum(r.fields?.['Deal Score'])
-      if (!matchesScoreFilter(score, scoreFilter)) return false
-      if (itemFilter !== 'all') {
-        const itemId = arr(r.fields?.['search-items'])[0]
-        const itemName = itemId ? searchItemMap[itemId] : ''
-        if (itemName !== itemFilter) return false
-      }
-      return true
+      const itemId = arr(r.fields?.['search-items'])[0]
+      const itemName = itemId ? searchItemMap[itemId] : ''
+      return itemName === itemFilter
     })
-  }, [records, scoreFilter, itemFilter, searchItemMap])
+  }, [records, itemFilter, searchItemMap])
 
   const dismiss = useCallback(async (record) => {
     setRecords(prev => prev.filter(r => r.id !== record.id))
@@ -244,9 +294,9 @@ export default function Deals() {
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Deals</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Facebook Deals</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {filtered.length} of {records.length} shown
+            {filtered.length} on this page
             {dismissedCount > 0 && (
               <>
                 {' · '}
@@ -264,11 +314,17 @@ export default function Deals() {
             )}
           </p>
         </div>
+        <Link
+          to="/deals/search-criteria"
+          className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          Manage searches →
+        </Link>
       </div>
 
       {/* Filter bar */}
       <div className="space-y-2">
-        {/* Toggle row: Within Range + Available Only */}
+        {/* Toggle row */}
         <div className="flex items-center gap-2 flex-wrap">
           <ToggleBtn active={withinRange} onClick={() => setWithinRange(v => !v)}>
             📍 Within Range
@@ -351,6 +407,29 @@ export default function Deals() {
         </div>
       )}
 
+      {/* Pagination */}
+      {(pageNum > 1 || nextOffset) && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-sm text-gray-500">Page {pageNum}</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={goPrev}
+              disabled={pageNum <= 1}
+              className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              ← Previous
+            </button>
+            <button
+              onClick={goNext}
+              disabled={!nextOffset}
+              className="px-4 py-2 text-sm font-medium border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Detail Modal */}
       {selected && (
         <DealModal
@@ -417,27 +496,19 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore, 
         isDismissed ? 'opacity-50' : ''
       }`}
     >
-      {/* Image area */}
       <div className="relative h-44 bg-gray-100 flex-shrink-0">
         {showImg ? (
-          <img
-            src={imageUrl}
-            alt={title}
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover"
-          />
+          <img src={imageUrl} alt={title} onError={() => setImgError(true)} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <ShoppingBag size={40} className="text-gray-300" />
           </div>
         )}
-
         {badge && (
           <div className={`absolute top-2 right-2 ${badge.cls} text-xs font-bold px-2 py-1 rounded-lg shadow`}>
             {badge.label}
           </div>
         )}
-
         {withinRange && (
           <div className="absolute top-2 left-2 flex items-center gap-1 bg-white/90 rounded-full px-2 py-0.5 shadow">
             <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
@@ -446,10 +517,8 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore, 
         )}
       </div>
 
-      {/* Content */}
       <div className="p-3 flex flex-col gap-1.5 flex-1">
         <p className="font-semibold text-gray-900 text-sm leading-snug line-clamp-2">{title}</p>
-
         {displayPrice && (
           <div>
             <p className="text-lg font-bold text-gray-900 leading-none">{displayPrice}</p>
@@ -460,7 +529,6 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore, 
             )}
           </div>
         )}
-
         {locLine && <p className="text-xs text-gray-500 leading-snug">{locLine}</p>}
 
         <div className="flex items-center justify-between gap-2 mt-auto pt-1">
@@ -470,27 +538,16 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore, 
                 {itemName}
               </span>
             )}
-            {date && (
-              <span className="text-xs text-gray-400 flex-shrink-0">{relativeTime(date)}</span>
-            )}
+            {date && <span className="text-xs text-gray-400 flex-shrink-0">{relativeTime(date)}</span>}
           </div>
-
           {isDismissed ? (
-            <button
-              data-action="restore"
-              onClick={e => { e.stopPropagation(); onRestore(record) }}
-              title="Restore deal"
-              className="flex-shrink-0 p-1.5 text-gray-400 hover:text-green-600 transition-colors"
-            >
+            <button data-action="restore" onClick={e => { e.stopPropagation(); onRestore(record) }} title="Restore deal"
+              className="flex-shrink-0 p-1.5 text-gray-400 hover:text-green-600 transition-colors">
               <RotateCcw size={15} />
             </button>
           ) : (
-            <button
-              data-action="dismiss"
-              onClick={e => { e.stopPropagation(); onDismiss(record) }}
-              title="Dismiss deal"
-              className="flex-shrink-0 p-1.5 text-gray-300 hover:text-red-400 transition-colors"
-            >
+            <button data-action="dismiss" onClick={e => { e.stopPropagation(); onDismiss(record) }} title="Dismiss deal"
+              className="flex-shrink-0 p-1.5 text-gray-300 hover:text-red-400 transition-colors">
               <ThumbsDown size={15} />
             </button>
           )}
@@ -543,10 +600,8 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
+      <div className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-200 flex-shrink-0">
           <div className="flex items-start justify-between gap-3">
@@ -556,9 +611,7 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
                 {displayPrice && (
                   <div className="flex items-center gap-2">
                     {priceDiff !== null && (
-                      <span className="text-sm text-gray-400 line-through">
-                        ${prevPrice.toLocaleString()}
-                      </span>
+                      <span className="text-sm text-gray-400 line-through">${prevPrice.toLocaleString()}</span>
                     )}
                     <span className="text-xl font-bold text-gray-900">{displayPrice}</span>
                     {priceDiff !== null && (
@@ -584,27 +637,16 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
-          {/* Image + FB link */}
           {(imageUrl || url) && (
             <div className="border-b border-gray-100">
               {imageUrl && !imgError && (
                 <a href={url || imageUrl} target="_blank" rel="noopener noreferrer" className="block">
-                  <img
-                    src={imageUrl}
-                    alt={title}
-                    onError={() => setImgError(true)}
-                    className="w-full object-cover max-h-72"
-                  />
+                  <img src={imageUrl} alt={title} onError={() => setImgError(true)} className="w-full object-cover max-h-72" />
                 </a>
               )}
               {url && (
                 <div className="px-5 py-3">
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-blue-600 hover:underline"
-                  >
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-blue-600 hover:underline">
                     View on Facebook →
                   </a>
                 </div>
@@ -613,7 +655,6 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
           )}
 
           <div className="px-5 py-4 space-y-5">
-            {/* AI Analysis */}
             {score != null && (
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">AI Analysis</p>
@@ -624,13 +665,10 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
                     <p className="text-xs text-gray-400">out of 10</p>
                   </div>
                 </div>
-                {scoreNotes && (
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{scoreNotes}</p>
-                )}
+                {scoreNotes && <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{scoreNotes}</p>}
               </div>
             )}
 
-            {/* Description */}
             {description && (
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Description</p>
@@ -638,7 +676,6 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
               </div>
             )}
 
-            {/* Logistics */}
             {(logisticsLine || seller) && (
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Logistics</p>
@@ -647,7 +684,6 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
               </div>
             )}
 
-            {/* Found */}
             {date && (
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Found</p>
@@ -657,20 +693,16 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
           </div>
         </div>
 
-        {/* Footer actions */}
+        {/* Footer */}
         <div className="px-5 py-3 border-t border-gray-100 flex-shrink-0">
           {isDismissed ? (
-            <button
-              onClick={() => { onRestore(record); onClose() }}
-              className="flex items-center gap-2 text-sm text-green-600 hover:text-green-800 font-medium"
-            >
+            <button onClick={() => { onRestore(record); onClose() }}
+              className="flex items-center gap-2 text-sm text-green-600 hover:text-green-800 font-medium">
               <RotateCcw size={15} /> Restore deal
             </button>
           ) : (
-            <button
-              onClick={() => { onDismiss(record); onClose() }}
-              className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-500 font-medium"
-            >
+            <button onClick={() => { onDismiss(record); onClose() }}
+              className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-500 font-medium">
               <ThumbsDown size={15} /> Dismiss deal
             </button>
           )}
