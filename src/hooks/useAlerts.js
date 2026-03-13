@@ -3,6 +3,10 @@ import { fetchAllRecords, createRecord, updateRecord, PM_BASE_ID, fmtCurrency, f
 
 const ALERTS_TABLE = 'Alerts'
 
+// Always returns an array — Airtable linked/rollup/lookup fields can return
+// non-array values (objects, null) when a record has no linked items.
+const arr = v => Array.isArray(v) ? v : []
+
 // ── Alert computation ──────────────────────────────────────────────────────────
 
 function todayStr() {
@@ -34,7 +38,7 @@ function computeAlerts({ properties = [], rentalUnits = [], leases = [], tenants
   // unit → property
   const unitToPropertyId = {}
   properties.forEach(p => {
-    ;(p.fields?.['Rental Units'] || []).forEach(uid => { unitToPropertyId[uid] = p.id })
+    arr(p.fields?.['Rental Units']).forEach(uid => { unitToPropertyId[uid] = p.id })
   })
 
   // Owned unit IDs
@@ -49,7 +53,7 @@ function computeAlerts({ properties = [], rentalUnits = [], leases = [], tenants
   // 1. late_payment
   invoicePayments.forEach(p => {
     const pf = p.fields || {}
-    const propIds = pf.Property || []
+    const propIds = arr(pf.Property)
     if (!propIds.some(pid => ownedPropIds.has(pid))) return
 
     const status = pf.Status || ''
@@ -83,7 +87,7 @@ function computeAlerts({ properties = [], rentalUnits = [], leases = [], tenants
   // 2. lease_expiring  3. lease_expired
   leases.forEach(l => {
     const lf = l.fields || {}
-    const unitIds = lf.Property || []  // Lease.Property → Rental Unit IDs
+    const unitIds = arr(lf.Property)  // Lease.Property → Rental Unit IDs
     if (!unitIds.some(uid => ownedUnitIds.has(uid))) return
     if ((lf.Status || '').toLowerCase() === 'closed') return
 
@@ -94,7 +98,7 @@ function computeAlerts({ properties = [], rentalUnits = [], leases = [], tenants
     if (!end) return
 
     const daysUntil = Math.ceil((end - today) / 86400000)
-    const tenantId = (lf['Tenant Management'] || [])[0]
+    const tenantId = arr(lf['Tenant Management'])[0]
     const tenantName = tenantMap[tenantId]?.fields?.Name || 'Unknown Tenant'
     const unitId = unitIds[0]
     const unitName = unitMap[unitId]?.fields?.Name || ''
@@ -138,7 +142,7 @@ function computeAlerts({ properties = [], rentalUnits = [], leases = [], tenants
   // 4. maintenance_open
   maintenance.forEach(m => {
     const mf = m.fields || {}
-    const propIds = mf.Property || []
+    const propIds = arr(mf.Property)
     if (!propIds.some(pid => ownedPropIds.has(pid))) return
 
     const status = (mf.Status || '').toLowerCase()
@@ -168,7 +172,7 @@ function computeAlerts({ properties = [], rentalUnits = [], leases = [], tenants
   // 5. loan_maturity
   loans.forEach(loan => {
     const lf = loan.fields || {}
-    const propIds = lf.Property || []
+    const propIds = arr(lf.Property)
     if (propIds.length > 0 && !propIds.some(pid => ownedPropIds.has(pid))) return
     if ((lf.Status || '').toLowerCase() !== 'active') return
 
@@ -217,7 +221,7 @@ function computeAlerts({ properties = [], rentalUnits = [], leases = [], tenants
   const occupiedUnitIds = new Set(
     leases
       .filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
-      .flatMap(l => l.fields?.Property || [])
+      .flatMap(l => arr(l.fields?.Property))
   )
 
   rentalUnits.forEach(unit => {

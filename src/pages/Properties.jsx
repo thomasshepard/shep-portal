@@ -19,6 +19,10 @@ const STATUS_COLORS = {
   'Pending': 'bg-yellow-100 text-yellow-700',
 }
 
+// Always returns an array — Airtable linked/rollup/lookup fields can return
+// non-array values (objects, null) when a record has no linked items.
+const arr = v => Array.isArray(v) ? v : []
+
 function isSold(prop) {
   return (prop.fields?.Status || '').toLowerCase() === 'sold'
 }
@@ -88,7 +92,7 @@ export default function Properties() {
   const occupiedUnitIds = new Set(
     leases
       .filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
-      .flatMap(l => l.fields?.Property || [])  // Lease "Property" field → Rental Unit IDs
+      .flatMap(l => arr(l.fields?.Property))  // Lease "Property" field → Rental Unit IDs
   )
 
   const openMaintenance = maintenance.filter(m => {
@@ -108,7 +112,7 @@ export default function Properties() {
   const ownedUnits = rentalUnits.filter(u => {
     // only count units belonging to owned properties
     // find via property records' Rental Units field
-    return ownedProperties.some(p => (p.fields?.['Rental Units'] || []).includes(u.id))
+    return ownedProperties.some(p => arr(p.fields?.['Rental Units']).includes(u.id))
   })
   const totalPortfolioValue = ownedProperties.reduce((s, p) => s + (p.fields?.['Est Market Value'] || 0), 0)
   const totalEquity = ownedProperties.reduce((s, p) => s + (p.fields?.['Equity'] || 0), 0)
@@ -132,7 +136,7 @@ export default function Properties() {
   // Map unit → property for rent roll
   const unitToPropertyId = {}
   properties.forEach(p => {
-    ;(p.fields?.['Rental Units'] || []).forEach(uid => { unitToPropertyId[uid] = p.id })
+    arr(p.fields?.['Rental Units']).forEach(uid => { unitToPropertyId[uid] = p.id })
   })
 
   const propMap = {}
@@ -146,7 +150,7 @@ export default function Properties() {
   const rentRollLeases = leases.filter(l => {
     const status = (l.fields?.Status || '').toLowerCase()
     if (status === 'closed') return false
-    const unitId = (l.fields?.Property || [])[0]
+    const unitId = arr(l.fields?.Property)[0]
     const propId = unitToPropertyId[unitId]
     if (!propId) return false
     return !isSold(propMap[propId])
@@ -192,7 +196,7 @@ export default function Properties() {
         {displayProperties.map(prop => {
           const pf = prop.fields || {}
           const sold = isSold(prop)
-          const propUnitIds = pf['Rental Units'] || []
+          const propUnitIds = arr(pf['Rental Units'])
           const units = propUnitIds.map(uid => unitMap[uid]).filter(Boolean)
           const isPrimaryResidence = pf['Investment Type'] === 'Primary Residence'
           const occupiedPropCount = units.filter(u => occupiedUnitIds.has(u.id)).length
@@ -317,11 +321,11 @@ export default function Properties() {
               <tbody className="divide-y divide-gray-100">
                 {rentRollLeases.map(l => {
                   const lf = l.fields || {}
-                  const unitId = (lf.Property || [])[0]
+                  const unitId = arr(lf.Property)[0]
                   const unit = unitMap[unitId]
                   const propId = unitToPropertyId[unitId]
                   const prop = propMap[propId]
-                  const tenant = tenantMap[(lf['Tenant Management'] || [])[0]]
+                  const tenant = tenantMap[arr(lf['Tenant Management'])[0]]
                   return (
                     <tr key={l.id} className="hover:bg-gray-50">
                       <td className="px-4 py-2 text-gray-700">{prop?.fields?.Address || '—'}</td>
@@ -357,7 +361,7 @@ export default function Properties() {
 function buildIndexByField(records, linkedField) {
   const idx = {}
   records.forEach(r => {
-    ;(r.fields?.[linkedField] || []).forEach(id => {
+    arr(r.fields?.[linkedField]).forEach(id => {
       if (!idx[id]) idx[id] = []
       idx[id].push(r)
     })

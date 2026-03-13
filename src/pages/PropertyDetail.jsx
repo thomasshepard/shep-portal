@@ -30,6 +30,10 @@ function recordIdFilter(ids) {
 
 const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 
+// Always returns an array — Airtable linked/rollup/lookup fields can return
+// non-array values (objects, null) when a record has no linked items.
+const arr = v => Array.isArray(v) ? v : []
+
 export default function PropertyDetail() {
   const { id } = useParams()
   const { isAdmin, isVA, profile } = useAuth()
@@ -84,11 +88,11 @@ export default function PropertyDetail() {
       setProperty(prop)
 
       const f = prop.fields || {}
-      const unitIds = f['Rental Units'] || []
-      const loanIds = f['Current Loans'] || []
-      const billIds = f['Bills Payment'] || []
-      const utilIds = f['Utilities'] || []
-      const invPayIds = f['Invoices Payments'] || []
+      const unitIds = arr(f['Rental Units'])
+      const loanIds = arr(f['Current Loans'])
+      const billIds = arr(f['Bills Payment'])
+      const utilIds = arr(f['Utilities'])
+      const invPayIds = arr(f['Invoices Payments'])
 
       // 2. Fetch Rental Units + other property-linked data in parallel
       const [unitsRes, invPayRes, maintRes, utilRes, loansRes, billsRes] = await Promise.all([
@@ -119,7 +123,7 @@ export default function PropertyDetail() {
       setBills(billsRes.data || [])
 
       // 3. Fetch Lease Agreements for all units
-      const leaseIds = [...new Set(units.flatMap(u => u.fields?.['Lease Agreements'] || []))]
+      const leaseIds = [...new Set(units.flatMap(u => arr(u.fields?.['Lease Agreements'])))]
       if (leaseIds.length === 0) {
         setLeases([])
         setTenants([])
@@ -133,8 +137,8 @@ export default function PropertyDetail() {
 
       // 4. Fetch Tenants from active leases (Status != "Closed")
       const activeLeases = leasesData.filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
-      const tenantIds = [...new Set(activeLeases.flatMap(l => l.fields?.['Tenant Management'] || []))]
-      const leaseInvIds = [...new Set(leasesData.flatMap(l => l.fields?.['Lease Invoice'] || []))]
+      const tenantIds = [...new Set(activeLeases.flatMap(l => arr(l.fields?.['Tenant Management'])))]
+      const leaseInvIds = [...new Set(leasesData.flatMap(l => arr(l.fields?.['Lease Invoice'])))]
 
       const [tenantsRes, leaseInvRes] = await Promise.all([
         tenantIds.length > 0
@@ -317,7 +321,7 @@ export default function PropertyDetail() {
           {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
           {rentalUnits.map(unit => {
             const uf = unit?.fields || {}
-            const unitLeases = (uf['Lease Agreements'] || [])
+            const unitLeases = arr(uf['Lease Agreements'])
               .map(lid => leaseMap[lid])
               .filter(Boolean)
 
@@ -356,7 +360,7 @@ export default function PropertyDetail() {
 
             // — OCCUPIED CARD —
             const lf = activeLease.fields || {}
-            const tenantId = (lf['Tenant Management'] || [])[0]
+            const tenantId = arr(lf['Tenant Management'])[0]
             const tenant = tenantId ? tenantMap[tenantId] : null
             const tf = tenant?.fields || {}
 
@@ -369,7 +373,7 @@ export default function PropertyDetail() {
             const remainingColor = monthsRemaining <= 0 ? 'text-red-600' : monthsRemaining <= 3 ? 'text-orange-500' : monthsRemaining <= 6 ? 'text-yellow-600' : 'text-gray-700'
 
             const leaseTermLabel = months === 1 ? 'Month-to-month' : months ? `${months} months` : null
-            const latestLeaseInv = leaseInvMap[(lf['Lease Invoice'] || []).at(-1)]
+            const latestLeaseInv = leaseInvMap[arr(lf['Lease Invoice']).at(-1)]
 
             return (
               <div key={unit.id} className="border border-gray-200 rounded-xl p-4 space-y-3">
