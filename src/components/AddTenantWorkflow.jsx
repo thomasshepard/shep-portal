@@ -126,7 +126,7 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
       Email: tenantData.Email,
       'Application Status': 'Active',
       'Tenant Lifecycle': 'Active',
-      Property: [{ id: propertyId }],
+      Property: [selectedUnitId],   // "Property" on Tenants links to Rental Units, not Property table
     }
     if (tenantData['Phone number']) tenantFields['Phone number'] = tenantData['Phone number']
     if (tenantData['Name - Secondary']) tenantFields['Name - Secondary'] = tenantData['Name - Secondary']
@@ -150,8 +150,8 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
       Name: leaseData.Name,
       Email: tenantData.Email,
       Status: 'Open',
-      Property: [{ id: propertyId }],
-      'Tenant Management': [{ id: tenantId }],
+      Property: [propertyId],
+      'Tenant Management': [tenantId],
     }
     const currencyKeys = ['Rent Amount', 'Lease Amount', 'Pet Rent (Cat)', 'Pet Rent (Dog)', 'Other Fees to Tenant']
     currencyKeys.forEach(k => {
@@ -175,10 +175,10 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
 
     // Step 3: Update Rental Unit
     addExecStep('Updating rental unit…', 'loading')
-    const existingLeaseIds = (selectedUnit?.fields?.['Lease Agreements'] || []).map(id => ({ id }))
+    const existingLeaseIds = selectedUnit?.fields?.['Lease Agreements'] || []
     const unitRes = await updateRecord('Rental Units', selectedUnitId, {
       Status: 'Occupied',
-      'Lease Agreements': [...existingLeaseIds, { id: leaseId }],
+      'Lease Agreements': [...existingLeaseIds, leaseId],
     }, PM_BASE_ID)
     if (unitRes.error) {
       addExecStep('Updating rental unit…', 'error')
@@ -190,7 +190,7 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
     // Step 4: Link Tenant to Lease
     addExecStep('Linking tenant to lease…', 'loading')
     const linkRes = await updateRecord('Tenants', tenantId, {
-      'Lease Agreements': [{ id: leaseId }],
+      'Lease Agreements': [leaseId],
     }, PM_BASE_ID)
     if (linkRes.error) {
       addExecStep('Linking tenant to lease…', 'error')

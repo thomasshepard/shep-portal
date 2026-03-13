@@ -279,17 +279,7 @@ export default function PropertyDetail() {
 
       {/* Units & Tenants */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-gray-800">Units & Tenants</h2>
-          {isAdmin && (
-            <button
-              onClick={() => setAddTenantModal('picker')}
-              className="flex items-center gap-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"
-            >
-              <Plus size={14} /> Add Tenant
-            </button>
-          )}
-        </div>
+        <h2 className="font-semibold text-gray-800 mb-4">Units & Tenants</h2>
         <div className="space-y-4">
           {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
           {rentalUnits.map(unit => {
@@ -300,25 +290,25 @@ export default function PropertyDetail() {
 
             if (!isOccupied) {
               return (
-                <div key={unit.id} className="border border-gray-100 rounded-lg p-4 bg-gray-50">
+                <div key={unit.id} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-700">{uf.Name || 'Unit'}</span>
-                      <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">VACANT</span>
+                      <span className="font-semibold text-gray-800">{uf.Name || 'Unit'}</span>
+                      <span className="bg-orange-200 text-orange-800 text-xs font-bold px-2 py-0.5 rounded-full">VACANT</span>
                     </div>
                     {isAdmin && (
                       <button
                         onClick={() => setAddTenantModal(unit)}
-                        className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded-md px-2 py-1 hover:bg-blue-50"
+                        className="flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-700"
                       >
-                        <Plus size={12} /> Add Tenant
+                        <Plus size={14} /> Add Tenant
                       </button>
                     )}
                   </div>
                   {uf['Estimated Income'] > 0 && (
-                    <p className="text-sm text-gray-500 mt-1">Est. Income: {fmtCurrency(uf['Estimated Income'])}</p>
+                    <p className="text-sm text-orange-700 mt-1.5 font-medium">Potential Income: {fmtCurrency(uf['Estimated Income'])}/mo</p>
                   )}
-                  {uf.Notes && <p className="text-xs text-gray-400 mt-1">{uf.Notes}</p>}
+                  {uf.Notes && <p className="text-xs text-gray-500 mt-1">{uf.Notes}</p>}
                 </div>
               )
             }
@@ -331,35 +321,40 @@ export default function PropertyDetail() {
 
             return (
               <div key={unit.id} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-start justify-between gap-2 mb-3">
+                {/* Top row: unit name + tenant name + lease doc */}
+                <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-800">{uf.Name || 'Unit'}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-gray-600 text-sm">{uf.Name || 'Unit'}</span>
                       {lifecycle && (
                         <span className={`text-xs px-2 py-0.5 rounded-full ${lifecycle === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                           {lifecycle}
                         </span>
                       )}
                     </div>
-                    {tenant && <p className="text-sm font-medium text-gray-700 mt-0.5">{tf.Name}</p>}
+                    {tenant && <p className="text-base font-bold text-gray-900 mt-0.5">{tf.Name}</p>}
                   </div>
-                  {lf['Google Drive'] && (
-                    <a href={lf['Google Drive']} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1 flex-shrink-0">
-                      <ExternalLink size={12} /> Lease Doc
-                    </a>
-                  )}
-                </div>
-
-                {tenant && (
-                  <div className="flex items-center gap-4 text-sm mb-3 flex-wrap">
-                    {tf.Email && (
-                      <a href={`mailto:${tf.Email}`} className="flex items-center gap-1 text-blue-600 hover:underline">
-                        <Mail size={13} /> {tf.Email}
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="text-lg font-bold text-gray-900">{fmtCurrency(lf['Rent Amount'] || lf['Lease Amount'])}</span>
+                    {lf['Google Drive'] && (
+                      <a href={lf['Google Drive']} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1 border border-blue-200 rounded px-2 py-1">
+                        <ExternalLink size={12} /> Lease
                       </a>
                     )}
+                  </div>
+                </div>
+
+                {/* Contact info */}
+                {tenant && (
+                  <div className="flex items-center gap-4 text-sm mb-3 flex-wrap">
                     {tf['Phone number'] && (
-                      <a href={`tel:${tf['Phone number']}`} className="flex items-center gap-1 text-blue-600 hover:underline">
-                        <Phone size={13} /> {tf['Phone number']}
+                      <a href={`tel:${tf['Phone number']}`} className="flex items-center gap-1.5 text-blue-600 hover:underline font-medium">
+                        <Phone size={14} /> {tf['Phone number']}
+                      </a>
+                    )}
+                    {tf.Email && (
+                      <a href={`mailto:${tf.Email}`} className="flex items-center gap-1.5 text-blue-600 hover:underline">
+                        <Mail size={14} /> {tf.Email}
                       </a>
                     )}
                   </div>
@@ -367,16 +362,20 @@ export default function PropertyDetail() {
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                   <div>
-                    <p className="text-xs text-gray-400">Rent</p>
-                    <p className="font-medium">{fmtCurrency(lf['Rent Amount'] || lf['Lease Amount'])}</p>
-                  </div>
-                  <div>
                     <p className="text-xs text-gray-400">Lease Start</p>
                     <p className="font-medium">{fmtDate(lf['Start Date'])}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Lease End</p>
-                    <p className="font-medium">{fmtDate(lf['End Date'])}</p>
+                    <p className="font-medium">
+                      {fmtDate(lf['End Date'])}
+                      {lf['End Date'] && (() => {
+                        const days = Math.ceil((new Date(lf['End Date']) - new Date()) / 86400000)
+                        return days >= 0
+                          ? <span className={`ml-1 text-xs ${days < 30 ? 'text-red-500' : days < 90 ? 'text-amber-500' : 'text-gray-400'}`}>({days}d)</span>
+                          : <span className="ml-1 text-xs text-red-500">(expired)</span>
+                      })()}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Mo. Remaining</p>
