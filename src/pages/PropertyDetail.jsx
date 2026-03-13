@@ -328,6 +328,19 @@ export default function PropertyDetail() {
               )
             }
 
+            // Unit is occupied but lease data didn't load (deleted/inaccessible lease, or Status set manually)
+            if (!activeLease) {
+              return (
+                <div key={unit.id} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-800">{uf.Name || 'Unit'}</span>
+                    <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">Occupied</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Lease details not available</p>
+                </div>
+              )
+            }
+
             const lf = activeLease.fields || {}
             const tenant = tenantMap[(lf['Tenant Management'] || [])[0]]
             const tf = tenant?.fields || {}
