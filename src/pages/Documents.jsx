@@ -9,7 +9,6 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
 const PAT = import.meta.env.VITE_AIRTABLE_PAT
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const DOCS_TABLE_ID = 'tbltkTOMpJHPIUBXN'
 const DRIVE_FOLDER_ID = '1RTkUVNYXnbYjd8gNPBgzgx_N9RWWFNTD'
 const PAGE_SIZE = 25
@@ -154,21 +153,6 @@ async function ensureDocsFields() {
   }
 }
 
-async function uploadToDrive(accessToken, file) {
-  const metadata = { name: file.name, parents: [DRIVE_FOLDER_ID] }
-  const form = new FormData()
-  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }))
-  form.append('file', file)
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body: form,
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err?.error?.message || `HTTP ${res.status}`)
-  }
-}
 
 function paginationPages(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i)
@@ -198,45 +182,8 @@ export default function Documents() {
   const [selected, setSelected] = useState(null)
   const [attachIdx, setAttachIdx] = useState(0)
 
-  // Google Drive upload state
-  const [uploading, setUploading] = useState(false)
-  const [gisReady, setGisReady] = useState(false)
   const fileInputRef = useRef(null)
-  const pendingFileRef = useRef(null)
-  const tokenClientRef = useRef(null)
   const gridRef = useRef(null)
-
-  // Load GIS script for Google Drive upload (admin only)
-  useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || !isAdmin) return
-    const script = document.createElement('script')
-    script.src = 'https://accounts.google.com/gsi/client'
-    script.onload = () => {
-      tokenClientRef.current = window.google?.accounts?.oauth2?.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.file',
-        callback: async (response) => {
-          if (response.error || !pendingFileRef.current) {
-            toast.error('Google auth failed')
-            setUploading(false)
-            return
-          }
-          try {
-            await uploadToDrive(response.access_token, pendingFileRef.current)
-            toast.success('Document uploaded — n8n will process it shortly')
-          } catch (e) {
-            toast.error('Upload failed: ' + e.message)
-          } finally {
-            setUploading(false)
-            pendingFileRef.current = null
-          }
-        },
-      })
-      if (tokenClientRef.current) setGisReady(true)
-    }
-    document.head.appendChild(script)
-    return () => { try { document.head.removeChild(script) } catch {} }
-  }, [isAdmin])
 
   useEffect(() => {
     async function init() {
@@ -282,13 +229,8 @@ export default function Documents() {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
-    if (!tokenClientRef.current) {
-      toast.error('Google auth not ready — try again in a moment')
-      return
-    }
-    pendingFileRef.current = file
-    setUploading(true)
-    tokenClientRef.current.requestAccessToken({ prompt: '' })
+    window.open(`https://drive.google.com/drive/folders/${DRIVE_FOLDER_ID}`, '_blank')
+    toast('Google Drive opened — drag your file into the folder. n8n will process it automatically.', { icon: '📂', duration: 6000 })
   }
 
   function goToPage(p) {
@@ -360,12 +302,10 @@ export default function Documents() {
         {isAdmin && (
           <button
             onClick={handleAddDocument}
-            disabled={uploading || !GOOGLE_CLIENT_ID || (GOOGLE_CLIENT_ID && !gisReady)}
-            title={!GOOGLE_CLIENT_ID ? 'Google OAuth not configured — see CLAUDE.md' : 'Upload PDF to Google Drive'}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
           >
             <Upload size={15} />
-            {uploading ? 'Uploading…' : 'Add Document'}
+            Add Document
           </button>
         )}
         <input
