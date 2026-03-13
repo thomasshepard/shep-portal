@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { ShoppingBag, ThumbsDown, RotateCcw, ExternalLink } from 'lucide-react'
+import { ShoppingBag, ThumbsDown, RotateCcw, X } from 'lucide-react'
 import { fetchAllRecords, updateRecord, FBM_BASE_ID } from '../lib/airtable'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
@@ -41,11 +41,32 @@ function relativeTime(dateStr) {
   return `${Math.floor(diff / 86400 / 30)}mo ago`
 }
 
+function fmtFullDate(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr + 'T12:00:00')
+  if (isNaN(d.getTime())) return dateStr
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 function scoreBadge(score) {
   if (score == null) return null
   if (score >= 8) return { label: score, cls: 'bg-green-500 text-white' }
   if (score >= 6) return { label: score, cls: 'bg-yellow-500 text-white' }
   return { label: score, cls: 'bg-gray-400 text-white' }
+}
+
+function scoreLabel(score) {
+  if (score == null) return ''
+  if (score >= 8) return 'Strong Deal'
+  if (score >= 6) return 'Worth a Look'
+  return 'Low Priority'
+}
+
+function scoreTextColor(score) {
+  if (score == null) return 'text-gray-500'
+  if (score >= 8) return 'text-green-600'
+  if (score >= 6) return 'text-yellow-600'
+  return 'text-gray-500'
 }
 
 function locationLine(f) {
@@ -57,6 +78,17 @@ function locationLine(f) {
   if (dist != null) parts.push(`${dist} mi`)
   if (hub) parts.push(hub)
   return parts.join(' · ')
+}
+
+// Build Airtable filterByFormula from current toggle state
+function buildFormula(showDismissed, withinRange, availableOnly) {
+  const parts = []
+  if (!showDismissed) parts.push('{Dismissed} != TRUE()')
+  if (withinRange) parts.push('{Within Range} = TRUE()')
+  if (availableOnly) parts.push('OR({Status} = "Available", {Status} = "", BLANK() = {Status})')
+  if (parts.length === 0) return ''
+  if (parts.length === 1) return parts[0]
+  return `AND(${parts.join(', ')})`
 }
 
 // ── Score filter logic ─────────────────────────────────────────────────────────
@@ -82,19 +114,26 @@ function matchesScoreFilter(score, filterId) {
 
 export default function Deals() {
   const [records, setRecords] = useState([])
-  const [searchItemMap, setSearchItemMap] = useState({})   // recordId → Item Name
+  const [searchItemMap, setSearchItemMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [dismissedCount, setDismissedCount] = useState(0)
   const [showDismissed, setShowDismissed] = useState(false)
+  const [withinRange, setWithinRange] = useState(true)
+  const [availableOnly, setAvailableOnly] = useState(true)
   const [scoreFilter, setScoreFilter] = useState('all')
   const [itemFilter, setItemFilter] = useState('all')
+  const [selected, setSelected] = useState(null)
 
-  useEffect(() => { load() }, [showDismissed])
+  useEffect(() => { load() }, [showDismissed, withinRange, availableOnly])
 
   async function load() {
     setLoading(true)
     try {
-      const formula = showDismissed ? '' : 'NOT({Dismissed})'
+      const formula = buildFormula(showDismissed, withinRange, availableOnly)
+      const dismissedFormula = withinRange
+        ? 'AND({Dismissed} = TRUE(), {Within Range} = TRUE())'
+        : '{Dismissed} = TRUE()'
+
       const [matchesRes, itemsRes, dismissedRes] = await Promise.all([
         fetchAllRecords('matches', {
           filterByFormula: formula,
@@ -102,14 +141,13 @@ export default function Deals() {
         }, FBM_BASE_ID),
         fetchAllRecords('search-items', {}, FBM_BASE_ID),
         fetchAllRecords('matches', {
-          filterByFormula: '{Dismissed}=TRUE()',
+          filterByFormula: dismissedFormula,
           fields: ['Listing ID'],
         }, FBM_BASE_ID),
       ])
 
       if (matchesRes.error) throw new Error(matchesRes.error)
 
-      // Build search-item lookup map
       const itemMap = {}
       arr(itemsRes.data).forEach(r => {
         if (r?.id) itemMap[r.id] = safeStr(r.fields?.['Item Name'], r.id)
@@ -124,7 +162,6 @@ export default function Deals() {
     }
   }
 
-  // Unique search items for filter bar
   const allItems = useMemo(() => {
     const s = new Set()
     records.forEach(r => {
@@ -134,7 +171,6 @@ export default function Deals() {
     return [...s].sort()
   }, [records, searchItemMap])
 
-  // Filtered list
   const filtered = useMemo(() => {
     return records.filter(r => {
       const score = safeNum(r.fields?.['Deal Score'])
@@ -148,19 +184,15 @@ export default function Deals() {
     })
   }, [records, scoreFilter, itemFilter, searchItemMap])
 
-  // Dismiss a deal
   const dismiss = useCallback(async (record) => {
-    // Optimistically remove
     setRecords(prev => prev.filter(r => r.id !== record.id))
     setDismissedCount(c => c + 1)
+    setSelected(prev => prev?.id === record.id ? null : prev)
 
     const { error } = await updateRecord('matches', record.id, { Dismissed: true }, FBM_BASE_ID)
     if (error) {
       toast.error('Failed to dismiss deal')
-      setRecords(prev => {
-        // Re-insert in roughly the right position (prepend, will re-sort on next load)
-        return [record, ...prev]
-      })
+      setRecords(prev => [record, ...prev])
       setDismissedCount(c => c - 1)
       return
     }
@@ -187,7 +219,6 @@ export default function Deals() {
     )
   }, [])
 
-  // Restore a dismissed deal
   const restore = useCallback(async (record) => {
     setRecords(prev => prev.map(r =>
       r.id === record.id ? { ...r, fields: { ...r.fields, Dismissed: false } } : r
@@ -237,6 +268,16 @@ export default function Deals() {
 
       {/* Filter bar */}
       <div className="space-y-2">
+        {/* Toggle row: Within Range + Available Only */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <ToggleBtn active={withinRange} onClick={() => setWithinRange(v => !v)}>
+            📍 Within Range
+          </ToggleBtn>
+          <ToggleBtn active={availableOnly} onClick={() => setAvailableOnly(v => !v)}>
+            ✅ Available only
+          </ToggleBtn>
+        </div>
+
         {/* Score filters */}
         <div className="flex items-center gap-2 flex-wrap">
           {SCORE_FILTERS.map(f => (
@@ -304,41 +345,69 @@ export default function Deals() {
               showDismissed={showDismissed}
               onDismiss={dismiss}
               onRestore={restore}
+              onSelect={() => setSelected(record)}
             />
           ))}
         </div>
+      )}
+
+      {/* Detail Modal */}
+      {selected && (
+        <DealModal
+          record={selected}
+          searchItemMap={searchItemMap}
+          onClose={() => setSelected(null)}
+          onDismiss={dismiss}
+          onRestore={restore}
+        />
       )}
     </div>
   )
 }
 
+// ── ToggleBtn ──────────────────────────────────────────────────────────────────
+
+function ToggleBtn({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
+        active
+          ? 'bg-emerald-600 text-white border-emerald-600'
+          : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
 // ── DealCard ──────────────────────────────────────────────────────────────────
 
-function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore }) {
+function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore, onSelect }) {
   const f = record.fields || {}
   const [imgError, setImgError] = useState(false)
 
   const score = safeNum(f['Deal Score'])
   const badge = scoreBadge(score)
   const imageUrl = safeStr(f['Image URL'])
-  const url = safeStr(f['URL'])
   const title = safeStr(f['Title'], 'Untitled')
   const priceText = safeStr(f['Price Text'])
-  const price = priceText || (safeNum(f['Price']) != null ? `$${safeNum(f['Price']).toLocaleString()}` : null)
+  const price = safeNum(f['Price'])
+  const prevPrice = safeNum(f['Previous Price'])
+  const displayPrice = priceText || (price != null ? `$${price.toLocaleString()}` : null)
+  const priceDiff = (price != null && prevPrice != null && price !== prevPrice) ? price - prevPrice : null
   const locLine = locationLine(f)
   const withinRange = f['Within Range'] === true
   const date = safeStr(f['Date Found'])
   const isDismissed = f['Dismissed'] === true
-
   const itemId = arr(f['search-items'])[0]
   const itemName = itemId ? searchItemMap[itemId] : null
-
   const showImg = imageUrl && !imgError
 
   function handleCardClick(e) {
-    // Don't navigate if clicking the thumb-down or restore buttons
     if (e.target.closest('[data-action]')) return
-    if (url) window.open(url, '_blank', 'noopener,noreferrer')
+    onSelect()
   }
 
   return (
@@ -363,45 +432,37 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore }
           </div>
         )}
 
-        {/* Score badge */}
         {badge && (
           <div className={`absolute top-2 right-2 ${badge.cls} text-xs font-bold px-2 py-1 rounded-lg shadow`}>
             {badge.label}
           </div>
         )}
 
-        {/* Within Range dot */}
         {withinRange && (
           <div className="absolute top-2 left-2 flex items-center gap-1 bg-white/90 rounded-full px-2 py-0.5 shadow">
             <span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
             <span className="text-xs font-medium text-green-700">In range</span>
           </div>
         )}
-
-        {/* External link overlay hint */}
-        {url && (
-          <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100">
-            <ExternalLink size={14} className="text-white drop-shadow" />
-          </div>
-        )}
       </div>
 
       {/* Content */}
       <div className="p-3 flex flex-col gap-1.5 flex-1">
-        {/* Title */}
         <p className="font-semibold text-gray-900 text-sm leading-snug line-clamp-2">{title}</p>
 
-        {/* Price */}
-        {price && (
-          <p className="text-lg font-bold text-gray-900 leading-none">{price}</p>
+        {displayPrice && (
+          <div>
+            <p className="text-lg font-bold text-gray-900 leading-none">{displayPrice}</p>
+            {priceDiff !== null && (
+              <p className={`text-xs mt-0.5 ${priceDiff < 0 ? 'text-green-600' : 'text-orange-500'}`}>
+                {priceDiff < 0 ? '📉 Price drop' : '📈 Price up'}
+              </p>
+            )}
+          </div>
         )}
 
-        {/* Location + hub */}
-        {locLine && (
-          <p className="text-xs text-gray-500 leading-snug">{locLine}</p>
-        )}
+        {locLine && <p className="text-xs text-gray-500 leading-snug">{locLine}</p>}
 
-        {/* Footer row: item tag + date + action button */}
         <div className="flex items-center justify-between gap-2 mt-auto pt-1">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             {itemName && (
@@ -414,7 +475,6 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore }
             )}
           </div>
 
-          {/* Thumb-down / Restore */}
           {isDismissed ? (
             <button
               data-action="restore"
@@ -432,6 +492,186 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore }
               className="flex-shrink-0 p-1.5 text-gray-300 hover:text-red-400 transition-colors"
             >
               <ThumbsDown size={15} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── DealModal ─────────────────────────────────────────────────────────────────
+
+function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
+  const f = record.fields || {}
+  const [imgError, setImgError] = useState(false)
+
+  const title = safeStr(f['Title'], 'Untitled')
+  const priceText = safeStr(f['Price Text'])
+  const price = safeNum(f['Price'])
+  const prevPrice = safeNum(f['Previous Price'])
+  const displayPrice = priceText || (price != null ? `$${price.toLocaleString()}` : null)
+  const priceDiff = (price != null && prevPrice != null && price !== prevPrice) ? price - prevPrice : null
+  const status = safeStr(f['Status'])
+  const score = safeNum(f['Deal Score'])
+  const scoreNotes = safeStr(f['Score Notes'])
+  const description = safeStr(f['Description'])
+  const url = safeStr(f['URL'])
+  const imageUrl = safeStr(f['Image URL'])
+  const date = safeStr(f['Date Found'])
+  const hub = safeStr(f['Nearest Hub'])
+  const dist = safeNum(f['Distance (miles)'])
+  const driveTime = safeNum(f['Drive Time (min)'])
+  const seller = safeStr(f['Seller'])
+  const isDismissed = f['Dismissed'] === true
+  const itemId = arr(f['search-items'])[0]
+  const itemName = itemId ? searchItemMap[itemId] : null
+
+  const STATUS_CLS = {
+    Available: 'bg-green-100 text-green-700',
+    Sold: 'bg-red-100 text-red-700',
+    'Price Drop': 'bg-yellow-100 text-yellow-700',
+    Unknown: 'bg-gray-100 text-gray-600',
+  }
+  const statusCls = status ? STATUS_CLS[status] : null
+
+  const logisticsParts = []
+  if (hub) logisticsParts.push(hub)
+  if (dist != null) logisticsParts.push(`${dist} mi`)
+  if (driveTime != null) logisticsParts.push(`~${driveTime} min drive`)
+  const logisticsLine = logisticsParts.join(' · ')
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-gray-200 flex-shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <h2 className="font-semibold text-gray-900 text-base leading-snug">{title}</h2>
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {displayPrice && (
+                  <div className="flex items-center gap-2">
+                    {priceDiff !== null && (
+                      <span className="text-sm text-gray-400 line-through">
+                        ${prevPrice.toLocaleString()}
+                      </span>
+                    )}
+                    <span className="text-xl font-bold text-gray-900">{displayPrice}</span>
+                    {priceDiff !== null && (
+                      <span className={`text-sm font-medium ${priceDiff < 0 ? 'text-green-600' : 'text-orange-500'}`}>
+                        {priceDiff < 0 ? '📉' : '📈'}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {status && statusCls && (
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusCls}`}>{status}</span>
+                )}
+                {itemName && (
+                  <span className="bg-blue-50 text-blue-700 text-xs font-medium px-2 py-0.5 rounded-full">{itemName}</span>
+                )}
+              </div>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-700 flex-shrink-0 mt-0.5">
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Image + FB link */}
+          {(imageUrl || url) && (
+            <div className="border-b border-gray-100">
+              {imageUrl && !imgError && (
+                <a href={url || imageUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  <img
+                    src={imageUrl}
+                    alt={title}
+                    onError={() => setImgError(true)}
+                    className="w-full object-cover max-h-72"
+                  />
+                </a>
+              )}
+              {url && (
+                <div className="px-5 py-3">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium text-blue-600 hover:underline"
+                  >
+                    View on Facebook →
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="px-5 py-4 space-y-5">
+            {/* AI Analysis */}
+            {score != null && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">AI Analysis</p>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className={`text-4xl font-black ${scoreTextColor(score)}`}>{score}</span>
+                  <div>
+                    <p className={`font-semibold ${scoreTextColor(score)}`}>{scoreLabel(score)}</p>
+                    <p className="text-xs text-gray-400">out of 10</p>
+                  </div>
+                </div>
+                {scoreNotes && (
+                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{scoreNotes}</p>
+                )}
+              </div>
+            )}
+
+            {/* Description */}
+            {description && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Description</p>
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{description}</p>
+              </div>
+            )}
+
+            {/* Logistics */}
+            {(logisticsLine || seller) && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Logistics</p>
+                {logisticsLine && <p className="text-sm text-gray-700">{logisticsLine}</p>}
+                {seller && <p className="text-sm text-gray-500 mt-0.5">Seller: {seller}</p>}
+              </div>
+            )}
+
+            {/* Found */}
+            {date && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Found</p>
+                <p className="text-sm text-gray-700">{relativeTime(date)} ({fmtFullDate(date)})</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer actions */}
+        <div className="px-5 py-3 border-t border-gray-100 flex-shrink-0">
+          {isDismissed ? (
+            <button
+              onClick={() => { onRestore(record); onClose() }}
+              className="flex items-center gap-2 text-sm text-green-600 hover:text-green-800 font-medium"
+            >
+              <RotateCcw size={15} /> Restore deal
+            </button>
+          ) : (
+            <button
+              onClick={() => { onDismiss(record); onClose() }}
+              className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-500 font-medium"
+            >
+              <ThumbsDown size={15} /> Dismiss deal
             </button>
           )}
         </div>
