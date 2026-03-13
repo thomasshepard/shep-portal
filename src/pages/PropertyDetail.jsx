@@ -109,7 +109,7 @@ export default function PropertyDetail() {
         isAdmin && loanIds.length > 0
           ? fetchAllRecords('Current Loans', { filterByFormula: recordIdFilter(loanIds) }, PM_BASE_ID)
           : Promise.resolve({ data: [] }),
-        isAdmin && billIds.length > 0
+        (isAdmin || isVA) && billIds.length > 0
           ? fetchAllRecords('Bills Payment', { filterByFormula: recordIdFilter(billIds) }, PM_BASE_ID)
           : Promise.resolve({ data: [] }),
       ])
@@ -183,6 +183,23 @@ export default function PropertyDetail() {
       if (data) setInvoicePayments(prev => [...prev, data])
     }
     setPaymentModal(null)
+  }
+
+  async function handleMoveOut(lease, unit) {
+    if (!confirm(`Move out tenant and mark unit as Vacant?\n\nThis will:\n• Set the lease status to Closed\n• Set the unit status to Vacant\n\nThis cannot be undone.`)) return
+
+    const [leaseRes, unitRes] = await Promise.all([
+      updateRecord('Lease Agreements', lease.id, { Status: 'Closed' }, PM_BASE_ID),
+      updateRecord('Rental Units', unit.id, { Status: 'Vacant' }, PM_BASE_ID),
+    ])
+
+    if (leaseRes.error || unitRes.error) {
+      toast.error('Move out failed: ' + (leaseRes.error || unitRes.error))
+      return
+    }
+
+    toast.success('Tenant moved out — unit marked Vacant')
+    load()
   }
 
   async function handleMaintSave(fields, recordId) {
@@ -405,9 +422,8 @@ export default function PropertyDetail() {
                         <Edit2 size={12} /> Edit Tenant
                       </button>
                       <button
-                        disabled
-                        title="Coming soon"
-                        className="flex items-center gap-1 text-xs text-gray-400 border border-gray-200 rounded-lg px-2 py-1.5 cursor-not-allowed"
+                        onClick={() => handleMoveOut(activeLease, unit)}
+                        className="flex items-center gap-1 text-xs text-red-500 border border-red-200 rounded-lg px-2 py-1.5 hover:bg-red-50"
                       >
                         Move Out
                       </button>
@@ -727,8 +743,8 @@ export default function PropertyDetail() {
         )}
       </div>
 
-      {/* Bills — Admin Only */}
-      {isAdmin && (
+      {/* Bills — Admin + VA */}
+      {(isAdmin || isVA) && (
         <div className="bg-white rounded-xl border border-gray-200">
           <button
             onClick={() => setBillsOpen(o => !o)}
