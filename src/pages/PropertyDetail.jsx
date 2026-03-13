@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PaymentForm from '../components/PaymentForm'
 import MaintenanceForm from '../components/MaintenanceForm'
+import AddTenantWorkflow from '../components/AddTenantWorkflow'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -49,6 +50,7 @@ export default function PropertyDetail() {
   const [paymentModal, setPaymentModal] = useState(null)
   const [maintModal, setMaintModal] = useState(null)
   const [expandedMaint, setExpandedMaint] = useState(new Set())
+  const [addTenantModal, setAddTenantModal] = useState(null) // null | 'picker' | unit record
 
   useEffect(() => { load() }, [id])
 
@@ -168,6 +170,12 @@ export default function PropertyDetail() {
   const leaseInvMap = {}
   leaseInvoices.forEach(li => { leaseInvMap[li.id] = li })
 
+  const vacantUnits = rentalUnits.filter(u => {
+    const unitLeases = (u.fields?.['Lease Agreements'] || []).map(lid => leaseMap[lid]).filter(Boolean)
+    const hasActive = unitLeases.some(l => (l.fields?.Status || '').toLowerCase() === 'active' || l.fields?.['Lease Active'] === 1)
+    return !hasActive && (u.fields?.Status || '').toLowerCase() !== 'occupied'
+  })
+
   function toggleMaint(mid) {
     setExpandedMaint(prev => {
       const next = new Set(prev)
@@ -271,7 +279,17 @@ export default function PropertyDetail() {
 
       {/* Units & Tenants */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h2 className="font-semibold text-gray-800 mb-4">Units & Tenants</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-gray-800">Units & Tenants</h2>
+          {isAdmin && (
+            <button
+              onClick={() => setAddTenantModal('picker')}
+              className="flex items-center gap-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"
+            >
+              <Plus size={14} /> Add Tenant
+            </button>
+          )}
+        </div>
         <div className="space-y-4">
           {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
           {rentalUnits.map(unit => {
@@ -283,9 +301,19 @@ export default function PropertyDetail() {
             if (!isOccupied) {
               return (
                 <div key={unit.id} className="border border-gray-100 rounded-lg p-4 bg-gray-50">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-700">{uf.Name || 'Unit'}</span>
-                    <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">VACANT</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-700">{uf.Name || 'Unit'}</span>
+                      <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">VACANT</span>
+                    </div>
+                    {isAdmin && (
+                      <button
+                        onClick={() => setAddTenantModal(unit)}
+                        className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded-md px-2 py-1 hover:bg-blue-50"
+                      >
+                        <Plus size={12} /> Add Tenant
+                      </button>
+                    )}
                   </div>
                   {uf['Estimated Income'] > 0 && (
                     <p className="text-sm text-gray-500 mt-1">Est. Income: {fmtCurrency(uf['Estimated Income'])}</p>
@@ -725,6 +753,17 @@ export default function PropertyDetail() {
           record={maintModal}
           onSave={handleMaintSave}
           onClose={() => setMaintModal(null)}
+        />
+      )}
+
+      {addTenantModal && (
+        <AddTenantWorkflow
+          propertyId={id}
+          propertyAddress={f.Address || ''}
+          unit={addTenantModal === 'picker' ? null : addTenantModal}
+          vacantUnits={vacantUnits}
+          onClose={() => setAddTenantModal(null)}
+          onSuccess={load}
         />
       )}
     </div>
