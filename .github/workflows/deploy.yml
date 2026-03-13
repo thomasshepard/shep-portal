@@ -38,6 +38,7 @@ jobs:
           VITE_AIRTABLE_PAT: ${{ secrets.VITE_AIRTABLE_PAT }}
           VITE_AIRTABLE_BASE_ID: ${{ secrets.VITE_AIRTABLE_BASE_ID }}
           VITE_AIRTABLE_CHICKENS_BASE_ID: ${{ secrets.VITE_AIRTABLE_CHICKENS_BASE_ID }}
+          VITE_AIRTABLE_PM_BASE_ID: ${{ secrets.VITE_AIRTABLE_PM_BASE_ID }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

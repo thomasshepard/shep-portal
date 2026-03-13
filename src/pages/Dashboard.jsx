@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Building2, Activity, FolderOpen } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { fetchAllRecords, PM_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
@@ -14,7 +15,7 @@ export default function Dashboard() {
     async function load() {
       try {
         const [{ count: propCount }, { count: fileCount }, { data: logs }] = await Promise.all([
-          supabase.from('properties').select('*', { count: 'exact', head: true }),
+          fetchAllRecords('Property', { fields: ['Address'] }, PM_BASE_ID).then(r => ({ count: r.data?.length || 0 })),
           supabase.storage.from('shared-files').list('').then(r => ({ count: r.data?.length || 0 })),
           supabase
             .from('access_logs')

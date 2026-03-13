@@ -1,135 +1,750 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, FileText, Image, Download } from 'lucide-react'
-import { supabase } from '../lib/supabase'
-import { useAccessLog } from '../hooks/useAccessLog'
+import { useParams, Link } from 'react-router-dom'
+import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail } from 'lucide-react'
+import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtPercent, fmtDate, PM_BASE_ID } from '../lib/airtable'
+import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
+import PaymentForm from '../components/PaymentForm'
+import MaintenanceForm from '../components/MaintenanceForm'
 import toast from 'react-hot-toast'
 
-const statusColors = {
-  active: 'bg-green-100 text-green-700',
-  rehab: 'bg-yellow-100 text-yellow-700',
-  listed: 'bg-blue-100 text-blue-700',
-  sold: 'bg-gray-100 text-gray-600',
-  pending: 'bg-orange-100 text-orange-700',
+const STATUS_COLORS = {
+  'Active': 'bg-green-100 text-green-700',
+  'Occupied': 'bg-green-100 text-green-700',
+  'Vacant': 'bg-gray-100 text-gray-600',
+  'Rehab': 'bg-orange-100 text-orange-700',
+  'Listed': 'bg-blue-100 text-blue-700',
+  'Sold': 'bg-gray-100 text-gray-500',
+  'Pending': 'bg-yellow-100 text-yellow-700',
 }
 
-function fmt(val) {
-  if (!val) return '—'
-  return '$' + Number(val).toLocaleString()
+function recordIdFilter(ids) {
+  if (!ids || ids.length === 0) return 'FALSE()'
+  if (ids.length === 1) return `RECORD_ID()="${ids[0]}"`
+  return `OR(${ids.map(id => `RECORD_ID()="${id}"`).join(',')})`
 }
+
+const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 
 export default function PropertyDetail() {
   const { id } = useParams()
-  const navigate = useNavigate()
-  const { log } = useAccessLog()
-  const [property, setProperty] = useState(null)
-  const [photos, setPhotos] = useState([])
-  const [docs, setDocs] = useState([])
+  const { isAdmin, isVA } = useAuth()
   const [loading, setLoading] = useState(true)
+  const [property, setProperty] = useState(null)
+  const [rentalUnits, setRentalUnits] = useState([])
+  const [leases, setLeases] = useState([])
+  const [tenants, setTenants] = useState([])
+  const [leaseInvoices, setLeaseInvoices] = useState([])
+  const [invoicePayments, setInvoicePayments] = useState([])
+  const [maintenance, setMaintenance] = useState([])
+  const [utilities, setUtilities] = useState([])
+  const [bills, setBills] = useState([])
+  const [loans, setLoans] = useState([])
 
-  useEffect(() => {
-    async function load() {
-      const { data, error } = await supabase.from('properties').select('*').eq('id', id).single()
-      if (error) { toast.error('Property not found'); navigate('/properties'); return }
-      setProperty(data)
+  const [editingProperty, setEditingProperty] = useState(false)
+  const [editForm, setEditForm] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [utilitiesOpen, setUtilitiesOpen] = useState(false)
+  const [billsOpen, setBillsOpen] = useState(false)
+  const [paymentModal, setPaymentModal] = useState(null)
+  const [maintModal, setMaintModal] = useState(null)
+  const [expandedMaint, setExpandedMaint] = useState(new Set())
 
-      const [{ data: photoFiles }, { data: docFiles }] = await Promise.all([
-        supabase.storage.from('property-photos').list(String(id)),
-        supabase.storage.from('property-docs').list(String(id)),
+  useEffect(() => { load() }, [id])
+
+  async function load() {
+    setLoading(true)
+    try {
+      const propRes = await fetchAllRecords('Property', { filterByFormula: `RECORD_ID()="${id}"` }, PM_BASE_ID)
+      if (propRes.error) throw new Error(propRes.error)
+      const prop = propRes.data?.[0]
+      if (!prop) throw new Error('Property not found')
+      setProperty(prop)
+
+      const f = prop.fields || {}
+      const unitIds = f['Rental Units'] || []
+      const loanIds = f['Current Loans'] || []
+      const billIds = f['Bills Payment'] || []
+      const utilIds = f['Utilities'] || []
+      const invPayIds = f['Invoices Payments'] || []
+
+      const [unitsRes, invPayRes, maintRes, utilRes, loansRes, billsRes] = await Promise.all([
+        unitIds.length > 0
+          ? fetchAllRecords('Rental Units', { filterByFormula: recordIdFilter(unitIds) }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
+        invPayIds.length > 0
+          ? fetchAllRecords('Invoices Payments', { filterByFormula: recordIdFilter(invPayIds) }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
+        fetchAllRecords('Maintenance Requests', { filterByFormula: `FIND("${id}", ARRAYJOIN({Property}))` }, PM_BASE_ID),
+        utilIds.length > 0
+          ? fetchAllRecords('Utilities', { filterByFormula: recordIdFilter(utilIds) }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
+        isAdmin && loanIds.length > 0
+          ? fetchAllRecords('Current Loans', { filterByFormula: recordIdFilter(loanIds) }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
+        isAdmin && billIds.length > 0
+          ? fetchAllRecords('Bills Payment', { filterByFormula: recordIdFilter(billIds) }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
       ])
-      setPhotos(photoFiles || [])
-      setDocs(docFiles || [])
-      setLoading(false)
-    }
-    load()
-  }, [id])
 
-  async function downloadDoc(name) {
-    const { data } = await supabase.storage.from('property-docs').createSignedUrl(`${id}/${name}`, 60)
-    if (data?.signedUrl) {
-      await log('file_download', `/properties/${id}`, { file: name })
-      window.open(data.signedUrl, '_blank')
+      const units = unitsRes.data || []
+      setRentalUnits(units)
+      setInvoicePayments(invPayRes.data || [])
+      setMaintenance(maintRes.data || [])
+      setUtilities(utilRes.data || [])
+      setLoans(loansRes.data || [])
+      setBills(billsRes.data || [])
+
+      const leaseIds = [...new Set(units.flatMap(u => u.fields?.['Lease Agreements'] || []))]
+      if (leaseIds.length > 0) {
+        const leasesRes = await fetchAllRecords('Lease Agreements', { filterByFormula: recordIdFilter(leaseIds) }, PM_BASE_ID)
+        const leasesData = leasesRes.data || []
+        setLeases(leasesData)
+
+        const tenantIds = [...new Set(leasesData.flatMap(l => l.fields?.['Tenant Management'] || []))]
+        const leaseInvIds = [...new Set(leasesData.flatMap(l => l.fields?.['Lease Invoice'] || []))]
+        const [tenantsRes, leaseInvRes] = await Promise.all([
+          tenantIds.length > 0
+            ? fetchAllRecords('Tenants', { filterByFormula: recordIdFilter(tenantIds) }, PM_BASE_ID)
+            : Promise.resolve({ data: [] }),
+          leaseInvIds.length > 0
+            ? fetchAllRecords('Lease Invoice', { filterByFormula: recordIdFilter(leaseInvIds) }, PM_BASE_ID)
+            : Promise.resolve({ data: [] }),
+        ])
+        setTenants(tenantsRes.data || [])
+        setLeaseInvoices(leaseInvRes.data || [])
+      }
+    } catch (e) {
+      toast.error('Failed to load property: ' + e.message)
+    } finally {
+      setLoading(false)
     }
   }
 
+  async function savePropertyEdit() {
+    setSaving(true)
+    const { error } = await updateRecord('Property', id, editForm, PM_BASE_ID)
+    if (error) {
+      toast.error('Failed to save: ' + error)
+    } else {
+      toast.success('Property updated')
+      setProperty(prev => ({ ...prev, fields: { ...prev.fields, ...editForm } }))
+      setEditingProperty(false)
+    }
+    setSaving(false)
+  }
+
+  async function handlePaymentSave(fields, recordId) {
+    if (recordId) {
+      const { error } = await updateRecord('Invoices Payments', recordId, fields, PM_BASE_ID)
+      if (error) { toast.error('Failed to update: ' + error); return }
+      toast.success('Payment updated')
+      setInvoicePayments(prev => prev.map(p => p.id === recordId ? { ...p, fields: { ...p.fields, ...fields } } : p))
+    } else {
+      const { data, error } = await createRecord('Invoices Payments', { ...fields, Property: [id] }, PM_BASE_ID)
+      if (error) { toast.error('Failed to create: ' + error); return }
+      toast.success('Payment added')
+      if (data) setInvoicePayments(prev => [...prev, data])
+    }
+    setPaymentModal(null)
+  }
+
+  async function handleMaintSave(fields, recordId) {
+    const { error } = await updateRecord('Maintenance Requests', recordId, fields, PM_BASE_ID)
+    if (error) { toast.error('Failed to update: ' + error); return }
+    toast.success('Maintenance updated')
+    setMaintenance(prev => prev.map(m => m.id === recordId ? { ...m, fields: { ...m.fields, ...fields } } : m))
+    setMaintModal(null)
+  }
+
   if (loading) return <LoadingSpinner />
-  if (!property) return null
+  if (!property) return <div className="p-8 text-center text-gray-500">Property not found.</div>
+
+  const f = property.fields || {}
+  const tenantMap = {}
+  tenants.forEach(t => { tenantMap[t.id] = t })
+  const leaseMap = {}
+  leases.forEach(l => { leaseMap[l.id] = l })
+  const leaseInvMap = {}
+  leaseInvoices.forEach(li => { leaseInvMap[li.id] = li })
+
+  function toggleMaint(mid) {
+    setExpandedMaint(prev => {
+      const next = new Set(prev)
+      next.has(mid) ? next.delete(mid) : next.add(mid)
+      return next
+    })
+  }
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <button onClick={() => navigate('/properties')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800">
-        <ArrowLeft size={16} /> Back to Properties
-      </button>
-
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{property.name}</h1>
-            <p className="text-gray-500 text-sm mt-1">{property.address}{property.city ? `, ${property.city}` : ''}</p>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <Link to="/properties" className="text-sm text-blue-600 hover:underline">← Properties</Link>
+          <h1 className="text-2xl font-bold text-gray-900 mt-1">{f.Address || 'Property'}</h1>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            {f['Investment Type'] && (
+              <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{f['Investment Type']}</span>
+            )}
+            {f.Status && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[f.Status] || 'bg-gray-100 text-gray-600'}`}>{f.Status}</span>
+            )}
+            {f['Type of Property'] && (
+              <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{f['Type of Property']}</span>
+            )}
           </div>
-          <span className={`text-sm font-medium px-3 py-1 rounded-full capitalize ${statusColors[property.status] || 'bg-gray-100 text-gray-600'}`}>
-            {property.status}
-          </span>
+        </div>
+        {isAdmin && (
+          <button
+            onClick={() => { setEditForm({ Status: f.Status || '', 'Est Market Value': f['Est Market Value'] || '', Notes: f.Notes || '' }); setEditingProperty(true) }}
+            className="flex items-center gap-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg px-3 py-2 hover:bg-gray-50 flex-shrink-0"
+          >
+            <Edit2 size={14} /> Edit
+          </button>
+        )}
+      </div>
+
+      {/* Financial Overview — Admin Only */}
+      {isAdmin && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 className="font-semibold text-gray-800 mb-4">Financial Overview</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            <FinRow label="Market Value" value={fmtCurrency(f['Est Market Value'])} />
+            <FinRow label="Purchase Price" value={fmtCurrency(f['Purchase Price'])} />
+            <FinRow label="Date Acquired" value={fmtDate(f['Date Acquired'])} />
+            <FinRow label="Mortgage Amount" value={fmtCurrency(f['Mortgage Amount'])} />
+            <FinRow label="Equity" value={fmtCurrency(f['Equity'])} />
+            <FinRow label="LTV" value={f['LTV'] != null ? fmtPercent(f['LTV'] * 100) : '—'} />
+            <FinRow label="Return on Equity" value={f['Return on Equity'] != null ? fmtPercent(f['Return on Equity'] * 100) : '—'} />
+            <FinRow label="Monthly PI" value={fmtCurrency(f['Monthly PI (from Current Loans)'])} />
+            <FinRow label="Est. Revenue" value={fmtCurrency(f['Estimated Revenue'])} />
+            <FinRow label="Cash Flow" value={fmtCurrency((f['Estimated Revenue'] || 0) - (f['Monthly PI (from Current Loans)'] || 0))} />
+            <FinRow label="HELOC (75%)" value={fmtCurrency(f['HELOC (75%)'])} />
+            <FinRow label="HELOC (80%)" value={fmtCurrency(f['HELOC (80%)'])} />
+            <FinRow label="Selling Cost" value={fmtCurrency(f['Selling Cost'])} />
+            <FinRow label="Accessible Equity" value={fmtCurrency(f['Accessible Equity (if sold)'])} />
+            <FinRow label="2024 Taxes" value={fmtCurrency(f['2024 Taxes'])} />
+            <FinRow label="Title In Name of" value={f['Title In Name of'] || '—'} />
+          </div>
+          {f.Notes && (
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs font-medium text-gray-500 mb-1">Notes</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{f.Notes}</p>
+            </div>
+          )}
+          {loans.length > 0 && (
+            <div className="mt-4">
+              <p className="text-sm font-medium text-gray-700 mb-2">Current Loans</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Name</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Current Amt</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Monthly PI</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Rate</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Maturity</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {loans.map(loan => {
+                      const lf = loan.fields || {}
+                      const rate = lf.Rate != null ? (lf.Rate < 1 ? fmtPercent(lf.Rate * 100) : fmtPercent(lf.Rate)) : '—'
+                      return (
+                        <tr key={loan.id}>
+                          <td className="px-3 py-2">{lf.Name || '—'}</td>
+                          <td className="px-3 py-2 text-right">{fmtCurrency(lf['Current Amount'])}</td>
+                          <td className="px-3 py-2 text-right">{fmtCurrency(lf['Monthly PI'])}</td>
+                          <td className="px-3 py-2">{rate} {lf['Rate Fixed/Variable'] || ''}</td>
+                          <td className="px-3 py-2">{fmtDate(lf['Maturity Date'])}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Units & Tenants */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 className="font-semibold text-gray-800 mb-4">Units & Tenants</h2>
+        <div className="space-y-4">
+          {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
+          {rentalUnits.map(unit => {
+            const uf = unit.fields || {}
+            const unitLeases = (uf['Lease Agreements'] || []).map(lid => leaseMap[lid]).filter(Boolean)
+            const activeLease = unitLeases.find(l => (l.fields?.Status || '').toLowerCase() === 'active' || l.fields?.['Lease Active'] === 1)
+            const isOccupied = !!activeLease || (uf.Status || '').toLowerCase() === 'occupied'
+
+            if (!isOccupied) {
+              return (
+                <div key={unit.id} className="border border-gray-100 rounded-lg p-4 bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-700">{uf.Name || 'Unit'}</span>
+                    <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">VACANT</span>
+                  </div>
+                  {uf['Estimated Income'] > 0 && (
+                    <p className="text-sm text-gray-500 mt-1">Est. Income: {fmtCurrency(uf['Estimated Income'])}</p>
+                  )}
+                  {uf.Notes && <p className="text-xs text-gray-400 mt-1">{uf.Notes}</p>}
+                </div>
+              )
+            }
+
+            const lf = activeLease.fields || {}
+            const tenant = tenantMap[(lf['Tenant Management'] || [])[0]]
+            const tf = tenant?.fields || {}
+            const lifecycle = (lf['Tenant Lifecycle (from Tenant Management)'] || [])[0] || tf['Tenant Lifecycle']
+            const latestLeaseInv = leaseInvMap[(lf['Lease Invoice'] || []).at(-1)]
+
+            return (
+              <div key={unit.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-gray-800">{uf.Name || 'Unit'}</span>
+                      {lifecycle && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${lifecycle === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {lifecycle}
+                        </span>
+                      )}
+                    </div>
+                    {tenant && <p className="text-sm font-medium text-gray-700 mt-0.5">{tf.Name}</p>}
+                  </div>
+                  {lf['Google Drive'] && (
+                    <a href={lf['Google Drive']} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1 flex-shrink-0">
+                      <ExternalLink size={12} /> Lease Doc
+                    </a>
+                  )}
+                </div>
+
+                {tenant && (
+                  <div className="flex items-center gap-4 text-sm mb-3 flex-wrap">
+                    {tf.Email && (
+                      <a href={`mailto:${tf.Email}`} className="flex items-center gap-1 text-blue-600 hover:underline">
+                        <Mail size={13} /> {tf.Email}
+                      </a>
+                    )}
+                    {tf['Phone number'] && (
+                      <a href={`tel:${tf['Phone number']}`} className="flex items-center gap-1 text-blue-600 hover:underline">
+                        <Phone size={13} /> {tf['Phone number']}
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-gray-400">Rent</p>
+                    <p className="font-medium">{fmtCurrency(lf['Rent Amount'] || lf['Lease Amount'])}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Lease Start</p>
+                    <p className="font-medium">{fmtDate(lf['Start Date'])}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Lease End</p>
+                    <p className="font-medium">{fmtDate(lf['End Date'])}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Mo. Remaining</p>
+                    <p className="font-medium">{lf['Months Remaining on Lease'] ?? '—'}</p>
+                  </div>
+                  {lf['Pet Rent'] > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400">Pet Rent</p>
+                      <p className="font-medium">{fmtCurrency(lf['Pet Rent'])}</p>
+                    </div>
+                  )}
+                  {lf['Other Fees to Tenant'] > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-400">Other Fees</p>
+                      <p className="font-medium">{fmtCurrency(lf['Other Fees to Tenant'])}</p>
+                    </div>
+                  )}
+                  {lf['Managed by'] && (
+                    <div>
+                      <p className="text-xs text-gray-400">Managed By</p>
+                      <p className="font-medium">{lf['Managed by']}</p>
+                    </div>
+                  )}
+                  {lf.Terms && (
+                    <div>
+                      <p className="text-xs text-gray-400">Terms</p>
+                      <p className="font-medium">{lf.Terms}</p>
+                    </div>
+                  )}
+                </div>
+
+                {!isVA && tf['Stripe Customer ID'] && (
+                  <p className="text-xs text-gray-400 mt-2">Stripe Customer: {tf['Stripe Customer ID']}</p>
+                )}
+
+                {latestLeaseInv && (
+                  <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-3 text-xs flex-wrap">
+                    <span className="text-gray-400">Latest Invoice:</span>
+                    <span className={`px-1.5 py-0.5 rounded-full ${latestLeaseInv.fields?.Status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                      {latestLeaseInv.fields?.Status}
+                    </span>
+                    <span className="text-gray-500">{fmtDate(latestLeaseInv.fields?.['Due Date'])}</span>
+                    {latestLeaseInv.fields?.['Link to Invoice'] && (
+                      <a href={latestLeaseInv.fields['Link to Invoice']} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">
+                        View <ExternalLink size={10} />
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Invoices & Payments */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-gray-800">Invoices & Payments</h2>
+          <button
+            onClick={() => setPaymentModal('new')}
+            className="flex items-center gap-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50"
+          >
+            <Plus size={14} /> Add Payment
+          </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-          <Detail label="Purchase Price" value={fmt(property.purchase_price)} />
-          <Detail label="Rehab Budget" value={fmt(property.rehab_budget)} />
-          <Detail label="ARV" value={fmt(property.arv)} />
-        </div>
+        {leaseInvoices.length > 0 && (
+          <div className="mb-5">
+            <p className="text-xs font-medium text-gray-500 mb-2">Lease Invoices (Stripe)</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Invoice ID</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Due Date</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Status</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {leaseInvoices.map(inv => (
+                    <tr key={inv.id}>
+                      <td className="px-3 py-2 font-mono text-xs text-gray-600">{inv.fields?.['Stripe Invoice ID'] || '—'}</td>
+                      <td className="px-3 py-2">{fmtDate(inv.fields?.['Due Date'])}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-1.5 py-0.5 rounded-full text-xs ${inv.fields?.Status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                          {inv.fields?.Status || '—'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        {inv.fields?.['Link to Invoice'] && (
+                          <a href={inv.fields['Link to Invoice']} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                            <ExternalLink size={13} />
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
-        {property.notes && (
-          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-            <p className="text-sm text-gray-700 whitespace-pre-wrap">{property.notes}</p>
+        <div>
+          <p className="text-xs font-medium text-gray-500 mb-2">Payment Records</p>
+          {invoicePayments.length === 0 ? (
+            <p className="text-sm text-gray-500">No payment records.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Name</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Month</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Due</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Paid</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Amount</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Status</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {invoicePayments.map(p => {
+                    const pf = p.fields || {}
+                    const sc = pf.Status === 'Paid' ? 'bg-green-100 text-green-700' : pf.Status === 'Late' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+                    return (
+                      <tr key={p.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium text-gray-700">{pf.Name || '—'}</td>
+                        <td className="px-3 py-2 text-gray-500">{pf['Month Due'] || '—'}</td>
+                        <td className="px-3 py-2 text-gray-500">{fmtDate(pf['Due Date'])}</td>
+                        <td className="px-3 py-2 text-gray-500">{fmtDate(pf['Date of Payment'])}</td>
+                        <td className="px-3 py-2 text-right font-medium">{fmtCurrency(pf['Invoice Amount'])}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${sc}`}>{pf.Status || '—'}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <button onClick={() => setPaymentModal(p)} className="text-gray-400 hover:text-gray-700">
+                            <Edit2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Maintenance */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 className="font-semibold text-gray-800 mb-4">Maintenance Requests</h2>
+        {maintenance.length === 0 ? (
+          <p className="text-sm text-gray-500">No maintenance requests.</p>
+        ) : (
+          <div className="space-y-2">
+            {maintenance.map(m => {
+              const mf = m.fields || {}
+              const expanded = expandedMaint.has(m.id)
+              const ms = (mf.Status || '').toLowerCase()
+              const sc = ms.includes('complet') || ms.includes('resolved')
+                ? 'bg-green-100 text-green-700'
+                : ms.includes('progress')
+                ? 'bg-blue-100 text-blue-700'
+                : ms.includes('emergency') || ms.includes('urgent')
+                ? 'bg-red-100 text-red-700'
+                : 'bg-yellow-100 text-yellow-700'
+              return (
+                <div key={m.id} className="border border-gray-100 rounded-lg overflow-hidden">
+                  <div
+                    className="flex items-start justify-between gap-3 p-3 cursor-pointer hover:bg-gray-50"
+                    onClick={() => toggleMaint(m.id)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-gray-800 text-sm">{mf.Name || '—'}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-xs ${sc}`}>{mf.Status || 'Open'}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5 flex-wrap">
+                        {mf.Date && <span>{fmtDate(mf.Date)}</span>}
+                        {mf.Address && <span>{mf.Address}</span>}
+                        {mf['Estimated Cost'] > 0 && <span>Est: {fmtCurrency(mf['Estimated Cost'])}</span>}
+                        {mf['Resolution Estimate'] && <span>Resolve by: {fmtDate(mf['Resolution Estimate'])}</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={e => { e.stopPropagation(); setMaintModal(m) }}
+                        className="text-gray-400 hover:text-gray-700"
+                        title="Update status"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                      {expanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                    </div>
+                  </div>
+                  {expanded && (
+                    <div className="border-t border-gray-100 p-3 bg-gray-50 text-sm space-y-2">
+                      {mf['Request Notes'] && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-500">Request Notes</p>
+                          <p className="text-gray-700 whitespace-pre-wrap">{mf['Request Notes']}</p>
+                        </div>
+                      )}
+                      {mf.Resolution && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-500">Resolution</p>
+                          <p className="text-gray-700 whitespace-pre-wrap">{mf.Resolution}</p>
+                        </div>
+                      )}
+                      {mf['Contact Phone'] && (
+                        <p className="text-xs text-gray-500">
+                          Contact:{' '}
+                          <a href={`tel:${mf['Contact Phone']}`} className="text-blue-600">{mf['Contact Phone']}</a>
+                          {mf['Contact Email'] && (
+                            <> / <a href={`mailto:${mf['Contact Email']}`} className="text-blue-600">{mf['Contact Email']}</a></>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
 
-      {/* Photos */}
-      {photos.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="font-semibold text-gray-800 mb-4 flex items-center gap-2"><Image size={18} /> Photos</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {photos.map(photo => {
-              const { data } = supabase.storage.from('property-photos').getPublicUrl(`${id}/${photo.name}`)
-              return (
-                <a key={photo.name} href={data.publicUrl} target="_blank" rel="noreferrer">
-                  <img src={data.publicUrl} alt={photo.name} className="w-full h-36 object-cover rounded-lg hover:opacity-90 transition-opacity" />
-                </a>
-              )
-            })}
+      {/* Utilities */}
+      <div className="bg-white rounded-xl border border-gray-200">
+        <button
+          onClick={() => setUtilitiesOpen(o => !o)}
+          className="w-full flex items-center justify-between px-5 py-3 text-left"
+        >
+          <h2 className="font-semibold text-gray-800">Utilities ({utilities.length})</h2>
+          {utilitiesOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+        {utilitiesOpen && (
+          <div className="border-t border-gray-100">
+            {utilities.length === 0 ? (
+              <p className="px-5 py-3 text-sm text-gray-500">No utilities.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Type</th>
+                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Who Pays</th>
+                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Billing Cycle</th>
+                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Payment Method</th>
+                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Due Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {utilities.map(u => (
+                      <tr key={u.id}>
+                        <td className="px-4 py-2 font-medium">{u.fields?.['Utility Type'] || '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Who Pays?'] || '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Billing Cycle'] || '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Payment Method'] || '—'}</td>
+                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Payment Due Date'] || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bills — Admin Only */}
+      {isAdmin && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <button
+            onClick={() => setBillsOpen(o => !o)}
+            className="w-full flex items-center justify-between px-5 py-3 text-left"
+          >
+            <h2 className="font-semibold text-gray-800">Bills ({bills.length})</h2>
+            {billsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {billsOpen && (
+            <div className="border-t border-gray-100">
+              {bills.length === 0 ? (
+                <p className="px-5 py-3 text-sm text-gray-500">No bills.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100">
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Bill</th>
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Vendor</th>
+                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-500">Amount</th>
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Date</th>
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Category</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {bills.map(b => (
+                        <tr key={b.id}>
+                          <td className="px-4 py-2 font-medium">{b.fields?.['Bill Name'] || '—'}</td>
+                          <td className="px-4 py-2 text-gray-600">{b.fields?.['Vendor / Payee'] || '—'}</td>
+                          <td className="px-4 py-2 text-right">{fmtCurrency(b.fields?.['Amount Paid'])}</td>
+                          <td className="px-4 py-2 text-gray-600">{fmtDate(b.fields?.['Payment Date'])}</td>
+                          <td className="px-4 py-2 text-gray-600">{b.fields?.Category || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Edit Property Modal */}
+      {editingProperty && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="font-semibold text-gray-900">Edit Property</h2>
+              <button onClick={() => setEditingProperty(false)} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <ModalField label="Status">
+                <select value={editForm.Status || ''} onChange={e => setEditForm(ef => ({ ...ef, Status: e.target.value }))} className={inp}>
+                  <option value="">Select...</option>
+                  {['Active', 'Rehab', 'Listed', 'Sold', 'Pending', 'Vacant'].map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </ModalField>
+              <ModalField label="Est. Market Value">
+                <input
+                  type="number"
+                  value={editForm['Est Market Value'] || ''}
+                  onChange={e => setEditForm(ef => ({ ...ef, 'Est Market Value': parseFloat(e.target.value) || 0 }))}
+                  className={inp}
+                />
+              </ModalField>
+              <ModalField label="Notes">
+                <textarea
+                  value={editForm.Notes || ''}
+                  onChange={e => setEditForm(ef => ({ ...ef, Notes: e.target.value }))}
+                  rows={3}
+                  className={inp}
+                />
+              </ModalField>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setEditingProperty(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+                <button onClick={savePropertyEdit} disabled={saving} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60">
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Docs */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="font-semibold text-gray-800 mb-4 flex items-center gap-2"><FileText size={18} /> Documents</h2>
-        {docs.length === 0 ? (
-          <p className="text-sm text-gray-500">No documents uploaded.</p>
-        ) : (
-          <div className="space-y-2">
-            {docs.map(doc => (
-              <div key={doc.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <span className="text-sm text-gray-700">{doc.name}</span>
-                <button onClick={() => downloadDoc(doc.name)} className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800">
-                  <Download size={14} /> Download
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {paymentModal && (
+        <PaymentForm
+          record={paymentModal === 'new' ? null : paymentModal}
+          onSave={handlePaymentSave}
+          onClose={() => setPaymentModal(null)}
+        />
+      )}
+
+      {maintModal && (
+        <MaintenanceForm
+          record={maintModal}
+          onSave={handleMaintSave}
+          onClose={() => setMaintModal(null)}
+        />
+      )}
     </div>
   )
 }
 
-function Detail({ label, value }) {
+function FinRow({ label, value }) {
   return (
     <div>
-      <p className="text-xs text-gray-500 font-medium">{label}</p>
-      <p className="text-gray-900 font-semibold mt-0.5">{value}</p>
+      <p className="text-xs text-gray-400">{label}</p>
+      <p className="font-medium text-gray-800">{value}</p>
+    </div>
+  )
+}
+
+function ModalField({ label, children }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      {children}
     </div>
   )
 }

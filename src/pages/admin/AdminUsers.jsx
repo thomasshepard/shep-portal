@@ -292,6 +292,7 @@ export default function AdminUsers() {
                   className={inp}
                 >
                   <option value="member">Member</option>
+                  <option value="va">VA</option>
                   <option value="admin">Admin</option>
                 </select>
               </Field>

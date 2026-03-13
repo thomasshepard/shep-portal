@@ -18,6 +18,7 @@ import Chickens from './pages/Chickens'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
+import MaintenanceSubmit from './pages/MaintenanceSubmit'
 
 export default function App() {
   return (
@@ -77,6 +78,7 @@ export default function App() {
               }
             />
           </Route>
+          <Route path="maintenance-request" element={<MaintenanceSubmit />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </HashRouter>

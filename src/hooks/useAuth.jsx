@@ -38,16 +38,17 @@ export function AuthProvider({ children }) {
   }
 
   const isAdmin = profile?.role === 'admin'
+  const isVA = profile?.role === 'va'
 
-  // Admins can access everything. Other users need explicit flags.
+  // Admins can access everything. VAs get properties access. Other users need explicit flags.
   const permissions = {
-    properties: isAdmin || !!profile?.can_view_properties,
+    properties: isAdmin || isVA || !!profile?.can_view_properties,
     llcs: isAdmin || !!profile?.can_view_llcs,
     chickens: isAdmin || !!profile?.can_view_chickens,
   }
 
   return (
-    <AuthContext.Provider value={{ session, profile, loading, isAdmin, permissions }}>
+    <AuthContext.Provider value={{ session, profile, loading, isAdmin, isVA, permissions }}>
       {children}
     </AuthContext.Provider>
   )
