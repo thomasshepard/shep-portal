@@ -200,6 +200,7 @@ export default function Documents() {
 
   // Google Drive upload state
   const [uploading, setUploading] = useState(false)
+  const [gisReady, setGisReady] = useState(false)
   const fileInputRef = useRef(null)
   const pendingFileRef = useRef(null)
   const tokenClientRef = useRef(null)
@@ -211,7 +212,7 @@ export default function Documents() {
     const script = document.createElement('script')
     script.src = 'https://accounts.google.com/gsi/client'
     script.onload = () => {
-      tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+      tokenClientRef.current = window.google?.accounts?.oauth2?.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: 'https://www.googleapis.com/auth/drive.file',
         callback: async (response) => {
@@ -231,6 +232,7 @@ export default function Documents() {
           }
         },
       })
+      if (tokenClientRef.current) setGisReady(true)
     }
     document.head.appendChild(script)
     return () => { try { document.head.removeChild(script) } catch {} }
@@ -280,9 +282,13 @@ export default function Documents() {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
+    if (!tokenClientRef.current) {
+      toast.error('Google auth not ready — try again in a moment')
+      return
+    }
     pendingFileRef.current = file
     setUploading(true)
-    tokenClientRef.current?.requestAccessToken({ prompt: '' })
+    tokenClientRef.current.requestAccessToken({ prompt: '' })
   }
 
   function goToPage(p) {
@@ -354,7 +360,7 @@ export default function Documents() {
         {isAdmin && (
           <button
             onClick={handleAddDocument}
-            disabled={uploading || (!GOOGLE_CLIENT_ID)}
+            disabled={uploading || !GOOGLE_CLIENT_ID || (GOOGLE_CLIENT_ID && !gisReady)}
             title={!GOOGLE_CLIENT_ID ? 'Google OAuth not configured — see CLAUDE.md' : 'Upload PDF to Google Drive'}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
