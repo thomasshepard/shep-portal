@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail } from 'lucide-react'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtPercent, fmtDate, PM_BASE_ID } from '../lib/airtable'
@@ -51,8 +51,17 @@ export default function PropertyDetail() {
   const [maintModal, setMaintModal] = useState(null)
   const [expandedMaint, setExpandedMaint] = useState(new Set())
   const [addTenantModal, setAddTenantModal] = useState(null) // null | 'picker' | unit record
+  const unitsRef = useRef(null)
 
   useEffect(() => { load() }, [id])
+
+  function handleWorkflowSuccess() {
+    load().then(() => {
+      setTimeout(() => {
+        unitsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 150)
+    })
+  }
 
   async function load() {
     setLoading(true)
@@ -172,7 +181,10 @@ export default function PropertyDetail() {
 
   const vacantUnits = rentalUnits.filter(u => {
     const unitLeases = (u.fields?.['Lease Agreements'] || []).map(lid => leaseMap[lid]).filter(Boolean)
-    const hasActive = unitLeases.some(l => (l.fields?.Status || '').toLowerCase() === 'active' || l.fields?.['Lease Active'] === 1)
+    const hasActive = unitLeases.some(l => {
+      const s = (l.fields?.Status || '').toLowerCase()
+      return s === 'active' || s === 'open' || l.fields?.['Lease Active'] === 1
+    })
     return !hasActive && (u.fields?.Status || '').toLowerCase() !== 'occupied'
   })
 
@@ -278,14 +290,17 @@ export default function PropertyDetail() {
       )}
 
       {/* Units & Tenants */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div ref={unitsRef} className="bg-white rounded-xl border border-gray-200 p-5">
         <h2 className="font-semibold text-gray-800 mb-4">Units & Tenants</h2>
         <div className="space-y-4">
           {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
           {rentalUnits.map(unit => {
             const uf = unit.fields || {}
             const unitLeases = (uf['Lease Agreements'] || []).map(lid => leaseMap[lid]).filter(Boolean)
-            const activeLease = unitLeases.find(l => (l.fields?.Status || '').toLowerCase() === 'active' || l.fields?.['Lease Active'] === 1)
+            const activeLease = unitLeases.find(l => {
+              const s = (l.fields?.Status || '').toLowerCase()
+              return s === 'active' || s === 'open' || l.fields?.['Lease Active'] === 1
+            })
             const isOccupied = !!activeLease || (uf.Status || '').toLowerCase() === 'occupied'
 
             if (!isOccupied) {
@@ -333,13 +348,24 @@ export default function PropertyDetail() {
                       )}
                     </div>
                     {tenant && <p className="text-base font-bold text-gray-900 mt-0.5">{tf.Name}</p>}
+                    {(() => {
+                      const months = lf['Months on Lease']
+                      if (!months) return null
+                      if (months === 1) return <p className="text-xs text-gray-500 mt-0.5">Month-to-Month</p>
+                      const startStr = lf['Start Date'] ? new Date(lf['Start Date'] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
+                      const endStr = lf['End Date'] ? new Date(lf['End Date'] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
+                      if (!startStr || !endStr) return null
+                      return <p className="text-xs text-gray-500 mt-0.5">{months}-month lease: {startStr} – {endStr}</p>
+                    })()}
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <span className="text-lg font-bold text-gray-900">{fmtCurrency(lf['Rent Amount'] || lf['Lease Amount'])}</span>
-                    {lf['Google Drive'] && (
+                    {lf['Google Drive'] ? (
                       <a href={lf['Google Drive']} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1 border border-blue-200 rounded px-2 py-1">
-                        <ExternalLink size={12} /> Lease
+                        <ExternalLink size={12} /> View Lease
                       </a>
+                    ) : (
+                      <span className="text-xs text-gray-400 border border-gray-200 rounded px-2 py-1">No lease doc</span>
                     )}
                   </div>
                 </div>
@@ -695,6 +721,20 @@ export default function PropertyDetail() {
         </div>
       )}
 
+      {/* Airtable source link — Admin only */}
+      {isAdmin && (
+        <div className="text-center py-2">
+          <a
+            href={`https://airtable.com/${PM_BASE_ID}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            Data source: Airtable — Property Management ↗
+          </a>
+        </div>
+      )}
+
       {/* Edit Property Modal */}
       {editingProperty && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -762,7 +802,7 @@ export default function PropertyDetail() {
           unit={addTenantModal === 'picker' ? null : addTenantModal}
           vacantUnits={vacantUnits}
           onClose={() => setAddTenantModal(null)}
-          onSuccess={load}
+          onSuccess={handleWorkflowSuccess}
         />
       )}
     </div>

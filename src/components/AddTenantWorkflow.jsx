@@ -22,6 +22,14 @@ const MANAGED_BY_OPTIONS = [
   'Doorby',
 ]
 
+const LEASE_TERM_OPTIONS = [
+  { label: 'Month-to-Month', value: 'mtm', months: 1 },
+  { label: '6 Months', value: '6', months: 6 },
+  { label: '12 Months', value: '12', months: 12 },
+  { label: '24 Months', value: '24', months: 24 },
+  { label: 'Other', value: 'other', months: null },
+]
+
 const emptyTenant = {
   Name: '',
   Email: '',
@@ -35,7 +43,6 @@ const emptyTenant = {
 const emptyLease = {
   Name: '',
   'Rent Amount': '',
-  'Lease Amount': '',
   'Start Date': '',
   'End Date': '',
   Terms: '',
@@ -44,8 +51,21 @@ const emptyLease = {
   'Pet Rent (Dog)': '',
   'Other Fees to Tenant': '',
   'Managed by': '',
-  'First Invoice Date': '',
   Note: '',
+}
+
+function getMonthsFromTerm(term, custom) {
+  if (term === 'mtm') return 1
+  if (term === 'other') return parseInt(custom) || 0
+  return parseInt(term) || 0
+}
+
+function calcEndDate(startDate, months) {
+  if (!startDate || !months) return ''
+  const d = new Date(startDate + 'T00:00:00')
+  d.setMonth(d.getMonth() + months)
+  d.setDate(d.getDate() - 1)
+  return d.toISOString().split('T')[0]
 }
 
 /**
@@ -62,6 +82,8 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
   const [selectedUnitId, setSelectedUnitId] = useState(unit?.id || '')
   const [tenantData, setTenantData] = useState(emptyTenant)
   const [leaseData, setLeaseData] = useState(emptyLease)
+  const [leaseTerm, setLeaseTerm] = useState('')
+  const [leaseTermCustom, setLeaseTermCustom] = useState('')
   const [executing, setExecuting] = useState(false)
   const [execSteps, setExecSteps] = useState([])
   const [done, setDone] = useState(false)
@@ -71,6 +93,32 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
 
   function setT(key, val) { setTenantData(prev => ({ ...prev, [key]: val })) }
   function setL(key, val) { setLeaseData(prev => ({ ...prev, [key]: val })) }
+
+  function handleTermChange(val) {
+    setLeaseTerm(val)
+    const opt = LEASE_TERM_OPTIONS.find(o => o.value === val)
+    const months = opt?.months
+    if (months) {
+      const end = calcEndDate(leaseData['Start Date'], months)
+      if (end) setL('End Date', end)
+    }
+  }
+
+  function handleStartDateChange(val) {
+    setL('Start Date', val)
+    const months = getMonthsFromTerm(leaseTerm, leaseTermCustom)
+    if (months && val) {
+      setL('End Date', calcEndDate(val, months))
+    }
+  }
+
+  function handleTermCustomChange(val) {
+    setLeaseTermCustom(val)
+    const months = parseInt(val) || 0
+    if (months && leaseData['Start Date']) {
+      setL('End Date', calcEndDate(leaseData['Start Date'], months))
+    }
+  }
 
   function validateStep1() {
     if (!selectedUnitId) { toast.error('Please select a unit'); return false }
@@ -96,7 +144,6 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
 
   function goToStep3() {
     if (!validateStep2()) return
-    if (!leaseData['Lease Amount']) setL('Lease Amount', leaseData['Rent Amount'])
     setStep(3)
   }
 
@@ -146,18 +193,24 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
 
     // Step 2: Create Lease Agreement
     addExecStep('Creating lease agreement…', 'loading')
+    const rentAmount = parseFloat(leaseData['Rent Amount']) || 0
     const leaseFields = {
       Name: leaseData.Name,
       Email: tenantData.Email,
       Status: 'Open',
       Property: [propertyId],
       'Tenant Management': [tenantId],
+      'Rent Amount': rentAmount,
+      'Lease Amount': rentAmount,  // always set equal to Rent Amount
     }
-    const currencyKeys = ['Rent Amount', 'Lease Amount', 'Pet Rent (Cat)', 'Pet Rent (Dog)', 'Other Fees to Tenant']
+    const months = getMonthsFromTerm(leaseTerm, leaseTermCustom)
+    if (months) leaseFields['Months on Lease'] = months
+
+    const currencyKeys = ['Pet Rent (Cat)', 'Pet Rent (Dog)', 'Other Fees to Tenant']
     currencyKeys.forEach(k => {
       if (leaseData[k] !== '') leaseFields[k] = parseFloat(leaseData[k]) || 0
     })
-    const textKeys = ['Terms', 'Google Drive', 'Managed by', 'First Invoice Date', 'Note', 'Start Date', 'End Date']
+    const textKeys = ['Terms', 'Google Drive', 'Managed by', 'Note', 'Start Date', 'End Date']
     textKeys.forEach(k => { if (leaseData[k]) leaseFields[k] = leaseData[k] })
 
     const leaseRes = await createRecord('Lease Agreements', leaseFields, PM_BASE_ID)
@@ -200,8 +253,9 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
 
     setDone(true)
     setExecuting(false)
-    toast.success(`${tenantData.Name} added successfully!`)
-    setTimeout(() => { onSuccess(); onClose() }, 1500)
+    toast.success(`${tenantData.Name} added to ${unitName}!`)
+    onClose()
+    onSuccess()
   }
 
   const showFooter = !executing && !done
@@ -299,26 +353,31 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
                 <FormField label="Lease Name *">
                   <input type="text" required value={leaseData.Name} onChange={e => setL('Name', e.target.value)} className={inp} />
                 </FormField>
+                <FormField label="Rent Amount *">
+                  <input type="number" step="0.01" min="0" required value={leaseData['Rent Amount']} onChange={e => setL('Rent Amount', e.target.value)} className={inp} placeholder="Monthly rent" />
+                </FormField>
+                <FormField label="Lease Term">
+                  <select value={leaseTerm} onChange={e => handleTermChange(e.target.value)} className={inp}>
+                    <option value="">Select term…</option>
+                    {LEASE_TERM_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </FormField>
+                {leaseTerm === 'other' && (
+                  <FormField label="Months">
+                    <input type="number" min="1" value={leaseTermCustom} onChange={e => handleTermCustomChange(e.target.value)} className={inp} placeholder="e.g. 18" />
+                  </FormField>
+                )}
+                <FormField label="Start Date *">
+                  <input type="date" required value={leaseData['Start Date']} onChange={e => handleStartDateChange(e.target.value)} className={inp} />
+                </FormField>
+                <FormField label="End Date *">
+                  <input type="date" required value={leaseData['End Date']} onChange={e => setL('End Date', e.target.value)} className={inp} />
+                </FormField>
                 <FormField label="Terms *">
                   <select value={leaseData.Terms} onChange={e => setL('Terms', e.target.value)} className={inp} required>
                     <option value="">Select terms…</option>
                     {TERMS_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
-                </FormField>
-                <FormField label="Rent Amount *">
-                  <input type="number" step="0.01" min="0" required value={leaseData['Rent Amount']} onChange={e => setL('Rent Amount', e.target.value)} className={inp} placeholder="0.00" />
-                </FormField>
-                <FormField label="Lease Amount">
-                  <input type="number" step="0.01" min="0" value={leaseData['Lease Amount']} onChange={e => setL('Lease Amount', e.target.value)} className={inp} placeholder="Defaults to rent amount" />
-                </FormField>
-                <FormField label="Start Date *">
-                  <input type="date" required value={leaseData['Start Date']} onChange={e => setL('Start Date', e.target.value)} className={inp} />
-                </FormField>
-                <FormField label="End Date *">
-                  <input type="date" required value={leaseData['End Date']} onChange={e => setL('End Date', e.target.value)} className={inp} />
-                </FormField>
-                <FormField label="First Invoice Date">
-                  <input type="date" value={leaseData['First Invoice Date']} onChange={e => setL('First Invoice Date', e.target.value)} className={inp} />
                 </FormField>
                 <FormField label="Managed By">
                   <select value={leaseData['Managed by']} onChange={e => setL('Managed by', e.target.value)} className={inp}>
@@ -331,11 +390,11 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
                 <input type="url" value={leaseData['Google Drive']} onChange={e => setL('Google Drive', e.target.value)} className={inp} placeholder="Google Drive link to lease PDF" />
               </FormField>
               <div className="grid grid-cols-3 gap-4">
-                <FormField label="Pet Rent (Cat)">
-                  <input type="number" step="0.01" min="0" value={leaseData['Pet Rent (Cat)']} onChange={e => setL('Pet Rent (Cat)', e.target.value)} className={inp} placeholder="0.00" />
-                </FormField>
                 <FormField label="Pet Rent (Dog)">
                   <input type="number" step="0.01" min="0" value={leaseData['Pet Rent (Dog)']} onChange={e => setL('Pet Rent (Dog)', e.target.value)} className={inp} placeholder="0.00" />
+                </FormField>
+                <FormField label="Pet Rent (Cat)">
+                  <input type="number" step="0.01" min="0" value={leaseData['Pet Rent (Cat)']} onChange={e => setL('Pet Rent (Cat)', e.target.value)} className={inp} placeholder="0.00" />
                 </FormField>
                 <FormField label="Other Fees">
                   <input type="number" step="0.01" min="0" value={leaseData['Other Fees to Tenant']} onChange={e => setL('Other Fees to Tenant', e.target.value)} className={inp} placeholder="0.00" />
@@ -362,8 +421,11 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
               <ReviewSection title="Lease">
                 <ReviewRow label="Name" value={leaseData.Name} />
                 <ReviewRow label="Rent" value={leaseData['Rent Amount'] ? `$${Number(leaseData['Rent Amount']).toLocaleString()}` : '—'} />
-                {leaseData['Lease Amount'] && leaseData['Lease Amount'] !== leaseData['Rent Amount'] && (
-                  <ReviewRow label="Lease Amount" value={`$${Number(leaseData['Lease Amount']).toLocaleString()}`} />
+                {leaseTerm && (
+                  <ReviewRow
+                    label="Lease Term"
+                    value={LEASE_TERM_OPTIONS.find(o => o.value === leaseTerm)?.label + (leaseTerm === 'other' ? ` (${leaseTermCustom} mo)` : '') || ''}
+                  />
                 )}
                 <ReviewRow label="Start" value={leaseData['Start Date']} />
                 <ReviewRow label="End" value={leaseData['End Date']} />
@@ -403,11 +465,6 @@ export default function AddTenantWorkflow({ propertyId, propertyAddress, unit, v
                   </span>
                 </div>
               ))}
-              {done && (
-                <div className="mt-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm font-medium">
-                  {tenantData.Name} is now linked to {unitName}.
-                </div>
-              )}
             </div>
           )}
         </div>
