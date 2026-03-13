@@ -221,16 +221,16 @@ export default function PropertyDetail() {
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <Link to="/properties" className="text-sm text-blue-600 hover:underline">← Properties</Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-1">{f.Address || 'Property'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mt-1">{safeRender(f.Address, 'Property')}</h1>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             {f['Investment Type'] && (
-              <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{f['Investment Type']}</span>
+              <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{safeRender(f['Investment Type'])}</span>
             )}
             {f.Status && (
-              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[f.Status] || 'bg-gray-100 text-gray-600'}`}>{f.Status}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[safeRender(f.Status, '')] || 'bg-gray-100 text-gray-600'}`}>{safeRender(f.Status)}</span>
             )}
             {f['Type of Property'] && (
-              <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{f['Type of Property']}</span>
+              <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{safeRender(f['Type of Property'])}</span>
             )}
           </div>
         </div>
@@ -251,7 +251,7 @@ export default function PropertyDetail() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             <FinRow label="Market Value" value={fmtCurrency(safeNum(f['Est Market Value']))} />
             <FinRow label="Purchase Price" value={fmtCurrency(safeNum(f['Purchase Price']))} />
-            <FinRow label="Date Acquired" value={fmtDate(safeVal(f['Date Acquired']))} />
+            <FinRow label="Date Acquired" value={fmtDate(safeRender(f['Date Acquired'], ''))} />
             <FinRow label="Mortgage Amount" value={fmtCurrency(safeNum(f['Mortgage Amount']))} />
             <FinRow label="Equity" value={fmtCurrency(safeNum(f['Equity']))} />
             <FinRow label="LTV" value={safeNum(f['LTV']) != null ? fmtPercent(safeNum(f['LTV']) * 100) : '—'} />
@@ -264,12 +264,12 @@ export default function PropertyDetail() {
             <FinRow label="Selling Cost" value={fmtCurrency(safeNum(f['Selling Cost']))} />
             <FinRow label="Accessible Equity" value={fmtCurrency(safeNum(f['Accessible Equity (if sold)']))} />
             <FinRow label="2024 Taxes" value={fmtCurrency(safeNum(f['2024 Taxes']))} />
-            <FinRow label="Title In Name of" value={safeVal(f['Title In Name of'])} />
+            <FinRow label="Title In Name of" value={safeRender(f['Title In Name of'])} />
           </div>
           {f.Notes && (
             <div className="mt-4 p-3 bg-gray-50 rounded-lg">
               <p className="text-xs font-medium text-gray-500 mb-1">Notes</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{f.Notes}</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{safeRender(f.Notes, '')}</p>
             </div>
           )}
           {loans.length > 0 && (
@@ -293,11 +293,11 @@ export default function PropertyDetail() {
                       const rate = rateNum != null ? (rateNum < 1 ? fmtPercent(rateNum * 100) : fmtPercent(rateNum)) : '—'
                       return (
                         <tr key={loan.id}>
-                          <td className="px-3 py-2">{safeVal(lf.Name)}</td>
+                          <td className="px-3 py-2">{safeRender(lf.Name)}</td>
                           <td className="px-3 py-2 text-right">{fmtCurrency(safeNum(lf['Current Amount']))}</td>
                           <td className="px-3 py-2 text-right">{fmtCurrency(safeNum(lf['Monthly PI']))}</td>
-                          <td className="px-3 py-2">{rate} {safeVal(lf['Rate Fixed/Variable'], '')}</td>
-                          <td className="px-3 py-2">{fmtDate(safeVal(lf['Maturity Date']))}</td>
+                          <td className="px-3 py-2">{rate} {safeRender(lf['Rate Fixed/Variable'], '')}</td>
+                          <td className="px-3 py-2">{fmtDate(safeRender(lf['Maturity Date'], ''))}</td>
                         </tr>
                       )
                     })}
@@ -333,11 +333,12 @@ export default function PropertyDetail() {
 
             // — VACANT CARD —
             if (!isOccupied) {
+              const estIncome = safeNum(uf['Estimated Income']) || 0
               return (
                 <div key={unit.id} className="border-2 border-orange-200 rounded-xl p-4 bg-orange-50">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-gray-800">{uf.Name || 'Unit'}</span>
+                      <span className="font-semibold text-gray-800">{safeRender(uf.Name, 'Unit')}</span>
                       <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">VACANT</span>
                     </div>
                     {isAdmin && (
@@ -349,9 +350,9 @@ export default function PropertyDetail() {
                       </button>
                     )}
                   </div>
-                  {(uf['Estimated Income'] > 0) && (
+                  {estIncome > 0 && (
                     <p className="text-sm text-orange-700 mt-2 font-medium">
-                      Potential: {fmtCurrency(uf['Estimated Income'])}/mo
+                      Potential: {fmtCurrency(estIncome)}/mo
                     </p>
                   )}
                 </div>
@@ -364,26 +365,33 @@ export default function PropertyDetail() {
             const tenant = tenantId ? tenantMap[tenantId] : null
             const tf = tenant?.fields || {}
 
-            const rent = lf['Rent Amount'] || lf['Lease Amount'] || 0
-            const petDog = lf['Pet Rent (Dog)'] || 0
-            const petCat = lf['Pet Rent (Cat)'] || 0
-            const otherFees = lf['Other Fees to Tenant'] || 0
-            const months = lf['Months on Lease']
-            const monthsRemaining = lf['Months Remaining on Lease']
-            const remainingColor = monthsRemaining <= 0 ? 'text-red-600' : monthsRemaining <= 3 ? 'text-orange-500' : monthsRemaining <= 6 ? 'text-yellow-600' : 'text-gray-700'
+            const rent = safeNum(lf['Rent Amount']) || safeNum(lf['Lease Amount']) || 0
+            const petDog = safeNum(lf['Pet Rent (Dog)']) || 0
+            const petCat = safeNum(lf['Pet Rent (Cat)']) || 0
+            const otherFees = safeNum(lf['Other Fees to Tenant']) || 0
+            const months = safeNum(lf['Months on Lease'])
+            const monthsRemaining = safeNum(lf['Months Remaining on Lease'])
+            const remainingColor = monthsRemaining == null ? 'text-gray-700' : monthsRemaining <= 0 ? 'text-red-600' : monthsRemaining <= 3 ? 'text-orange-500' : monthsRemaining <= 6 ? 'text-yellow-600' : 'text-gray-700'
 
-            const leaseTermLabel = months === 1 ? 'Month-to-month' : months ? `${months} months` : null
+            const leaseTermLabel = months === 1 ? 'Month-to-month' : months != null ? `${months} months` : null
             const latestLeaseInv = leaseInvMap[arr(lf['Lease Invoice']).at(-1)]
+
+            const phone = safeRender(tf['Phone number'], '')
+            const email = safeRender(tf.Email, '')
+            const leaseStatus = safeRender(lf.Status, '')
+            const terms = safeRender(lf.Terms, '')
+            const googleDrive = safeRender(lf['Google Drive'], '')
+            const stripeId = safeRender(tf['Stripe Customer ID'], '')
 
             return (
               <div key={unit.id} className="border border-gray-200 rounded-xl p-4 space-y-3">
                 {/* Row 1: Unit name + Occupied badge */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-gray-800">{uf.Name || 'Unit'}</span>
+                    <span className="font-semibold text-gray-800">{safeRender(uf.Name, 'Unit')}</span>
                     <span className="bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded-full">Occupied</span>
-                    {lf.Status && lf.Status !== 'Open' && (
-                      <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{lf.Status}</span>
+                    {leaseStatus && leaseStatus !== 'Open' && (
+                      <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{leaseStatus}</span>
                     )}
                   </div>
                   {isAdmin && (
@@ -407,17 +415,17 @@ export default function PropertyDetail() {
 
                 {/* Row 2: Tenant name */}
                 <div>
-                  <p className="text-lg font-bold text-gray-900">{tf.Name || 'Unknown Tenant'}</p>
+                  <p className="text-lg font-bold text-gray-900">{safeRender(tf.Name, 'Unknown Tenant')}</p>
                   {tenant && (
                     <div className="flex items-center gap-4 mt-1 flex-wrap">
-                      {tf['Phone number'] && (
-                        <a href={`tel:${tf['Phone number']}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
-                          <Phone size={13} /> {tf['Phone number']}
+                      {phone && (
+                        <a href={`tel:${phone}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                          <Phone size={13} /> {phone}
                         </a>
                       )}
-                      {tf.Email && (
-                        <a href={`mailto:${tf.Email}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
-                          <Mail size={13} /> {tf.Email}
+                      {email && (
+                        <a href={`mailto:${email}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                          <Mail size={13} /> {email}
                         </a>
                       )}
                     </div>
@@ -427,7 +435,7 @@ export default function PropertyDetail() {
                 {/* Row 3: Rent + Terms */}
                 <div className="flex items-baseline gap-3 flex-wrap">
                   <span className="text-xl font-bold text-gray-900">{fmtCurrency(rent)}<span className="text-sm font-normal text-gray-500">/mo</span></span>
-                  {lf.Terms && <span className="text-sm text-gray-500">{lf.Terms}</span>}
+                  {terms && <span className="text-sm text-gray-500">{terms}</span>}
                   {petDog > 0 && <span className="text-sm text-gray-500">+ {fmtCurrency(petDog)} dog</span>}
                   {petCat > 0 && <span className="text-sm text-gray-500">+ {fmtCurrency(petCat)} cat</span>}
                   {otherFees > 0 && <span className="text-sm text-gray-500">+ {fmtCurrency(otherFees)} fees</span>}
@@ -437,7 +445,7 @@ export default function PropertyDetail() {
                 <div className="text-sm text-gray-600 space-y-0.5">
                   {(lf['Start Date'] || lf['End Date']) && (
                     <p>
-                      Lease: {fmtDate(lf['Start Date'])} → {fmtDate(lf['End Date'])}
+                      Lease: {fmtDate(safeRender(lf['Start Date'], ''))} → {fmtDate(safeRender(lf['End Date'], ''))}
                       {leaseTermLabel && <span className="text-gray-400"> ({leaseTermLabel})</span>}
                     </p>
                   )}
@@ -452,11 +460,11 @@ export default function PropertyDetail() {
 
                 {/* Row 5: Stripe + Lease doc */}
                 <div className="flex items-center gap-3 flex-wrap text-sm">
-                  {tf['Stripe Customer ID'] && (
-                    <span className="text-xs text-gray-400">Stripe: {tf['Stripe Customer ID']}</span>
+                  {stripeId && (
+                    <span className="text-xs text-gray-400">Stripe: {stripeId}</span>
                   )}
-                  {lf['Google Drive'] ? (
-                    <a href={lf['Google Drive']} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:underline border border-blue-200 rounded px-2 py-1">
+                  {googleDrive ? (
+                    <a href={googleDrive} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-blue-600 hover:underline border border-blue-200 rounded px-2 py-1">
                       <ExternalLink size={11} /> View Lease Doc
                     </a>
                   ) : (
@@ -469,11 +477,11 @@ export default function PropertyDetail() {
                   <div className="pt-2 border-t border-gray-100 flex items-center gap-3 text-xs flex-wrap">
                     <span className="text-gray-400">Latest Invoice:</span>
                     <span className={`px-1.5 py-0.5 rounded-full ${latestLeaseInv.fields?.Status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                      {latestLeaseInv.fields?.Status}
+                      {safeRender(latestLeaseInv.fields?.Status)}
                     </span>
-                    <span className="text-gray-500">{fmtDate(latestLeaseInv.fields?.['Due Date'])}</span>
+                    <span className="text-gray-500">{fmtDate(safeRender(latestLeaseInv.fields?.['Due Date'], ''))}</span>
                     {latestLeaseInv.fields?.['Link to Invoice'] && (
-                      <a href={latestLeaseInv.fields['Link to Invoice']} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">
+                      <a href={safeRender(latestLeaseInv.fields['Link to Invoice'], '')} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-0.5">
                         View <ExternalLink size={10} />
                       </a>
                     )}
@@ -511,24 +519,28 @@ export default function PropertyDetail() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {leaseInvoices.map(inv => (
-                    <tr key={inv.id}>
-                      <td className="px-3 py-2 font-mono text-xs text-gray-600">{inv.fields?.['Stripe Invoice ID'] || '—'}</td>
-                      <td className="px-3 py-2">{fmtDate(inv.fields?.['Due Date'])}</td>
-                      <td className="px-3 py-2">
-                        <span className={`px-1.5 py-0.5 rounded-full text-xs ${inv.fields?.Status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {inv.fields?.Status || '—'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">
-                        {inv.fields?.['Link to Invoice'] && (
-                          <a href={inv.fields['Link to Invoice']} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
-                            <ExternalLink size={13} />
-                          </a>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {leaseInvoices.map(inv => {
+                    const invStatus = safeRender(inv.fields?.Status, '')
+                    const invLink = safeRender(inv.fields?.['Link to Invoice'], '')
+                    return (
+                      <tr key={inv.id}>
+                        <td className="px-3 py-2 font-mono text-xs text-gray-600">{safeRender(inv.fields?.['Stripe Invoice ID'])}</td>
+                        <td className="px-3 py-2">{fmtDate(safeRender(inv.fields?.['Due Date'], ''))}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${invStatus === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                            {invStatus || '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {invLink && (
+                            <a href={invLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
+                              <ExternalLink size={13} />
+                            </a>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -556,16 +568,17 @@ export default function PropertyDetail() {
                 <tbody className="divide-y divide-gray-100">
                   {invoicePayments.map(p => {
                     const pf = p.fields || {}
-                    const sc = pf.Status === 'Paid' ? 'bg-green-100 text-green-700' : pf.Status === 'Late' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+                    const pStatus = safeRender(pf.Status, '')
+                    const sc = pStatus === 'Paid' ? 'bg-green-100 text-green-700' : pStatus === 'Late' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
                     return (
                       <tr key={p.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium text-gray-700">{pf.Name || '—'}</td>
-                        <td className="px-3 py-2 text-gray-500">{pf['Month Due'] || '—'}</td>
-                        <td className="px-3 py-2 text-gray-500">{fmtDate(pf['Due Date'])}</td>
-                        <td className="px-3 py-2 text-gray-500">{fmtDate(pf['Date of Payment'])}</td>
-                        <td className="px-3 py-2 text-right font-medium">{fmtCurrency(pf['Invoice Amount'])}</td>
+                        <td className="px-3 py-2 font-medium text-gray-700">{safeRender(pf.Name)}</td>
+                        <td className="px-3 py-2 text-gray-500">{safeRender(pf['Month Due'])}</td>
+                        <td className="px-3 py-2 text-gray-500">{fmtDate(safeRender(pf['Due Date'], ''))}</td>
+                        <td className="px-3 py-2 text-gray-500">{fmtDate(safeRender(pf['Date of Payment'], ''))}</td>
+                        <td className="px-3 py-2 text-right font-medium">{fmtCurrency(safeNum(pf['Invoice Amount']))}</td>
                         <td className="px-3 py-2">
-                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${sc}`}>{pf.Status || '—'}</span>
+                          <span className={`px-1.5 py-0.5 rounded-full text-xs ${sc}`}>{pStatus || '—'}</span>
                         </td>
                         <td className="px-3 py-2">
                           <button onClick={() => setPaymentModal(p)} className="text-gray-400 hover:text-gray-700">
@@ -592,7 +605,8 @@ export default function PropertyDetail() {
             {maintenance.map(m => {
               const mf = m.fields || {}
               const expanded = expandedMaint.has(m.id)
-              const ms = (mf.Status || '').toLowerCase()
+              const mStatus = safeRender(mf.Status, '')
+              const ms = mStatus.toLowerCase()
               const sc = ms.includes('complet') || ms.includes('resolved')
                 ? 'bg-green-100 text-green-700'
                 : ms.includes('progress')
@@ -600,6 +614,13 @@ export default function PropertyDetail() {
                 : ms.includes('emergency') || ms.includes('urgent')
                 ? 'bg-red-100 text-red-700'
                 : 'bg-yellow-100 text-yellow-700'
+              const mAddr = safeRender(mf.Address, '')
+              const mDate = safeRender(mf.Date, '')
+              const mResEst = safeRender(mf['Resolution Estimate'], '')
+              const mNotes = safeRender(mf['Request Notes'], '')
+              const mResolution = safeRender(mf.Resolution, '')
+              const mPhone = safeRender(mf['Contact Phone'], '')
+              const mEmail = safeRender(mf['Contact Email'], '')
               return (
                 <div key={m.id} className="border border-gray-100 rounded-lg overflow-hidden">
                   <div
@@ -608,14 +629,14 @@ export default function PropertyDetail() {
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-gray-800 text-sm">{mf.Name || '—'}</span>
-                        <span className={`px-1.5 py-0.5 rounded-full text-xs ${sc}`}>{mf.Status || 'Open'}</span>
+                        <span className="font-medium text-gray-800 text-sm">{safeRender(mf.Name)}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-xs ${sc}`}>{mStatus || 'Open'}</span>
                       </div>
                       <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5 flex-wrap">
-                        {mf.Date && <span>{fmtDate(mf.Date)}</span>}
-                        {mf.Address && <span>{mf.Address}</span>}
-                        {mf['Estimated Cost'] > 0 && <span>Est: {fmtCurrency(mf['Estimated Cost'])}</span>}
-                        {mf['Resolution Estimate'] && <span>Resolve by: {fmtDate(mf['Resolution Estimate'])}</span>}
+                        {mDate && <span>{fmtDate(mDate)}</span>}
+                        {mAddr && <span>{mAddr}</span>}
+                        {safeNum(mf['Estimated Cost']) > 0 && <span>Est: {fmtCurrency(safeNum(mf['Estimated Cost']))}</span>}
+                        {mResEst && <span>Resolve by: {fmtDate(mResEst)}</span>}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -631,24 +652,24 @@ export default function PropertyDetail() {
                   </div>
                   {expanded && (
                     <div className="border-t border-gray-100 p-3 bg-gray-50 text-sm space-y-2">
-                      {mf['Request Notes'] && (
+                      {mNotes && (
                         <div>
                           <p className="text-xs font-medium text-gray-500">Request Notes</p>
-                          <p className="text-gray-700 whitespace-pre-wrap">{mf['Request Notes']}</p>
+                          <p className="text-gray-700 whitespace-pre-wrap">{mNotes}</p>
                         </div>
                       )}
-                      {mf.Resolution && (
+                      {mResolution && (
                         <div>
                           <p className="text-xs font-medium text-gray-500">Resolution</p>
-                          <p className="text-gray-700 whitespace-pre-wrap">{mf.Resolution}</p>
+                          <p className="text-gray-700 whitespace-pre-wrap">{mResolution}</p>
                         </div>
                       )}
-                      {mf['Contact Phone'] && (
+                      {mPhone && (
                         <p className="text-xs text-gray-500">
                           Contact:{' '}
-                          <a href={`tel:${mf['Contact Phone']}`} className="text-blue-600">{mf['Contact Phone']}</a>
-                          {mf['Contact Email'] && (
-                            <> / <a href={`mailto:${mf['Contact Email']}`} className="text-blue-600">{mf['Contact Email']}</a></>
+                          <a href={`tel:${mPhone}`} className="text-blue-600">{mPhone}</a>
+                          {mEmail && (
+                            <> / <a href={`mailto:${mEmail}`} className="text-blue-600">{mEmail}</a></>
                           )}
                         </p>
                       )}
@@ -689,11 +710,11 @@ export default function PropertyDetail() {
                   <tbody className="divide-y divide-gray-100">
                     {utilities.map(u => (
                       <tr key={u.id}>
-                        <td className="px-4 py-2 font-medium">{u.fields?.['Utility Type'] || '—'}</td>
-                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Who Pays?'] || '—'}</td>
-                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Billing Cycle'] || '—'}</td>
-                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Payment Method'] || '—'}</td>
-                        <td className="px-4 py-2 text-gray-600">{u.fields?.['Payment Due Date'] || '—'}</td>
+                        <td className="px-4 py-2 font-medium">{safeRender(u.fields?.['Utility Type'])}</td>
+                        <td className="px-4 py-2 text-gray-600">{safeRender(u.fields?.['Who Pays?'])}</td>
+                        <td className="px-4 py-2 text-gray-600">{safeRender(u.fields?.['Billing Cycle'])}</td>
+                        <td className="px-4 py-2 text-gray-600">{safeRender(u.fields?.['Payment Method'])}</td>
+                        <td className="px-4 py-2 text-gray-600">{safeRender(u.fields?.['Payment Due Date'])}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -733,11 +754,11 @@ export default function PropertyDetail() {
                     <tbody className="divide-y divide-gray-100">
                       {bills.map(b => (
                         <tr key={b.id}>
-                          <td className="px-4 py-2 font-medium">{b.fields?.['Bill Name'] || '—'}</td>
-                          <td className="px-4 py-2 text-gray-600">{b.fields?.['Vendor / Payee'] || '—'}</td>
-                          <td className="px-4 py-2 text-right">{fmtCurrency(b.fields?.['Amount Paid'])}</td>
-                          <td className="px-4 py-2 text-gray-600">{fmtDate(b.fields?.['Payment Date'])}</td>
-                          <td className="px-4 py-2 text-gray-600">{b.fields?.Category || '—'}</td>
+                          <td className="px-4 py-2 font-medium">{safeRender(b.fields?.['Bill Name'])}</td>
+                          <td className="px-4 py-2 text-gray-600">{safeRender(b.fields?.['Vendor / Payee'])}</td>
+                          <td className="px-4 py-2 text-right">{fmtCurrency(safeNum(b.fields?.['Amount Paid']))}</td>
+                          <td className="px-4 py-2 text-gray-600">{fmtDate(safeRender(b.fields?.['Payment Date'], ''))}</td>
+                          <td className="px-4 py-2 text-gray-600">{safeRender(b.fields?.Category)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -826,9 +847,9 @@ export default function PropertyDetail() {
       {addTenantUnit && (
         <AddTenantWorkflow
           propertyId={id}
-          propertyName={f.Address || ''}
+          propertyName={safeRender(f.Address, '')}
           unitId={addTenantUnit.id}
-          unitName={addTenantUnit.fields?.Name || 'Unit'}
+          unitName={safeRender(addTenantUnit.fields?.Name, 'Unit')}
           onClose={() => setAddTenantUnit(null)}
           onSuccess={handleWorkflowSuccess}
         />
@@ -846,19 +867,23 @@ export default function PropertyDetail() {
   )
 }
 
-// Safely unwrap Airtable formula/rollup/lookup values that can return
-// {specialValue: "NaN"}, {error: "#ERROR!"}, or arrays of linked record objects.
-function safeVal(val, fallback = '—') {
+// Safely render any Airtable field value as a string.
+// Handles {specialValue:"NaN"}, {error:"#ERROR!"}, linked record objects,
+// arrays of objects, and plain primitives.
+function safeRender(val, fallback = '—') {
   if (val === null || val === undefined) return fallback
   if (typeof val === 'object') {
+    if (val.specialValue) return fallback
+    if (val.error) return fallback
     if (Array.isArray(val)) {
-      const parts = val.map(v => (typeof v === 'object' ? v?.name || v?.id || '' : String(v))).filter(Boolean)
+      const parts = val.map(v => typeof v === 'object' ? (v.name || String(v.id) || '') : String(v)).filter(Boolean)
       return parts.length ? parts.join(', ') : fallback
     }
-    // {specialValue: "NaN"}, {error: "#ERROR!"}, linked record object
-    return val.name || val.id || fallback
+    if (val.name) return val.name
+    if (val.id) return String(val.id)
+    return fallback
   }
-  return val
+  return String(val)
 }
 
 // Returns a number or null; never returns an object/NaN from formula fields.
