@@ -19,6 +19,7 @@ import AdminUsers from './pages/admin/AdminUsers'
 import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
 import MaintenanceSubmit from './pages/MaintenanceSubmit'
+import ErrorBoundary from './components/ErrorBoundary'
 
 export default function App() {
   return (
@@ -37,8 +38,8 @@ export default function App() {
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
-            <Route path="properties" element={<PermRoute permission="properties"><Properties /></PermRoute>} />
-            <Route path="properties/:id" element={<PermRoute permission="properties"><PropertyDetail /></PermRoute>} />
+            <Route path="properties" element={<PermRoute permission="properties"><ErrorBoundary><Properties /></ErrorBoundary></PermRoute>} />
+            <Route path="properties/:id" element={<PermRoute permission="properties"><ErrorBoundary><PropertyDetail /></ErrorBoundary></PermRoute>} />
             <Route path="tools" element={<Tools />} />
             <Route path="tools/:slug" element={<ToolView />} />
             <Route path="files" element={<Files />} />

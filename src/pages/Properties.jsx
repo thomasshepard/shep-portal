@@ -108,16 +108,17 @@ export default function Properties() {
     return s !== 'Paid' && d < today
   })
 
-  // Admin portfolio summary — owned properties only
-  const ownedUnits = rentalUnits.filter(u => {
-    // only count units belonging to owned properties
-    // find via property records' Rental Units field
-    return ownedProperties.some(p => arr(p.fields?.['Rental Units']).includes(u.id))
-  })
+  // Admin portfolio summary
+  // Portfolio Value + Equity = ALL owned properties
+  // Cash Flow + Occupancy = Rental Properties only
+  const rentalProperties = ownedProperties.filter(p => p.fields?.['Investment Type'] === 'Rental Property')
+  const rentalUnitsOnly = rentalUnits.filter(u =>
+    rentalProperties.some(p => arr(p.fields?.['Rental Units']).includes(u.id))
+  )
   const totalPortfolioValue = ownedProperties.reduce((s, p) => s + (p.fields?.['Est Market Value'] || 0), 0)
   const totalEquity = ownedProperties.reduce((s, p) => s + (p.fields?.['Equity'] || 0), 0)
-  const monthlyCashFlow = ownedProperties.reduce((s, p) => s + ((p.fields?.['Estimated Revenue'] || 0) - (p.fields?.['Monthly PI (from Current Loans)'] || 0)), 0)
-  const occupiedCount = ownedUnits.filter(u => occupiedUnitIds.has(u.id)).length
+  const monthlyCashFlow = rentalProperties.reduce((s, p) => s + ((p.fields?.['Estimated Revenue'] || 0) - (p.fields?.['Monthly PI (from Current Loans)'] || 0)), 0)
+  const occupiedCount = rentalUnitsOnly.filter(u => occupiedUnitIds.has(u.id)).length
 
   // VA summary
   const paymentsDue = invoicePayments.filter(p => {
@@ -146,14 +147,18 @@ export default function Properties() {
   const unitMap = {}
   rentalUnits.forEach(u => { if (u?.id) unitMap[u.id] = u })
 
-  // Rent roll: non-Closed leases from owned properties only
+  // Rent roll: non-Closed leases from Owned rental properties only
+  // Excludes Fix & Flip, Primary Residence, and Sold/non-Owned properties
   const rentRollLeases = leases.filter(l => {
     const status = (l.fields?.Status || '').toLowerCase()
     if (status === 'closed') return false
     const unitId = arr(l.fields?.Property)[0]
     const propId = unitToPropertyId[unitId]
     if (!propId) return false
-    return !isSold(propMap[propId])
+    const prop = propMap[propId]
+    if (!prop || prop.fields?.Status !== 'Owned') return false
+    const investType = prop.fields?.['Investment Type'] || ''
+    return investType !== 'Fix & Flip' && investType !== 'Primary Residence'
   })
 
   return (
@@ -175,7 +180,7 @@ export default function Properties() {
             <SummaryCard label="Portfolio Value" value={fmtCurrency(totalPortfolioValue)} />
             <SummaryCard label="Total Equity" value={fmtCurrency(totalEquity)} />
             <SummaryCard label="Monthly Cash Flow" value={fmtCurrency(monthlyCashFlow)} highlight={monthlyCashFlow >= 0 ? 'green' : 'red'} />
-            <SummaryCard label="Occupancy" value={ownedUnits.length ? `${occupiedCount}/${ownedUnits.length}` : '—'} />
+            <SummaryCard label="Occupancy" value={rentalUnitsOnly.length ? `${occupiedCount}/${rentalUnitsOnly.length}` : '—'} />
             <SummaryCard label="Open Maintenance" value={openMaintenance.length} highlight={openMaintenance.length > 0 ? 'yellow' : null} />
           </>
         ) : (
@@ -191,110 +196,160 @@ export default function Properties() {
       {/* Alerts */}
       <AlertsPanel alerts={alerts} onDismiss={dismiss} onRestore={restore} />
 
-      {/* Property Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {displayProperties.map(prop => {
-          const pf = prop.fields || {}
-          const sold = isSold(prop)
-          const propUnitIds = arr(pf['Rental Units'])
-          const units = propUnitIds.map(uid => unitMap[uid]).filter(Boolean)
-          const isPrimaryResidence = pf['Investment Type'] === 'Primary Residence'
-          const occupiedPropCount = units.filter(u => occupiedUnitIds.has(u.id)).length
+      {/* Property Cards — grouped by Investment Type */}
+      {(() => {
+        const GROUPS = [
+          { key: 'rental', label: 'Rental Properties', filter: p => p.fields?.['Investment Type'] === 'Rental Property' },
+          { key: 'flip', label: 'Fix & Flip', filter: p => p.fields?.['Investment Type'] === 'Fix & Flip' },
+          { key: 'primary', label: 'Primary Residence', filter: p => p.fields?.['Investment Type'] === 'Primary Residence' },
+          { key: 'other', label: 'Other', filter: p => !p.fields?.['Investment Type'] },
+        ]
+        const groups = GROUPS.map(g => ({ ...g, properties: displayProperties.filter(g.filter) })).filter(g => g.properties.length > 0)
 
-          const propMaint = maintByProperty[prop.id] || []
-          const propPayments = paymentsByProperty[prop.id] || []
-          const propLeases = propUnitIds.flatMap(uid => leasesByUnit[uid] || [])
+        return groups.map(group => (
+          <div key={group.key} className="space-y-3">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+              {group.label} <span className="text-gray-400 font-normal normal-case">({group.properties.length})</span>
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {group.properties.map(prop => {
+                const pf = prop.fields || {}
+                const sold = isSold(prop)
+                const propUnitIds = arr(pf['Rental Units'])
+                const units = propUnitIds.map(uid => unitMap[uid]).filter(Boolean)
+                const isPrimaryResidence = pf['Investment Type'] === 'Primary Residence'
+                const isFixAndFlip = pf['Investment Type'] === 'Fix & Flip'
+                const isRental = pf['Investment Type'] === 'Rental Property'
+                const occupiedPropCount = units.filter(u => occupiedUnitIds.has(u.id)).length
 
-          const openMaintCount = propMaint.filter(m => !['completed', 'resolved'].includes((m.fields?.Status || '').toLowerCase())).length
-          const leaseExpiring = propLeases.some(l => {
-            const end = l.fields?.['End Date'] ? new Date(l.fields['End Date']) : null
-            return end && end >= today && end <= in90
-          })
-          const propLate = propPayments.filter(p => {
-            const s = p.fields?.Status || ''
-            const due = p.fields?.['Due Date'] ? new Date(p.fields['Due Date']) : null
-            if (!due) return false
-            const d = new Date(due); d.setHours(0, 0, 0, 0)
-            return s !== 'Paid' && d < today
-          })
-          const alertCount = (leaseExpiring ? 1 : 0) + propLate.length + (openMaintCount > 0 ? 1 : 0)
+                const propMaint = maintByProperty[prop.id] || []
+                const propPayments = paymentsByProperty[prop.id] || []
+                const propLeases = propUnitIds.flatMap(uid => leasesByUnit[uid] || [])
 
-          const activeRent = propLeases
-            .filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
-            .reduce((s, l) => s + (l.fields?.['Rent Amount'] || l.fields?.['Lease Amount'] || 0), 0)
+                const openMaintCount = propMaint.filter(m => !['completed', 'resolved'].includes((m.fields?.Status || '').toLowerCase())).length
+                const leaseExpiring = propLeases.some(l => {
+                  const end = l.fields?.['End Date'] ? new Date(l.fields['End Date']) : null
+                  return end && end >= today && end <= in90
+                })
+                const propLate = propPayments.filter(p => {
+                  const s = p.fields?.Status || ''
+                  const due = p.fields?.['Due Date'] ? new Date(p.fields['Due Date']) : null
+                  if (!due) return false
+                  const d = new Date(due); d.setHours(0, 0, 0, 0)
+                  return s !== 'Paid' && d < today
+                })
+                const alertCount = (leaseExpiring ? 1 : 0) + propLate.length + (openMaintCount > 0 ? 1 : 0)
 
-          const propPaymentsDue = propPayments.filter(p => {
-            const s = p.fields?.Status || ''
-            const due = p.fields?.['Due Date'] ? new Date(p.fields['Due Date']) : null
-            if (!due) return false
-            return s === 'Pending' && due.getMonth() === thisMonth && due.getFullYear() === thisYear
-          }).length
+                const activeRent = propLeases
+                  .filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
+                  .reduce((s, l) => s + (l.fields?.['Rent Amount'] || l.fields?.['Lease Amount'] || 0), 0)
 
-          const cashFlow = (pf['Estimated Revenue'] || 0) - (pf['Monthly PI (from Current Loans)'] || 0)
+                const propPaymentsDue = propPayments.filter(p => {
+                  const s = p.fields?.Status || ''
+                  const due = p.fields?.['Due Date'] ? new Date(p.fields['Due Date']) : null
+                  if (!due) return false
+                  return s === 'Pending' && due.getMonth() === thisMonth && due.getFullYear() === thisYear
+                }).length
 
-          return (
-            <Link
-              key={prop.id}
-              to={`/properties/${prop.id}`}
-              className={`bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow block ${sold ? 'opacity-50' : ''}`}
-            >
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-gray-900 truncate">{pf.Address || 'Untitled'}</h3>
-                  {!isVA && pf.Owner && <p className="text-xs text-gray-400 mt-0.5">{pf.Owner}</p>}
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
-                  {alertCount > 0 && !sold && (
-                    <span className="bg-red-100 text-red-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{alertCount}</span>
-                  )}
-                  {pf['Investment Type'] && (
-                    <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{pf['Investment Type']}</span>
-                  )}
-                  {pf.Status && (
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[pf.Status] || 'bg-gray-100 text-gray-600'}`}>{pf.Status}</span>
-                  )}
-                </div>
-              </div>
+                const cashFlow = (pf['Estimated Revenue'] || 0) - (pf['Monthly PI (from Current Loans)'] || 0)
 
-              {units.length > 0 && !isPrimaryResidence && (
-                <p className="text-sm text-gray-500 mb-3">{occupiedPropCount}/{units.length} units occupied</p>
-              )}
+                return (
+                  <Link
+                    key={prop.id}
+                    to={`/properties/${prop.id}`}
+                    className={`bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow block ${sold ? 'opacity-50' : ''}`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-900 truncate">{pf.Address || 'Untitled'}</h3>
+                        {!isVA && pf.Owner && <p className="text-xs text-gray-400 mt-0.5">{pf.Owner}</p>}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
+                        {alertCount > 0 && !sold && (
+                          <span className="bg-red-100 text-red-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{alertCount}</span>
+                        )}
+                        {pf.Status && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[pf.Status] || 'bg-gray-100 text-gray-600'}`}>{pf.Status}</span>
+                        )}
+                      </div>
+                    </div>
 
-              {isAdmin ? (
-                <div className="grid grid-cols-3 gap-3 text-sm">
-                  <div>
-                    <p className="text-xs text-gray-400">Market Value</p>
-                    <p className="font-medium text-gray-800">{fmtCurrency(pf['Est Market Value'])}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Equity</p>
-                    <p className="font-medium text-gray-800">{fmtCurrency(pf['Equity'])}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Cash Flow</p>
-                    <p className={`font-medium ${cashFlow >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtCurrency(cashFlow)}</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-3 text-sm">
-                  <div>
-                    <p className="text-xs text-gray-400">Total Rent</p>
-                    <p className="font-medium text-gray-800">{fmtCurrency(activeRent)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Due This Month</p>
-                    <p className={`font-medium ${propPaymentsDue > 0 ? 'text-amber-600' : 'text-gray-800'}`}>{propPaymentsDue}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-400">Late</p>
-                    <p className={`font-medium ${propLate.length > 0 ? 'text-red-600' : 'text-gray-800'}`}>{propLate.length}</p>
-                  </div>
-                </div>
-              )}
-            </Link>
-          )
-        })}
-      </div>
+                    {units.length > 0 && isRental && (
+                      <p className="text-sm text-gray-500 mb-3">{occupiedPropCount}/{units.length} units occupied</p>
+                    )}
+
+                    {isAdmin ? (
+                      <div className="grid grid-cols-3 gap-3 text-sm">
+                        {isFixAndFlip ? (
+                          <>
+                            <div>
+                              <p className="text-xs text-gray-400">Market Value</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Est Market Value'])}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400">Total Debt</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Mortgage Amount'])}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400">Equity</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Equity'])}</p>
+                            </div>
+                          </>
+                        ) : isPrimaryResidence ? (
+                          <>
+                            <div>
+                              <p className="text-xs text-gray-400">Market Value</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Est Market Value'])}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400">Equity</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Equity'])}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400">Monthly PI</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Monthly PI (from Current Loans)'])}</p>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <p className="text-xs text-gray-400">Market Value</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Est Market Value'])}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400">Equity</p>
+                              <p className="font-medium text-gray-800">{fmtCurrency(pf['Equity'])}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-400">Cash Flow</p>
+                              <p className={`font-medium ${cashFlow >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtCurrency(cashFlow)}</p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-3 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-400">Total Rent</p>
+                          <p className="font-medium text-gray-800">{fmtCurrency(activeRent)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-400">Due This Month</p>
+                          <p className={`font-medium ${propPaymentsDue > 0 ? 'text-amber-600' : 'text-gray-800'}`}>{propPaymentsDue}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-400">Late</p>
+                          <p className={`font-medium ${propLate.length > 0 ? 'text-red-600' : 'text-gray-800'}`}>{propLate.length}</p>
+                        </div>
+                      </div>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))
+      })()}
 
       {/* Rent Roll */}
       <div className="bg-white rounded-xl border border-gray-200">

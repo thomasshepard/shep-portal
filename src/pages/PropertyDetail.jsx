@@ -198,6 +198,8 @@ export default function PropertyDetail() {
 
   const f = property.fields || {}
   const isPrimaryResidence = f['Investment Type'] === 'Primary Residence'
+  const isFixAndFlip = f['Investment Type'] === 'Fix & Flip'
+  const hideTenantsUI = isPrimaryResidence || isFixAndFlip
 
   // Build lookup maps
   const tenantMap = {}
@@ -310,12 +312,12 @@ export default function PropertyDetail() {
       )}
 
       {/* Alerts — compact, scoped to this property */}
-      {!isPrimaryResidence && (
+      {!hideTenantsUI && (
         <AlertsPanel alerts={alerts} onDismiss={dismiss} onRestore={restore} propertyFilter={id} compact />
       )}
 
-      {/* Units & Tenants — hidden for Primary Residence */}
-      {!isPrimaryResidence && <div ref={unitsRef} className="bg-white rounded-xl border border-gray-200 p-5">
+      {/* Units & Tenants — hidden for Primary Residence and Fix & Flip */}
+      {!hideTenantsUI && <div ref={unitsRef} className="bg-white rounded-xl border border-gray-200 p-5">
         <h2 className="font-semibold text-gray-800 mb-4">Units & Tenants</h2>
         <div className="space-y-4">
           {rentalUnits.length === 0 && <p className="text-sm text-gray-500">No rental units.</p>}
@@ -420,7 +422,7 @@ export default function PropertyDetail() {
                     <div className="flex items-center gap-4 mt-1 flex-wrap">
                       {phone && (
                         <a href={`tel:${phone}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
-                          <Phone size={13} /> {phone}
+                          <Phone size={13} /> {formatPhone(phone)}
                         </a>
                       )}
                       {email && (
@@ -493,8 +495,8 @@ export default function PropertyDetail() {
         </div>
       </div>}
 
-      {/* Invoices & Payments — hidden for Primary Residence */}
-      {!isPrimaryResidence && <div className="bg-white rounded-xl border border-gray-200 p-5">
+      {/* Invoices & Payments — hidden for Primary Residence and Fix & Flip */}
+      {!hideTenantsUI && <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-gray-800">Invoices & Payments</h2>
           <button
@@ -895,6 +897,14 @@ function safeNum(val) {
 
 // TODO: Add escrow tracking fields (taxes through escrow, insurance through escrow)
 // These would be boolean fields on the Property table in Airtable
+
+function formatPhone(phone) {
+  if (!phone) return '—'
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length === 10) return `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`
+  if (digits.length === 11 && digits[0] === '1') return `(${digits.slice(1,4)}) ${digits.slice(4,7)}-${digits.slice(7)}`
+  return phone
+}
 
 function FinRow({ label, value }) {
   return (

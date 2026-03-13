@@ -8,6 +8,8 @@ import {
   fmtCurrency, fmtDate,
 } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
+
+console.log('CHICKENS_BASE_ID:', CHICKENS_BASE_ID)
 import LoadingSpinner from '../components/LoadingSpinner'
 import FlockForm from '../components/FlockForm'
 import FeedingScheduleForm from '../components/FeedingScheduleForm'

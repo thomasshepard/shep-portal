@@ -20,6 +20,7 @@ const TERMS_OPTIONS = [
 const MANAGED_BY_OPTIONS = [
   'Thomas Shepard - East Meadow Properties',
   'Doorby',
+  'Tevan Picket',
 ]
 
 const LEASE_TERM_OPTIONS = [
@@ -333,13 +334,13 @@ export default function AddTenantWorkflow({ propertyId, propertyName, unitId, un
               </FormField>
               <div className="grid grid-cols-3 gap-4">
                 <FormField label="Pet Rent (Dog)">
-                  <input type="number" step="0.01" min="0" value={leaseData['Pet Rent (Dog)']} onChange={e => setL('Pet Rent (Dog)', e.target.value)} className={inp} placeholder="0.00" />
+                  <input type="number" step="0.01" min="0" value={leaseData['Pet Rent (Dog)']} onChange={e => setL('Pet Rent (Dog)', e.target.value)} className={inp} />
                 </FormField>
                 <FormField label="Pet Rent (Cat)">
-                  <input type="number" step="0.01" min="0" value={leaseData['Pet Rent (Cat)']} onChange={e => setL('Pet Rent (Cat)', e.target.value)} className={inp} placeholder="0.00" />
+                  <input type="number" step="0.01" min="0" value={leaseData['Pet Rent (Cat)']} onChange={e => setL('Pet Rent (Cat)', e.target.value)} className={inp} />
                 </FormField>
                 <FormField label="Other Fees">
-                  <input type="number" step="0.01" min="0" value={leaseData['Other Fees to Tenant']} onChange={e => setL('Other Fees to Tenant', e.target.value)} className={inp} placeholder="0.00" />
+                  <input type="number" step="0.01" min="0" value={leaseData['Other Fees to Tenant']} onChange={e => setL('Other Fees to Tenant', e.target.value)} className={inp} />
                 </FormField>
               </div>
               <FormField label="Notes">
