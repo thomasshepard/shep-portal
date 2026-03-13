@@ -233,15 +233,14 @@ export default function Documents() {
 
 function DocCard({ doc, onClick }) {
   const thumb = doc.attachments[0]?.thumbnails?.large?.url || doc.attachments[0]?.thumbnails?.small?.url
-  const isImage = doc.attachments[0]?.type?.startsWith('image/')
 
   return (
     <button
       onClick={onClick}
       className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow text-left w-full"
     >
-      {/* Thumbnail or placeholder */}
-      {thumb && isImage ? (
+      {/* Thumbnail — Airtable provides thumbnails for both images and PDFs */}
+      {thumb ? (
         <div className="h-36 overflow-hidden bg-gray-100">
           <img src={thumb} alt={doc.name} className="w-full h-full object-cover" />
         </div>
