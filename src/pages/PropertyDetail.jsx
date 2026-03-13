@@ -8,6 +8,8 @@ import PaymentForm from '../components/PaymentForm'
 import MaintenanceForm from '../components/MaintenanceForm'
 import AddTenantWorkflow from '../components/AddTenantWorkflow'
 import EditTenantModal from '../components/EditTenantModal'
+import AlertsPanel from '../components/AlertsPanel'
+import { useAlerts } from '../hooks/useAlerts'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -30,7 +32,7 @@ const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ou
 
 export default function PropertyDetail() {
   const { id } = useParams()
-  const { isAdmin, isVA } = useAuth()
+  const { isAdmin, isVA, profile } = useAuth()
   const [loading, setLoading] = useState(true)
   const [property, setProperty] = useState(null)
   const [rentalUnits, setRentalUnits] = useState([])
@@ -54,6 +56,12 @@ export default function PropertyDetail() {
   const [addTenantUnit, setAddTenantUnit] = useState(null)   // rental unit record or null
   const [editTenantData, setEditTenantData] = useState(null) // { tenant, lease } or null
   const unitsRef = useRef(null)
+
+  const userName = profile?.full_name || profile?.email || 'Unknown'
+  const { alerts, dismiss, restore } = useAlerts(
+    { properties: property ? [property] : [], rentalUnits, leases, tenants, invoicePayments, maintenance, loans },
+    userName
+  )
 
   useEffect(() => { load() }, [id])
 
@@ -294,6 +302,9 @@ export default function PropertyDetail() {
           )}
         </div>
       )}
+
+      {/* Alerts — compact, scoped to this property */}
+      <AlertsPanel alerts={alerts} onDismiss={dismiss} onRestore={restore} propertyFilter={id} compact />
 
       {/* Units & Tenants */}
       <div ref={unitsRef} className="bg-white rounded-xl border border-gray-200 p-5">

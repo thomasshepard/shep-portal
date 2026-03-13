@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { fetchAllRecords, fmtCurrency, fmtDate, PM_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
+import { useAlerts } from '../hooks/useAlerts'
 import LoadingSpinner from '../components/LoadingSpinner'
+import AlertsPanel from '../components/AlertsPanel'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -22,7 +24,7 @@ function isSold(prop) {
 }
 
 export default function Properties() {
-  const { isAdmin, isVA } = useAuth()
+  const { isAdmin, isVA, profile } = useAuth()
   const [loading, setLoading] = useState(true)
   const [properties, setProperties] = useState([])
   const [rentalUnits, setRentalUnits] = useState([])
@@ -30,20 +32,27 @@ export default function Properties() {
   const [tenants, setTenants] = useState([])
   const [invoicePayments, setInvoicePayments] = useState([])
   const [maintenance, setMaintenance] = useState([])
-  const [alertsOpen, setAlertsOpen] = useState(true)
+  const [loans, setLoans] = useState([])
   const [rentRollOpen, setRentRollOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
+
+  const userName = profile?.full_name || profile?.email || 'Unknown'
+  const { alerts, dismiss, restore } = useAlerts(
+    { properties, rentalUnits, leases, tenants, invoicePayments, maintenance, loans },
+    userName
+  )
 
   useEffect(() => {
     async function load() {
       try {
-        const [propRes, unitsRes, leasesRes, tenantsRes, invRes, maintRes] = await Promise.all([
+        const [propRes, unitsRes, leasesRes, tenantsRes, invRes, maintRes, loansRes] = await Promise.all([
           fetchAllRecords('Property', {}, PM_BASE_ID),
           fetchAllRecords('Rental Units', {}, PM_BASE_ID),
           fetchAllRecords('Lease Agreements', {}, PM_BASE_ID),
           fetchAllRecords('Tenants', {}, PM_BASE_ID),
           fetchAllRecords('Invoices Payments', {}, PM_BASE_ID),
           fetchAllRecords('Maintenance Requests', {}, PM_BASE_ID),
+          fetchAllRecords('Current Loans', {}, PM_BASE_ID),
         ])
         if (propRes.error) throw new Error(propRes.error)
         setProperties(propRes.data || [])
@@ -52,6 +61,7 @@ export default function Properties() {
         setTenants(tenantsRes.data || [])
         setInvoicePayments(invRes.data || [])
         setMaintenance(maintRes.data || [])
+        setLoans(loansRes.data || [])
       } catch (e) {
         toast.error('Failed to load properties: ' + e.message)
       } finally {
@@ -112,24 +122,6 @@ export default function Properties() {
     if (!due) return false
     return s === 'Pending' && due.getMonth() === thisMonth && due.getFullYear() === thisYear
   })
-
-  // Alerts (from owned properties only)
-  const activeLeaseIds = new Set(ownedProperties.flatMap(p => (p.fields?.['Rental Units'] || [])
-    .flatMap(uid => {
-      const unit = rentalUnits.find(u => u.id === uid)
-      return unit?.fields?.['Lease Agreements'] || []
-    })
-  ))
-  const expiringLeases = leases.filter(l => {
-    if (!activeLeaseIds.has(l.id)) return false
-    const end = l.fields?.['End Date'] ? new Date(l.fields['End Date']) : null
-    return end && end >= today && end <= in90
-  })
-  const emergencyMaint = maintenance.filter(m => {
-    const s = (m.fields?.Status || '').toLowerCase()
-    return s.includes('emergency') || s.includes('urgent')
-  })
-  const hasAlerts = expiringLeases.length > 0 || latePayments.length > 0 || emergencyMaint.length > 0
 
   // Per-property indexes
   const unitsByProperty = buildIndex(rentalUnits, null, ownedProperties)  // built differently below
@@ -193,48 +185,7 @@ export default function Properties() {
       </div>
 
       {/* Alerts */}
-      {hasAlerts && (
-        <div className="bg-white rounded-xl border border-amber-200">
-          <button
-            onClick={() => setAlertsOpen(o => !o)}
-            className="w-full flex items-center justify-between px-5 py-3 text-left"
-          >
-            <div className="flex items-center gap-2 font-semibold text-amber-700">
-              <AlertTriangle size={16} />
-              Alerts ({expiringLeases.length + latePayments.length + emergencyMaint.length})
-            </div>
-            {alertsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-          {alertsOpen && (
-            <div className="px-5 pb-4 space-y-2">
-              {expiringLeases.map(l => {
-                const end = new Date(l.fields['End Date'])
-                const days = Math.ceil((end - today) / 86400000)
-                const cls = days < 30
-                  ? 'bg-red-50 text-red-700 border-red-200'
-                  : days < 60
-                  ? 'bg-orange-50 text-orange-700 border-orange-200'
-                  : 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                return (
-                  <div key={l.id} className={`text-sm px-3 py-2 rounded-lg border ${cls}`}>
-                    <strong>Lease Expiring:</strong> {l.fields?.Name || l.id} — expires {fmtDate(l.fields['End Date'])} ({days} days)
-                  </div>
-                )
-              })}
-              {latePayments.map(p => (
-                <div key={p.id} className="text-sm px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200">
-                  <strong>Late Payment:</strong> {p.fields?.Name || p.id} — due {fmtDate(p.fields?.['Due Date'])}
-                </div>
-              ))}
-              {emergencyMaint.map(m => (
-                <div key={m.id} className="text-sm px-3 py-2 rounded-lg border bg-red-50 text-red-700 border-red-200">
-                  <strong>Emergency Maintenance:</strong> {m.fields?.Name || m.id}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <AlertsPanel alerts={alerts} onDismiss={dismiss} onRestore={restore} />
 
       {/* Property Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

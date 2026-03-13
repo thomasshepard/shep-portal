@@ -52,14 +52,14 @@ export async function fetchAllRecords(tableName, params = {}, baseId = BASE_ID) 
   }
 }
 
-/** Create a new record. */
-export async function createRecord(tableName, fields, baseId = BASE_ID) {
+/** Create a new record. Pass typecast: true to auto-create select options. */
+export async function createRecord(tableName, fields, baseId = BASE_ID, { typecast = false } = {}) {
   if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }
   try {
     const res = await fetch(buildUrl(tableName, baseId), {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ fields }),
+      body: JSON.stringify({ fields, ...(typecast ? { typecast: true } : {}) }),
     })
     const json = await res.json()
     if (!res.ok) return { data: null, error: json?.error?.message || `HTTP ${res.status}` }
@@ -69,14 +69,14 @@ export async function createRecord(tableName, fields, baseId = BASE_ID) {
   }
 }
 
-/** Update an existing record by ID. */
-export async function updateRecord(tableName, recordId, fields, baseId = BASE_ID) {
+/** Update an existing record by ID. Pass typecast: true to auto-create select options. */
+export async function updateRecord(tableName, recordId, fields, baseId = BASE_ID, { typecast = false } = {}) {
   if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }
   try {
     const res = await fetch(`${buildUrl(tableName, baseId)}/${recordId}`, {
       method: 'PATCH',
       headers: headers(),
-      body: JSON.stringify({ fields }),
+      body: JSON.stringify({ fields, ...(typecast ? { typecast: true } : {}) }),
     })
     const json = await res.json()
     if (!res.ok) return { data: null, error: json?.error?.message || `HTTP ${res.status}` }
