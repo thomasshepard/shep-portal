@@ -71,9 +71,10 @@ function getFeedForDate(flockId, schedules, targetDate) {
 async function fireWebhook(payload) {
   if (!WEBHOOK_URL) { console.warn('VITE_N8N_CHICKENS_WEBHOOK_URL not configured'); return }
   try {
+    // Use text/plain to avoid CORS preflight — n8n receives the JSON body regardless
     await fetch(WEBHOOK_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify(payload),
     })
   } catch (e) {
