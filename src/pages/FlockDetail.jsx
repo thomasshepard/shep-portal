@@ -14,6 +14,22 @@ import toast from 'react-hot-toast'
 
 const WEBHOOK_URL = import.meta.env.VITE_N8N_CHICKENS_WEBHOOK_URL
 
+const CORNISH_CROSS_SCHEDULE = [
+  { week: 1, oz_per_bird: 0.66 },
+  { week: 2, oz_per_bird: 0.97 },
+  { week: 3, oz_per_bird: 1.48 },
+  { week: 4, oz_per_bird: 2.07 },
+  { week: 5, oz_per_bird: 2.79 },
+  { week: 6, oz_per_bird: 3.11 },
+  { week: 7, oz_per_bird: 2.73 },
+  { week: 8, oz_per_bird: 2.30 },
+]
+
+const WEEK_OZ_FIELDS = [
+  'Week 1 oz/bird', 'Week 2 oz/bird', 'Week 3 oz/bird', 'Week 4 oz/bird',
+  'Week 5 oz/bird', 'Week 6 oz/bird', 'Week 7 oz/bird', 'Week 8 oz/bird',
+]
+
 const arr = v => Array.isArray(v) ? v : []
 
 function safeStr(val, fallback = '—') {
@@ -327,18 +343,48 @@ export default function FlockDetail() {
     setRecalculating(true)
     const f = flock.fields
     const currentVersion = scheduleRows.length > 0 ? (safeNum(scheduleRows[0].fields['Version']) ?? 1) : 1
+    const tw = safeNum(f['Target Weeks']) ?? 8
+    const breedName = safeStr(f['Breed'], '')
+
+    // 1. Deactivate all current version rows so n8n doesn't create duplicates
+    if (scheduleRows.length > 0) {
+      await Promise.all(
+        scheduleRows.map(s =>
+          updateRecord('Feeding Schedule', s.id, { 'fldy2kQTxvHAifAM5': false }, CHICKENS_BASE_ID)
+        )
+      )
+    }
+
+    // 2. Build schedule from breed profile; fall back to Cornish Cross defaults
+    let schedule = CORNISH_CROSS_SCHEDULE.slice(0, tw)
+    if (breedName) {
+      const res = await fetchAllRecords('Breed Profiles', {
+        filterByFormula: `{Breed Name} = '${breedName}'`,
+      }, CHICKENS_BASE_ID)
+      const profile = (res.data || [])[0]
+      if (profile) {
+        const built = WEEK_OZ_FIELDS
+          .slice(0, tw)
+          .map((fn, i) => ({ week: i + 1, oz_per_bird: safeNum(profile.fields[fn]) || 0 }))
+          .filter(w => w.oz_per_bird > 0)
+        if (built.length > 0) schedule = built
+      }
+    }
+
+    // 3. Fire webhook with full payload
     await fireWebhook({
       action: 'recalculate_schedule',
       flockId: id,
       flockName: safeStr(f['Name']),
       hatchDate: f['Hatch Date'] || '',
       newBirdCount: safeNum(f['Current Count']) ?? 0,
-      targetWeeks: safeNum(f['Target Weeks']) ?? 8,
-      breed: safeStr(f['Breed'], ''),
+      targetWeeks: tw,
+      breed: breedName,
       previousVersion: currentVersion,
       version: currentVersion + 1,
       baseId: CHICKENS_BASE_ID,
       tableId: 'tbl55s9JUg6g38w3g',
+      schedule,
     })
     toast.success('Recalculation triggered — reloading schedule in 3s…')
     setTimeout(async () => {
