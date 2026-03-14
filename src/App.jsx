@@ -15,6 +15,7 @@ import Files from './pages/Files'
 import LLCs from './pages/LLCs'
 import LLCDetail from './pages/LLCDetail'
 import Chickens from './pages/Chickens'
+import FlockDetail from './pages/FlockDetail'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="llcs" element={<PermRoute permission="llcs"><LLCs /></PermRoute>} />
             <Route path="llcs/:id" element={<PermRoute permission="llcs"><LLCDetail /></PermRoute>} />
             <Route path="chickens" element={<PermRoute permission="chickens"><Chickens /></PermRoute>} />
+            <Route path="chickens/:id" element={<PermRoute permission="chickens"><FlockDetail /></PermRoute>} />
             <Route path="documents" element={<PermRoute permission="documents"><Documents /></PermRoute>} />
             <Route path="deals" element={<PermRoute permission="deals"><Deals /></PermRoute>} />
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />

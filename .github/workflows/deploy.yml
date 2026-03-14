@@ -41,6 +41,7 @@ jobs:
           VITE_AIRTABLE_PM_BASE_ID: ${{ secrets.VITE_AIRTABLE_PM_BASE_ID }}
           VITE_AIRTABLE_DOCS_BASE_ID: ${{ secrets.VITE_AIRTABLE_DOCS_BASE_ID }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_N8N_CHICKENS_WEBHOOK_URL: ${{ secrets.VITE_N8N_CHICKENS_WEBHOOK_URL }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

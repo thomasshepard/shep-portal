@@ -1,332 +1,478 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Egg, Plus, X } from 'lucide-react'
 import {
-  Egg, Plus, AlertTriangle, Pencil, ChevronDown, Trash2,
-  ClipboardList, DollarSign, Calendar,
-} from 'lucide-react'
-import {
-  fetchAllRecords, deleteRecord, CHICKENS_BASE_ID,
-  fmtCurrency, fmtDate,
+  fetchAllRecords, createRecord, updateRecord, CHICKENS_BASE_ID,
 } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
-
-console.log('CHICKENS_BASE_ID:', CHICKENS_BASE_ID)
 import LoadingSpinner from '../components/LoadingSpinner'
-import FlockForm from '../components/FlockForm'
-import FeedingScheduleForm from '../components/FeedingScheduleForm'
-import MortalityForm from '../components/MortalityForm'
-import ExpenseForm from '../components/ExpenseForm'
 import toast from 'react-hot-toast'
 
-// ── Helpers ──────────────────────────────────────────────────────
+const WEBHOOK_URL = import.meta.env.VITE_N8N_CHICKENS_WEBHOOK_URL
 
-function daysBetween(dateStr) {
-  const d = new Date(dateStr)
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  d.setHours(0, 0, 0, 0)
-  return Math.floor((now - d) / 86400000)
+const arr = v => Array.isArray(v) ? v : []
+
+function safeStr(val, fallback = '—') {
+  if (val == null || val === '') return fallback
+  if (typeof val === 'object') return fallback
+  return String(val)
 }
 
-function getAge(hatchDate) {
-  const totalDays = daysBetween(hatchDate)
-  return { weeks: Math.floor(totalDays / 7), days: totalDays % 7, totalDays }
-}
-
-function currentWeekNum(hatchDate) {
-  return Math.floor(daysBetween(hatchDate) / 7) + 1
-}
-
-function processingInfo(processingDate) {
-  const d = new Date(processingDate)
-  const now = new Date()
-  const diffMs = d - now
-  const diffDays = Math.ceil(diffMs / 86400000)
-  return diffDays
-}
-
-function fmtAge(hatchDate) {
-  const tomorrow = new Date()
-  tomorrow.setDate(tomorrow.getDate() - 1)
-  if (new Date(hatchDate) > new Date()) {
-    const d = new Date(hatchDate)
-    return `Arriving ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-  }
-  const { weeks, days } = getAge(hatchDate)
-  return `${weeks}w ${days}d old`
+function safeNum(val) {
+  if (val == null || typeof val === 'object') return null
+  const n = Number(val)
+  return isNaN(n) ? null : n
 }
 
 const STATUS_COLORS = {
-  'Brooding': 'bg-yellow-100 text-yellow-700',
-  'Growing': 'bg-green-100 text-green-700',
-  'Ready to Process': 'bg-orange-100 text-orange-700',
-  'Processed': 'bg-gray-100 text-gray-500',
+  Growing: 'bg-green-100 text-green-700',
+  Processing: 'bg-orange-100 text-orange-700',
+  Processed: 'bg-gray-100 text-gray-500',
+  Lost: 'bg-red-100 text-red-700',
 }
 
-const CAT_COLORS = {
-  'Chicks': 'bg-blue-100 text-blue-700',
-  'Feed': 'bg-green-100 text-green-700',
-  'Equipment': 'bg-gray-100 text-gray-600',
-  'Bedding': 'bg-yellow-100 text-yellow-700',
-  'Supplements/Medication': 'bg-purple-100 text-purple-700',
-  'Processing': 'bg-orange-100 text-orange-700',
-  'Utilities': 'bg-red-100 text-red-700',
-  'Other': 'bg-gray-100 text-gray-600',
+function fmtAge(hatchDate) {
+  if (!hatchDate) return '—'
+  const hatch = new Date(hatchDate + 'T12:00:00')
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  if (hatch > today) {
+    return `Arriving ${hatch.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+  }
+  const totalDays = Math.floor((today - hatch) / 86400000)
+  const weeks = Math.floor(totalDays / 7)
+  const days = totalDays % 7
+  if (weeks === 0) return `${days}d old`
+  if (days === 0) return `${weeks} week${weeks !== 1 ? 's' : ''} old`
+  return `${weeks} weeks, ${days} days old`
 }
 
-// ── FlockCard ─────────────────────────────────────────────────────
+function daysToProcessing(processingDate) {
+  if (!processingDate) return null
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  const proc = new Date(processingDate + 'T12:00:00')
+  return Math.ceil((proc - today) / 86400000)
+}
 
-function FlockCard({ flock, schedules, mortality, expenses, isAdmin, onEdit, onRecordLoss, onViewSchedule }) {
+function getFeedForDate(flockId, schedules, targetDate) {
+  const d = new Date(targetDate)
+  d.setHours(12, 0, 0, 0)
+  return schedules.find(s => {
+    if (!arr(s.fields['Flock']).includes(flockId)) return false
+    if (s.fields['Is Current Version'] !== true) return false
+    const start = s.fields['Week Start Date'] ? new Date(s.fields['Week Start Date'] + 'T12:00:00') : null
+    const end = s.fields['Week End Date'] ? new Date(s.fields['Week End Date'] + 'T12:00:00') : null
+    if (!start || !end) return false
+    return d >= start && d <= end
+  }) || null
+}
+
+async function fireWebhook(payload) {
+  if (!WEBHOOK_URL) { console.warn('VITE_N8N_CHICKENS_WEBHOOK_URL not configured'); return }
+  try {
+    await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  } catch (e) {
+    console.warn('Webhook call failed:', e.message)
+  }
+}
+
+// ── FlockCard ─────────────────────────────────────────────────────────────────
+
+function FlockCard({ flock, schedules, archived, onClick }) {
   const f = flock.fields
-  const hatchDate = f['Hatch Date']
-  const processingDate = f['Processing Date']
-  const currentCount = f['Current Count'] ?? 0
-  const startingCount = f['Starting Count'] ?? 0
+  const currentCount = safeNum(f['Current Count']) ?? 0
+  const startingCount = safeNum(f['Starting Count']) ?? 0
+  const lost = Math.max(0, startingCount - currentCount)
+  const status = safeStr(f['Status'])
 
-  // Age / arriving
-  const ageLabel = hatchDate ? fmtAge(hatchDate) : '—'
-  const isFuture = hatchDate && new Date(hatchDate) > new Date()
+  const today = new Date()
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
 
-  // Today's feed
-  const weekNum = hatchDate && !isFuture ? currentWeekNum(hatchDate) : null
-  const scheduleEntry = weekNum
-    ? schedules.find(s => s.fields.Flock?.[0] === flock.id && s.fields.Week === weekNum)
-    : null
-  const pastWeek8 = weekNum && weekNum > 8 && !processingDate
-  const depleted = currentCount === 0
+  const todayFeed = archived ? null : getFeedForDate(flock.id, schedules, today)
+  const tomorrowFeed = archived ? null : getFeedForDate(flock.id, schedules, tomorrow)
 
-  // Mortality
-  const flockMortality = mortality.filter(m => m.fields.Flock?.[0] === flock.id)
-  const totalLost = flockMortality.reduce((s, m) => s + (m.fields.Count || 1), 0)
-  const mortalityRate = startingCount > 0 ? ((totalLost / startingCount) * 100).toFixed(1) : 0
-
-  // Expenses total
-  const totalExpenses = expenses
-    .filter(e => e.fields.Flock?.[0] === flock.id)
-    .reduce((s, e) => s + (e.fields.Amount || 0), 0)
-
-  // Processing countdown
-  let countdownEl = null
-  if (processingDate) {
-    const daysUntil = processingInfo(processingDate)
-    if (daysUntil < 0) {
-      countdownEl = <span className="text-gray-500">Processing day was {fmtDate(processingDate)}</span>
-    } else if (daysUntil <= 2) {
-      const pullDate = new Date(processingDate)
-      pullDate.setDate(pullDate.getDate() - 2)
-      countdownEl = (
-        <span className="text-red-600 font-semibold">
-          ⚠ Processing in {daysUntil}d — PULL FEED by {pullDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-        </span>
-      )
-    } else if (daysUntil <= 7) {
-      countdownEl = <span className="text-orange-600 font-semibold">Processing in {daysUntil} days</span>
+  const days = f['Processing Date'] ? daysToProcessing(f['Processing Date']) : null
+  let countdownColor = 'text-gray-600'
+  let countdownLabel = ''
+  if (days !== null) {
+    if (days < 0) {
+      countdownColor = 'text-red-600 font-semibold'; countdownLabel = 'Overdue'
+    } else if (days < 7) {
+      countdownColor = 'text-red-600 font-semibold'; countdownLabel = `${days} days to processing`
+    } else if (days <= 14) {
+      countdownColor = 'text-yellow-600 font-semibold'; countdownLabel = `${days} days to processing`
     } else {
-      countdownEl = <span className="text-gray-600">Processing in {daysUntil} days</span>
+      countdownColor = 'text-green-600'; countdownLabel = `${days} days to processing`
     }
-  } else {
-    countdownEl = <span className="text-gray-400">No processing date set</span>
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      {/* Header */}
-      <div className="px-5 pt-5 pb-3">
+    <button
+      onClick={archived ? undefined : onClick}
+      className={`bg-white rounded-xl border border-gray-200 overflow-hidden text-left w-full transition-shadow ${
+        archived ? 'opacity-60' : 'hover:shadow-md cursor-pointer'
+      }`}
+    >
+      <div className="px-5 py-4 border-b border-gray-100">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold text-gray-900">{f.Name}</h3>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{f.Breed || 'Unknown breed'}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[f.Status] || 'bg-gray-100 text-gray-600'}`}>{f.Status}</span>
-              <span className="text-xs text-gray-500">{ageLabel}</span>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-gray-900 truncate">{safeStr(f['Name'])}</h3>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {f['Breed'] && (
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{f['Breed']}</span>
+              )}
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[status] || 'bg-gray-100 text-gray-600'}`}>
+                {status}
+              </span>
+              <span className="text-xs text-gray-400">{fmtAge(f['Hatch Date'])}</span>
             </div>
           </div>
-          {isAdmin && (
-            <button onClick={onEdit} className="text-gray-400 hover:text-gray-700 mt-0.5">
-              <Pencil size={15} />
-            </button>
+          {!archived && (
+            <div className="text-right flex-shrink-0">
+              {todayFeed ? (
+                <>
+                  <div className="flex items-baseline gap-1 justify-end">
+                    <span className="text-3xl font-black text-gray-900">
+                      {safeNum(todayFeed.fields['Quarts Per Day']) ?? '—'}
+                    </span>
+                    <span className="text-sm text-gray-500">qts today</span>
+                  </div>
+                  {tomorrowFeed && tomorrowFeed.id !== todayFeed.id && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {safeNum(tomorrowFeed.fields['Quarts Per Day'])} qts tomorrow
+                    </p>
+                  )}
+                </>
+              ) : (
+                <span className="text-sm text-gray-400">No schedule</span>
+              )}
+            </div>
           )}
         </div>
       </div>
-
-      {/* Today's Feed — hero number */}
-      <div className="px-5 pb-4 border-b border-gray-100">
-        {depleted ? (
-          <div className="text-gray-400 text-sm italic">Flock depleted</div>
-        ) : isFuture ? (
-          <div className="text-gray-400 text-sm italic">Not arrived yet</div>
-        ) : pastWeek8 ? (
-          <div className="text-amber-600 text-sm font-medium">Past 8-week plan — consider processing</div>
-        ) : weekNum && weekNum <= 8 ? (
-          scheduleEntry ? (
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-black text-gray-900">{scheduleEntry.fields['Quarts Per Day'] ?? '—'}</span>
-                <span className="text-lg text-gray-500 font-medium">qts today</span>
-              </div>
-              <div className="flex gap-3 mt-1 text-xs text-gray-400">
-                <span>Week {weekNum} · {scheduleEntry.fields['Date Range'] || ''}</span>
-                {scheduleEntry.fields.Notes && <span className="text-amber-600">{scheduleEntry.fields.Notes}</span>}
-              </div>
-            </div>
-          ) : (
-            <div className="text-gray-400 text-sm">
-              No schedule for week {weekNum} —{' '}
-              {isAdmin && (
-                <button onClick={onViewSchedule} className="text-blue-600 hover:underline">edit schedule</button>
-              )}
-            </div>
-          )
-        ) : null}
+      <div className="px-5 py-3 flex items-center justify-between gap-4 text-sm">
+        <div>
+          <span className="font-medium text-gray-700">{currentCount} / {startingCount} birds</span>
+          {lost > 0 && <span className="text-xs text-red-400 ml-1.5">· {lost} lost</span>}
+        </div>
+        {!archived && countdownLabel && (
+          <span className={`text-xs ${countdownColor}`}>{countdownLabel}</span>
+        )}
+        {archived && <span className="text-xs text-gray-400">Archived</span>}
       </div>
+    </button>
+  )
+}
 
-      {/* Bird count + countdown */}
-      <div className="px-5 py-3 space-y-2 border-b border-gray-100">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-700 font-medium">{currentCount} / {startingCount} birds</span>
-            {totalLost > 0 && (
-              <span className="text-xs text-red-500">({totalLost} lost — {mortalityRate}%)</span>
-            )}
+// ── Add Flock Modal ───────────────────────────────────────────────────────────
+
+const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+const emptyFlockForm = {
+  name: '',
+  breed: '',
+  hatchDate: new Date().toISOString().split('T')[0],
+  startingCount: '',
+  supplier: '',
+  purchasePrice: '',
+  vaccinated: false,
+  vaccinationNotes: '',
+  feedType: '',
+  targetWeeks: '',
+  overrideDate: false,
+  processingDate: '',
+  notes: '',
+}
+
+function calcProcDate(hatchDate, targetWeeks) {
+  if (!hatchDate || !targetWeeks) return ''
+  const d = new Date(hatchDate + 'T12:00:00')
+  d.setDate(d.getDate() + Number(targetWeeks) * 7)
+  return d.toISOString().split('T')[0]
+}
+
+function AddFlockModal({ breedProfiles, onClose, onSaved }) {
+  const navigate = useNavigate()
+  const [form, setForm] = useState(emptyFlockForm)
+  const [saving, setSaving] = useState(false)
+
+  function setF(key, val) { setForm(f => ({ ...f, [key]: val })) }
+
+  function onBreedChange(breedName) {
+    const profile = breedProfiles.find(p => p.fields['Breed Name'] === breedName)
+    setForm(f => {
+      const tw = profile ? (safeNum(profile.fields['Target Weeks']) ?? f.targetWeeks) : f.targetWeeks
+      const ft = profile ? (safeStr(profile.fields['Default Feed Type'], '') || f.feedType) : f.feedType
+      return {
+        ...f,
+        breed: breedName,
+        feedType: ft,
+        targetWeeks: String(tw),
+        processingDate: f.overrideDate ? f.processingDate : calcProcDate(f.hatchDate, tw),
+      }
+    })
+  }
+
+  function onHatchChange(val) {
+    setForm(f => ({
+      ...f,
+      hatchDate: val,
+      processingDate: f.overrideDate ? f.processingDate : calcProcDate(val, f.targetWeeks),
+    }))
+  }
+
+  function onWeeksChange(val) {
+    setForm(f => ({
+      ...f,
+      targetWeeks: val,
+      processingDate: f.overrideDate ? f.processingDate : calcProcDate(f.hatchDate, val),
+    }))
+  }
+
+  async function handleSave(e) {
+    e.preventDefault()
+    if (!form.name.trim()) return toast.error('Name is required')
+    if (!form.startingCount) return toast.error('Starting count is required')
+    setSaving(true)
+
+    const fields = {
+      'Name': form.name.trim(),
+      'Hatch Date': form.hatchDate,
+      'Starting Count': Number(form.startingCount),
+      'Current Count': Number(form.startingCount),
+      'Status': 'Growing',
+      'Webhook Triggered': false,
+    }
+    if (form.breed) fields['Breed'] = form.breed
+    if (form.supplier) fields['Supplier'] = form.supplier.trim()
+    if (form.purchasePrice) fields['Purchase Price'] = Number(form.purchasePrice)
+    if (form.vaccinated) fields['Vaccinated'] = true
+    if (form.vaccinationNotes) fields['Vaccination Notes'] = form.vaccinationNotes.trim()
+    if (form.feedType) fields['Feed Type'] = form.feedType.trim()
+    if (form.targetWeeks) fields['Target Weeks'] = Number(form.targetWeeks)
+    if (form.processingDate) fields['Processing Date'] = form.processingDate
+    if (form.notes) fields['Notes'] = form.notes.trim()
+
+    const { data, error } = await createRecord('Flock', fields, CHICKENS_BASE_ID)
+    if (error) { toast.error('Failed to create flock: ' + error); setSaving(false); return }
+
+    const newId = data.id
+    const profile = breedProfiles.find(p => p.fields['Breed Name'] === form.breed)
+    const tw = Number(form.targetWeeks) || 8
+    const weekFields = [
+      'Week 1 oz/bird', 'Week 2 oz/bird', 'Week 3 oz/bird', 'Week 4 oz/bird',
+      'Week 5 oz/bird', 'Week 6 oz/bird', 'Week 7 oz/bird', 'Week 8 oz/bird',
+    ]
+    const schedule = profile
+      ? weekFields.slice(0, tw)
+          .map((fn, i) => ({ week: i + 1, oz_per_bird: safeNum(profile.fields[fn]) || 0 }))
+          .filter(w => w.oz_per_bird > 0)
+      : []
+
+    await fireWebhook({
+      action: 'generate_schedule',
+      flockId: newId,
+      flockName: fields['Name'],
+      hatchDate: form.hatchDate,
+      birdCount: Number(form.startingCount),
+      targetWeeks: tw,
+      breed: form.breed || '',
+      version: 1,
+      baseId: CHICKENS_BASE_ID,
+      tableId: 'tbl55s9JUg6g38w3g',
+      schedule,
+    })
+
+    await updateRecord('Flock', newId, { 'Webhook Triggered': true }, CHICKENS_BASE_ID)
+    toast.success('Flock created — feeding schedule is being generated')
+    setSaving(false)
+    onSaved()
+    navigate(`/chickens/${newId}`)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl w-full max-w-lg shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+          <h2 className="font-semibold text-gray-900">Add Flock</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSave} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          <Field label="Name *">
+            <input required value={form.name} onChange={e => setF('name', e.target.value)} className={inp} placeholder="e.g. Spring 2026 Batch" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Breed">
+              <select value={form.breed} onChange={e => onBreedChange(e.target.value)} className={inp}>
+                <option value="">Select breed…</option>
+                {breedProfiles.map(p => (
+                  <option key={p.id} value={p.fields['Breed Name']}>{p.fields['Breed Name']}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Hatch Date *">
+              <input type="date" required value={form.hatchDate} onChange={e => onHatchChange(e.target.value)} className={inp} />
+            </Field>
           </div>
-          <button
-            onClick={onRecordLoss}
-            className="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 min-h-[32px]"
-          >
-            Record Loss
-          </button>
-        </div>
-        <div className="text-sm">{countdownEl}</div>
-      </div>
-
-      {/* Footer */}
-      <div className="px-5 py-3 flex items-center justify-between text-xs text-gray-500">
-        <div className="flex gap-4">
-          {f['Feed Type'] && <span>{f['Feed Type']}</span>}
-          {totalExpenses > 0 && <span>{fmtCurrency(totalExpenses)} in expenses</span>}
-        </div>
-        <button onClick={onViewSchedule} className="text-blue-600 hover:underline text-xs">
-          View Schedule
-        </button>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Starting Count *">
+              <input type="number" min={1} required value={form.startingCount} onChange={e => setF('startingCount', e.target.value)} className={inp} placeholder="e.g. 50" />
+            </Field>
+            <Field label="Target Weeks">
+              <input type="number" min={1} max={16} value={form.targetWeeks} onChange={e => onWeeksChange(e.target.value)} className={inp} placeholder="e.g. 8" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Supplier">
+              <input value={form.supplier} onChange={e => setF('supplier', e.target.value)} className={inp} placeholder="Murray McMurray" />
+            </Field>
+            <Field label="Purchase Price ($)">
+              <input type="number" min={0} step="0.01" value={form.purchasePrice} onChange={e => setF('purchasePrice', e.target.value)} className={inp} placeholder="0.00" />
+            </Field>
+          </div>
+          <Field label="Feed Type">
+            <input value={form.feedType} onChange={e => setF('feedType', e.target.value)} className={inp} placeholder="e.g. Broiler Starter" />
+          </Field>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Processing Date
+              {!form.overrideDate && form.processingDate && (
+                <span className="text-xs text-gray-400 font-normal ml-1">(auto-calculated)</span>
+              )}
+            </label>
+            <div className="flex gap-2 items-center">
+              <input
+                type="date"
+                readOnly={!form.overrideDate}
+                value={form.processingDate}
+                onChange={e => setF('processingDate', e.target.value)}
+                className={inp + (form.overrideDate ? '' : ' bg-gray-50 text-gray-500 cursor-default')}
+              />
+              <button
+                type="button"
+                onClick={() => setF('overrideDate', !form.overrideDate)}
+                className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
+              >
+                {form.overrideDate ? 'Auto' : 'Override'}
+              </button>
+            </div>
+          </div>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={form.vaccinated} onChange={e => setF('vaccinated', e.target.checked)} className="rounded" />
+            <span className="text-sm text-gray-700">Vaccinated</span>
+          </label>
+          {form.vaccinated && (
+            <Field label="Vaccination Notes">
+              <input value={form.vaccinationNotes} onChange={e => setF('vaccinationNotes', e.target.value)} className={inp} placeholder="e.g. Marek's Day 1" />
+            </Field>
+          )}
+          <Field label="Notes">
+            <textarea rows={2} value={form.notes} onChange={e => setF('notes', e.target.value)} className={inp + ' resize-none'} placeholder="Internal notes…" />
+          </Field>
+          <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 bg-amber-500 text-white text-sm rounded-lg font-medium hover:bg-amber-600 disabled:opacity-60"
+            >
+              {saving ? 'Creating…' : 'Create Flock'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
 }
 
-// ── Main Page ─────────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function Chickens() {
   const { isAdmin } = useAuth()
-
+  const navigate = useNavigate()
   const [flocks, setFlocks] = useState([])
   const [schedules, setSchedules] = useState([])
-  const [mortality, setMortality] = useState([])
-  const [expenses, setExpenses] = useState([])
+  const [breedProfiles, setBreedProfiles] = useState([])
   const [loading, setLoading] = useState(true)
-
-  const [showFlockForm, setShowFlockForm] = useState(false)
-  const [editingFlock, setEditingFlock] = useState(null)
-  const [showScheduleFor, setShowScheduleFor] = useState(null) // flock record
-  const [showMortalityFor, setShowMortalityFor] = useState(null) // flock record
-  const [showExpenseForm, setShowExpenseForm] = useState(false)
-  const [editingExpense, setEditingExpense] = useState(null)
-
-  const [selectedFlockId, setSelectedFlockId] = useState('')
-  const [expenseCatFilter, setExpenseCatFilter] = useState('All')
-  const [expenseFlockFilter, setExpenseFlockFilter] = useState('All')
+  const [showArchived, setShowArchived] = useState(false)
+  const [showAddForm, setShowAddForm] = useState(false)
 
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
     setLoading(true)
-    const [f, s, m, e] = await Promise.all([
-      fetchAllRecords('Flocks', { sort: { field: 'Hatch Date', direction: 'desc' } }, CHICKENS_BASE_ID),
-      fetchAllRecords('Feeding schedule', {}, CHICKENS_BASE_ID),
-      fetchAllRecords('Mortality log', { sort: { field: 'Date', direction: 'desc' } }, CHICKENS_BASE_ID),
-      fetchAllRecords('Chicken expenses', { sort: { field: 'Date', direction: 'desc' } }, CHICKENS_BASE_ID),
+    const [f, s, b] = await Promise.all([
+      fetchAllRecords('Flock', { sort: { field: 'Hatch Date', direction: 'desc' } }, CHICKENS_BASE_ID),
+      fetchAllRecords('Feeding Schedule', {}, CHICKENS_BASE_ID),
+      fetchAllRecords('Breed Profiles', { sort: { field: 'Breed Name', direction: 'asc' } }, CHICKENS_BASE_ID),
     ])
-    const flockData = f.data || []
-    setFlocks(flockData)
+    setFlocks(f.data || [])
     setSchedules(s.data || [])
-    setMortality(m.data || [])
-    setExpenses(e.data || [])
-
-    // Default selected flock to first active flock
-    const active = flockData.filter(fl => fl.fields.Status !== 'Processed')
-    if (active.length > 0 && !selectedFlockId) setSelectedFlockId(active[0].id)
-
+    setBreedProfiles(b.data || [])
     setLoading(false)
   }
 
-  const activeFlocks = useMemo(() => flocks.filter(f => f.fields.Status !== 'Processed'), [flocks])
-  const allFlocks = flocks
-
-  const selectedFlock = flocks.find(f => f.id === selectedFlockId)
-  const selectedSchedule = schedules.filter(s => s.fields.Flock?.[0] === selectedFlockId)
-  const selectedMortality = mortality.filter(m => m.fields.Flock?.[0] === selectedFlockId).sort(
-    (a, b) => new Date(b.fields.Date) - new Date(a.fields.Date)
-  )
-
-  // Expense summary
-  const totalSpent = expenses.reduce((s, e) => s + (e.fields.Amount || 0), 0)
-  const feedCosts = expenses.filter(e => e.fields.Category === 'Feed').reduce((s, e) => s + (e.fields.Amount || 0), 0)
-  const chickCosts = expenses.filter(e => e.fields.Category === 'Chicks').reduce((s, e) => s + (e.fields.Amount || 0), 0)
-  const otherCosts = totalSpent - feedCosts - chickCosts
-
-  // Filtered expenses
-  const filteredExpenses = useMemo(() => {
-    return expenses.filter(e => {
-      if (expenseCatFilter !== 'All' && e.fields.Category !== expenseCatFilter) return false
-      if (expenseFlockFilter === 'General' && e.fields.Flock?.length > 0) return false
-      if (expenseFlockFilter !== 'All' && expenseFlockFilter !== 'General' && e.fields.Flock?.[0] !== expenseFlockFilter) return false
-      return true
-    })
-  }, [expenses, expenseCatFilter, expenseFlockFilter])
-
-  async function handleDeleteMortality(record) {
-    if (!confirm('Delete this mortality record?')) return
-    const { error } = await deleteRecord('Mortality log', record.id, CHICKENS_BASE_ID)
-    if (error) toast.error(error)
-    else { toast.success('Record deleted'); loadAll() }
-  }
-
-  async function handleDeleteExpense(record) {
-    if (!confirm('Delete this expense?')) return
-    const { error } = await deleteRecord('Chicken expenses', record.id, CHICKENS_BASE_ID)
-    if (error) toast.error(error)
-    else { toast.success('Expense deleted'); loadAll() }
-  }
+  const activeFlocks = flocks.filter(f => !f.fields['Archived'])
+  const archivedFlocks = flocks.filter(f => f.fields['Archived'])
 
   if (loading) return <LoadingSpinner />
 
   return (
-    <div className="space-y-8">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <Egg className="text-amber-500" size={24} />
-            <h1 className="text-2xl font-bold text-gray-900">Chicken Farming</h1>
+            <Egg className="text-amber-500" size={22} />
+            <h1 className="text-2xl font-bold text-gray-900">Chickens</h1>
           </div>
-          <p className="text-sm text-gray-500 mt-1">Active flock management, feeding schedules, and expense tracking.</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {activeFlocks.length} active flock{activeFlocks.length !== 1 ? 's' : ''}
+          </p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={() => { setEditingFlock(null); setShowFlockForm(true) }}
-            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          >
-            <Plus size={16} /> Add Flock
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {archivedFlocks.length > 0 && (
+            <button
+              onClick={() => setShowArchived(v => !v)}
+              className="text-sm text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-2"
+            >
+              {showArchived ? 'Hide Archived' : `Show Archived (${archivedFlocks.length})`}
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus size={16} /> Add Flock
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Active Flock Cards ── */}
-      {activeFlocks.length === 0 ? (
+      {activeFlocks.length === 0 && !showArchived ? (
         <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 text-center">
           <Egg size={36} className="mx-auto text-gray-300 mb-3" />
           <p className="text-gray-500 font-medium">No active flocks</p>
           {isAdmin && (
-            <button onClick={() => { setEditingFlock(null); setShowFlockForm(true) }}
-              className="mt-4 text-sm text-amber-600 hover:text-amber-700 font-medium">
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="mt-4 text-sm text-amber-600 hover:text-amber-700 font-medium"
+            >
               Add your first flock →
             </button>
           )}
@@ -338,299 +484,21 @@ export default function Chickens() {
               key={flock.id}
               flock={flock}
               schedules={schedules}
-              mortality={mortality}
-              expenses={expenses}
-              isAdmin={isAdmin}
-              onEdit={() => { setEditingFlock(flock); setShowFlockForm(true) }}
-              onRecordLoss={() => setShowMortalityFor(flock)}
-              onViewSchedule={() => {
-                setSelectedFlockId(flock.id)
-                document.getElementById('schedule-section')?.scrollIntoView({ behavior: 'smooth' })
-              }}
+              archived={false}
+              onClick={() => navigate(`/chickens/${flock.id}`)}
             />
           ))}
-        </div>
-      )}
-
-      {/* ── Flock selector for lower sections ── */}
-      {allFlocks.length > 0 && (
-        <div className="flex items-center gap-3">
-          <label className="text-sm font-medium text-gray-600">Viewing flock:</label>
-          <select
-            value={selectedFlockId}
-            onChange={e => setSelectedFlockId(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {allFlocks.map(f => (
-              <option key={f.id} value={f.id}>{f.fields.Name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* ── Feeding Schedule ── */}
-      <section id="schedule-section" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <ClipboardList size={18} className="text-gray-400" />
-            <h2 className="font-semibold text-gray-900">Feeding Schedule</h2>
-          </div>
-          {isAdmin && selectedFlock && (
-            <button
-              onClick={() => setShowScheduleFor(selectedFlock)}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              Edit Schedule
-            </button>
-          )}
-        </div>
-
-        {!selectedFlock ? (
-          <p className="px-5 py-8 text-center text-gray-400 text-sm">No flock selected</p>
-        ) : selectedSchedule.length === 0 ? (
-          <p className="px-5 py-8 text-center text-gray-400 text-sm">
-            No feeding schedule entered.{isAdmin && <> <button onClick={() => setShowScheduleFor(selectedFlock)} className="text-blue-600 hover:underline">Click Edit Schedule</button> to enter weekly quarts.</>}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-5 py-3 font-medium text-gray-500 text-xs">Week</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Date Range</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Quarts/Day</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Bar</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Notes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {(() => {
-                  const hatchDate = selectedFlock?.fields['Hatch Date']
-                  const weekNow = hatchDate ? currentWeekNum(hatchDate) : null
-                  const maxQuarts = Math.max(...selectedSchedule.map(s => s.fields['Quarts Per Day'] || 0), 1)
-                  const sorted = [...selectedSchedule].sort((a, b) => a.fields.Week - b.fields.Week)
-                  return sorted.map(s => {
-                    const w = s.fields.Week
-                    const isCurrent = w === weekNow
-                    const isPast = weekNow !== null && w < weekNow
-                    const quarts = s.fields['Quarts Per Day']
-                    return (
-                      <tr key={s.id} className={isCurrent ? 'bg-amber-50' : isPast ? 'bg-gray-50/50' : ''}>
-                        <td className={`px-5 py-3 font-medium ${isCurrent ? 'text-amber-700' : isPast ? 'text-gray-400' : 'text-gray-700'}`}>
-                          {isCurrent ? `► W${w}` : `W${w}`}
-                        </td>
-                        <td className={`px-4 py-3 ${isPast ? 'text-gray-400' : 'text-gray-600'}`}>{s.fields['Date Range'] || '—'}</td>
-                        <td className={`px-4 py-3 font-semibold ${isCurrent ? 'text-amber-700 text-base' : isPast ? 'text-gray-400' : 'text-gray-700'}`}>
-                          {quarts ?? '—'}
-                        </td>
-                        <td className="px-4 py-3 w-32">
-                          {quarts != null && (
-                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${isCurrent ? 'bg-amber-400' : isPast ? 'bg-gray-300' : 'bg-blue-400'}`}
-                                style={{ width: `${(quarts / maxQuarts) * 100}%` }}
-                              />
-                            </div>
-                          )}
-                        </td>
-                        <td className={`px-4 py-3 text-xs ${isPast ? 'text-gray-400' : 'text-gray-500'}`}>{s.fields.Notes || ''}</td>
-                      </tr>
-                    )
-                  })
-                })()}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* ── Mortality Log ── */}
-      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <h2 className="font-semibold text-gray-900">Mortality Log</h2>
-            {selectedFlock && <span className="text-xs text-gray-400">{selectedFlock.fields.Name}</span>}
-          </div>
-          {selectedFlock && (
-            <button
-              onClick={() => setShowMortalityFor(selectedFlock)}
-              className="text-sm text-red-600 hover:text-red-800 border border-red-200 rounded px-3 py-1"
-            >
-              Record Loss
-            </button>
-          )}
-        </div>
-
-        {selectedMortality.length === 0 ? (
-          <p className="px-5 py-8 text-center text-gray-400 text-sm">No mortality events recorded.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-5 py-3 font-medium text-gray-500 text-xs">Date</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Count</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Cause</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Notes</th>
-                  {isAdmin && <th className="px-4 py-3 w-8" />}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {selectedMortality.map(m => (
-                  <tr key={m.id} className="hover:bg-gray-50">
-                    <td className="px-5 py-3 text-gray-600">{fmtDate(m.fields.Date)}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{m.fields.Count || 1}</td>
-                    <td className="px-4 py-3 text-gray-600">{m.fields.Cause || '—'}</td>
-                    <td className="px-4 py-3 text-gray-500">{m.fields.Notes || ''}</td>
-                    {isAdmin && (
-                      <td className="px-4 py-3">
-                        <button onClick={() => handleDeleteMortality(m)} className="text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* ── Expenses ── */}
-      <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <DollarSign size={18} className="text-gray-400" />
-            <h2 className="font-semibold text-gray-900">Expenses</h2>
-          </div>
-          {isAdmin && (
-            <button
-              onClick={() => { setEditingExpense(null); setShowExpenseForm(true) }}
-              className="flex items-center gap-1.5 text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700"
-            >
-              <Plus size={14} /> Add Expense
-            </button>
-          )}
-        </div>
-
-        {/* Summary cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-5 border-b border-gray-100">
-          {[
-            { label: 'Total Spent', value: fmtCurrency(totalSpent), color: 'text-gray-900' },
-            { label: 'Feed', value: fmtCurrency(feedCosts), color: 'text-green-700' },
-            { label: 'Chicks', value: fmtCurrency(chickCosts), color: 'text-blue-700' },
-            { label: 'Other', value: fmtCurrency(otherCosts), color: 'text-gray-600' },
-          ].map(({ label, value, color }) => (
-            <div key={label} className="bg-gray-50 rounded-lg px-4 py-3">
-              <p className="text-xs text-gray-500">{label}</p>
-              <p className={`text-lg font-bold ${color}`}>{value}</p>
-            </div>
+          {showArchived && archivedFlocks.map(flock => (
+            <FlockCard key={flock.id} flock={flock} schedules={[]} archived={true} onClick={null} />
           ))}
         </div>
-
-        {/* Filter bar */}
-        <div className="flex flex-wrap gap-3 px-5 py-3 border-b border-gray-100 bg-gray-50/50">
-          <select value={expenseCatFilter} onChange={e => setExpenseCatFilter(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
-            <option value="All">All Categories</option>
-            {['Chicks','Feed','Equipment','Bedding','Supplements/Medication','Processing','Utilities','Other'].map(c => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-          <select value={expenseFlockFilter} onChange={e => setExpenseFlockFilter(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
-            <option value="All">All Flocks</option>
-            <option value="General">General (no flock)</option>
-            {allFlocks.map(f => <option key={f.id} value={f.id}>{f.fields.Name}</option>)}
-          </select>
-        </div>
-
-        {filteredExpenses.length === 0 ? (
-          <p className="px-5 py-8 text-center text-gray-400 text-sm">No expenses found.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-5 py-3 font-medium text-gray-500 text-xs">Date</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Category</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Description</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Qty</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-500 text-xs">Amount</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Flock</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500 text-xs">Vendor</th>
-                  {isAdmin && <th className="px-4 py-3 w-16" />}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filteredExpenses.map(e => {
-                  const linkedFlock = e.fields.Flock?.[0] ? allFlocks.find(f => f.id === e.fields.Flock[0]) : null
-                  return (
-                    <tr key={e.id} className="hover:bg-gray-50">
-                      <td className="px-5 py-3 text-gray-500">{fmtDate(e.fields.Date)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CAT_COLORS[e.fields.Category] || 'bg-gray-100 text-gray-600'}`}>
-                          {e.fields.Category}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-700">{e.fields.Description}</td>
-                      <td className="px-4 py-3 text-gray-500">{e.fields.Quantity ?? '—'}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-800">{fmtCurrency(e.fields.Amount)}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{linkedFlock?.fields.Name || 'General'}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{e.fields.Vendor || '—'}</td>
-                      {isAdmin && (
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button onClick={() => { setEditingExpense(e); setShowExpenseForm(true) }}
-                              className="text-gray-300 hover:text-blue-500 transition-colors">
-                              <Pencil size={13} />
-                            </button>
-                            <button onClick={() => handleDeleteExpense(e)}
-                              className="text-gray-300 hover:text-red-500 transition-colors">
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* ── Modals ── */}
-      {showFlockForm && (
-        <FlockForm
-          flock={editingFlock}
-          onClose={() => setShowFlockForm(false)}
-          onSaved={() => { setShowFlockForm(false); loadAll() }}
-        />
       )}
-      {showScheduleFor && (
-        <FeedingScheduleForm
-          flock={showScheduleFor}
-          existingSchedule={schedules.filter(s => s.fields.Flock?.[0] === showScheduleFor.id)}
-          onClose={() => setShowScheduleFor(null)}
-          onSaved={() => { setShowScheduleFor(null); loadAll() }}
-        />
-      )}
-      {showMortalityFor && (
-        <MortalityForm
-          flock={showMortalityFor}
-          onClose={() => setShowMortalityFor(null)}
-          onSaved={() => { setShowMortalityFor(null); loadAll() }}
-        />
-      )}
-      {showExpenseForm && (
-        <ExpenseForm
-          expense={editingExpense}
-          flocks={allFlocks}
-          onClose={() => setShowExpenseForm(false)}
-          onSaved={() => { setShowExpenseForm(false); loadAll() }}
+
+      {showAddForm && (
+        <AddFlockModal
+          breedProfiles={breedProfiles}
+          onClose={() => setShowAddForm(false)}
+          onSaved={() => setShowAddForm(false)}
         />
       )}
     </div>
