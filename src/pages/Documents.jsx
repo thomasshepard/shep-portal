@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import {
   Search, X, FileText, AlertTriangle, ExternalLink,
-  ChevronLeft, ChevronRight, Plus, Upload, Share2, Flag,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, Upload, Share2, Flag,
 } from 'lucide-react'
 import { fetchAllRecords, updateRecord, DOCS_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
@@ -133,13 +133,6 @@ async function ensureDocsFields() {
         body: JSON.stringify({ name: 'Tags', type: 'multipleSelects', options: { choices: [] } }),
       }))
     }
-    if (!fieldNames.has('Shared')) {
-      creates.push(fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Shared', type: 'checkbox', options: { icon: 'check', color: 'greenBright' } }),
-      }))
-    }
     if (!fieldNames.has('Duplicate')) {
       creates.push(fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
         method: 'POST',
@@ -168,15 +161,15 @@ function paginationPages(current, total) {
 // ── Main component ───────────────────────────────────────────────────────────
 
 export default function Documents() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile } = useAuth()
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
   const [notConfigured, setNotConfigured] = useState(false)
   const [search, setSearch] = useState('')
-  const [filterCategory, setFilterCategory] = useState('')
+  const [filterCategories, setFilterCategories] = useState([])
   const [filterEntity, setFilterEntity] = useState('')
   const [filterYear, setFilterYear] = useState('')
-  const [filterTag, setFilterTag] = useState('')
+  const [filterTags, setFilterTags] = useState([])
   const [sort, setSort] = useState('newest')
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState(null)
@@ -195,7 +188,7 @@ export default function Documents() {
   }, [])
 
   // Reset to page 1 when filters or sort change
-  useEffect(() => { setPage(0) }, [search, filterCategory, filterEntity, filterYear, filterTag, sort])
+  useEffect(() => { setPage(0) }, [search, filterCategories, filterEntity, filterYear, filterTags, sort])
 
   async function load() {
     setLoading(true)
@@ -248,15 +241,26 @@ export default function Documents() {
     return [...s].sort()
   }, [docs])
 
+  // Tags the current non-admin user is allowed to see (null = admin, sees all)
+  const userAllowedTags = useMemo(() => {
+    if (isAdmin) return null
+    const v = profile?.allowed_tags
+    if (!v) return []
+    return Array.isArray(v) ? v : v.split(',').map(t => t.trim()).filter(Boolean)
+  }, [isAdmin, profile])
+
   // Filtered + sorted list
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     let result = docs.filter(d => {
-      if (!isAdmin && !d.shared) return false
-      if (filterCategory && d.category !== filterCategory) return false
+      if (!isAdmin) {
+        if (!userAllowedTags?.length) return false
+        if (!d.tags.some(t => userAllowedTags.includes(t))) return false
+      }
+      if (filterCategories.length > 0 && !filterCategories.includes(d.category)) return false
       if (filterEntity && d.entity !== filterEntity) return false
       if (filterYear && fmtYear(d.createdTime) !== filterYear) return false
-      if (filterTag && !d.tags.includes(filterTag)) return false
+      if (filterTags.length > 0 && !filterTags.some(t => d.tags.includes(t))) return false
       if (q && !d.name.toLowerCase().includes(q) &&
           !d.summary.toLowerCase().includes(q) &&
           !d.entity.toLowerCase().includes(q) &&
@@ -270,11 +274,11 @@ export default function Documents() {
     else if (sort === 'az') result.sort((a, b) => a.name.localeCompare(b.name))
     else if (sort === 'za') result.sort((a, b) => b.name.localeCompare(a.name))
     return result
-  }, [docs, search, filterCategory, filterEntity, filterYear, filterTag, sort, isAdmin])
+  }, [docs, search, filterCategories, filterEntity, filterYear, filterTags, sort, isAdmin, userAllowedTags])
 
   const pageCount  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const paginated  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
-  const hasFilters = filterCategory || filterEntity || filterYear || filterTag
+  const hasFilters = filterCategories.length > 0 || filterEntity || filterYear || filterTags.length > 0
 
   if (notConfigured) {
     return (
@@ -335,10 +339,12 @@ export default function Documents() {
         </div>
 
         {categories.length > 0 && (
-          <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-            <option value="">All Categories</option>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <MultiSelectDropdown
+            label="All Categories"
+            options={categories}
+            selected={filterCategories}
+            onChange={setFilterCategories}
+          />
         )}
 
         {entities.length > 0 && (
@@ -356,10 +362,12 @@ export default function Documents() {
         )}
 
         {allTags.length > 0 && (
-          <select value={filterTag} onChange={e => setFilterTag(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-            <option value="">All Tags</option>
-            {allTags.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <MultiSelectDropdown
+            label="All Tags"
+            options={allTags}
+            selected={filterTags}
+            onChange={setFilterTags}
+          />
         )}
 
         <select value={sort} onChange={e => setSort(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
@@ -368,7 +376,7 @@ export default function Documents() {
 
         {hasFilters && (
           <button
-            onClick={() => { setFilterCategory(''); setFilterEntity(''); setFilterYear(''); setFilterTag('') }}
+            onClick={() => { setFilterCategories([]); setFilterEntity(''); setFilterYear(''); setFilterTags([]) }}
             className="text-sm text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-2"
           >
             Clear filters
@@ -414,6 +422,67 @@ export default function Documents() {
           onMarkDuplicate={handleMarkDuplicate}
           isAdmin={isAdmin}
         />
+      )}
+    </div>
+  )
+}
+
+// ── MultiSelectDropdown ───────────────────────────────────────────────────────
+
+function MultiSelectDropdown({ label, options, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const buttonLabel = selected.length === 0
+    ? label
+    : selected.length === 1
+      ? selected[0]
+      : `${selected.length} selected`
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 whitespace-nowrap"
+      >
+        {buttonLabel}
+        <ChevronDown size={13} className="text-gray-400 flex-shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute top-full mt-1 left-0 z-20 bg-white border border-gray-200 rounded-lg shadow-lg min-w-44 py-1 max-h-60 overflow-y-auto">
+          <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={selected.length === 0}
+              onChange={() => onChange([])}
+              className="rounded"
+            />
+            <span className="text-sm text-gray-700">All</span>
+          </label>
+          {options.map(opt => (
+            <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selected.includes(opt)}
+                onChange={() => {
+                  if (selected.includes(opt)) onChange(selected.filter(s => s !== opt))
+                  else onChange([...selected, opt])
+                }}
+                className="rounded"
+              />
+              <span className="text-sm text-gray-700">{opt}</span>
+            </label>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -528,7 +597,6 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
   const docDate   = fmtDate(doc.date)
 
   const [localTags, setLocalTags] = useState(doc.tags)
-  const [localShared, setLocalShared] = useState(doc.shared)
   const [tagInput, setTagInput] = useState('')
   const tagInputRef = useRef(null)
 
@@ -565,18 +633,6 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
       toast.error('Failed to remove tag')
       setLocalTags(localTags)
       onUpdateDoc(doc.id, { tags: localTags })
-    }
-  }
-
-  async function toggleShared() {
-    const newShared = !localShared
-    setLocalShared(newShared)
-    onUpdateDoc(doc.id, { shared: newShared })
-    const { error } = await updateRecord('Documents', doc.id, { Shared: newShared }, DOCS_BASE_ID)
-    if (error) {
-      toast.error('Failed to update Shared flag')
-      setLocalShared(localShared)
-      onUpdateDoc(doc.id, { shared: localShared })
     }
   }
 
@@ -746,26 +802,6 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
                   <Plus size={15} />
                 </button>
               </div>
-            </div>
-
-            {/* Shared with partners */}
-            <div className="flex items-center justify-between py-3 border-t border-gray-100">
-              <div>
-                <p className="text-sm font-medium text-gray-700">Shared with partners</p>
-                <p className="text-xs text-gray-400 mt-0.5">Partners with document access can view this record</p>
-              </div>
-              <button
-                onClick={toggleShared}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-                  localShared ? 'bg-blue-600' : 'bg-gray-200'
-                }`}
-                role="switch"
-                aria-checked={localShared}
-              >
-                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                  localShared ? 'translate-x-5' : 'translate-x-0'
-                }`} />
-              </button>
             </div>
 
             {extraFields.length > 0 && (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, X } from 'lucide-react'
+import { Plus, Trash2, X, Edit2 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import LoadingSpinner from '../../components/LoadingSpinner'
@@ -23,6 +23,7 @@ const emptyForm = {
   can_view_chickens: false,
   can_view_documents: false,
   can_view_deals: false,
+  allowed_tags: '',
 }
 
 export default function AdminUsers() {
@@ -31,6 +32,7 @@ export default function AdminUsers() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [editingUser, setEditingUser] = useState(null)  // user being edited for allowed_tags
 
   useEffect(() => { load() }, [])
 
@@ -94,6 +96,7 @@ export default function AdminUsers() {
           can_view_chickens: form.can_view_chickens,
           can_view_documents: form.can_view_documents,
           can_view_deals: form.can_view_deals,
+          allowed_tags: form.allowed_tags || null,
         })
         .eq('id', newUserId)
       if (!profileErr) { profileUpdated = true; break }
@@ -255,13 +258,22 @@ export default function AdminUsers() {
                       />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => handleDelete(u)}
-                        title="Delete user"
-                        className="text-gray-300 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setEditingUser(u)}
+                          title="Edit allowed tags"
+                          className="text-gray-300 hover:text-blue-500 transition-colors"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(u)}
+                          title="Delete user"
+                          className="text-gray-300 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -277,6 +289,18 @@ export default function AdminUsers() {
         <p>• <strong>Active/Inactive</strong> is a soft flag. To fully block access, also disable the account in Supabase Auth dashboard.</p>
         <p>• <strong>Delete</strong> permanently removes the account. Requires the <code>delete-user</code> edge function to be deployed.</p>
       </div>
+
+      {/* Edit Allowed Tags Modal */}
+      {editingUser && (
+        <EditTagsModal
+          user={editingUser}
+          onClose={() => setEditingUser(null)}
+          onSave={async (userId, tags) => {
+            const ok = await updateUser(userId, { allowed_tags: tags || null })
+            if (ok) { toast.success('Allowed tags updated'); setEditingUser(null) }
+          }}
+        />
+      )}
 
       {/* Add User Modal */}
       {showAddForm && (
@@ -329,6 +353,18 @@ export default function AdminUsers() {
                   <option value="admin">Admin</option>
                 </select>
               </Field>
+
+              {form.role !== 'admin' && (
+                <Field label="Allowed Tags">
+                  <input
+                    value={form.allowed_tags}
+                    onChange={e => setField('allowed_tags', e.target.value)}
+                    className={inp}
+                    placeholder="Ridge & Anchor, Virginia Holdings"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Comma-separated. Controls which tagged documents this user can see.</p>
+                </Field>
+              )}
 
               {form.role !== 'admin' && (
                 <div>
@@ -403,6 +439,57 @@ export default function AdminUsers() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function EditTagsModal({ user, onClose, onSave }) {
+  const [tags, setTags] = useState(
+    Array.isArray(user.allowed_tags)
+      ? user.allowed_tags.join(', ')
+      : (user.allowed_tags || '')
+  )
+  const [saving, setSaving] = useState(false)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setSaving(true)
+    await onSave(user.id, tags.trim() || null)
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl w-full max-w-sm shadow-xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div>
+            <h2 className="font-semibold text-gray-900">Edit Allowed Tags</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{user.full_name || user.email}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <Field label="Allowed Tags">
+            <input
+              value={tags}
+              onChange={e => setTags(e.target.value)}
+              className={inp}
+              placeholder="Ridge & Anchor, Virginia Holdings"
+            />
+            <p className="text-xs text-gray-400 mt-1">Comma-separated. This user will only see documents tagged with at least one of these values.</p>
+          </Field>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
