@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import {
-  Search, X, FileText, AlertTriangle, ExternalLink,
-  ChevronLeft, ChevronRight, ChevronDown, Plus, Upload, Share2, Flag,
+  Search, X, FileText, AlertTriangle, ExternalLink, Calendar,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, Upload, Share2, Flag, Mail,
 } from 'lucide-react'
 import { fetchAllRecords, updateRecord, DOCS_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
@@ -56,17 +56,24 @@ function fmtYear(str) {
 function parseDoc(record) {
   const f = record.fields || {}
   const attachments = arr(pick(f, 'Attachments', 'File', 'Scan', 'Document'))
-  const rawTags = arr(f['Tags'])
-  const tags = rawTags.map(t => (typeof t === 'object' ? (t.name || '') : String(t))).filter(Boolean)
+  // Tags is a singleLineText field containing a plain comma-separated string
+  const tags = safeStr(f['Tags'] || f['fldNDnNI658sbNde0'] || '', '')
+    .split(',')
+    .map(t => t.trim())
+    .filter(Boolean)
   return {
     id: record.id,
-    createdTime: record.createdTime || '',            // filed date — top-level Airtable field
-    date: safeStr(pick(f, 'Date', 'Document Date'), ''), // document date from AI extraction
+    createdTime: record.createdTime || '',
+    date: safeStr(pick(f, 'Date', 'Document Date'), ''),
     name: safeStr(pick(f, 'Name', 'Document Name', 'Title'), 'Untitled'),
     category: safeStr(pick(f, 'Category', 'Document Type', 'Type'), ''),
     entity: safeStr(pick(f, 'Entity', 'LLC', 'Property', 'Related Entity'), ''),
     summary: safeStr(pick(f, 'Summary', 'AI Summary'), ''),
     notes: safeStr(pick(f, 'Description', 'Notes'), ''),
+    isMail: f['IsMail'] === true,
+    sender: safeStr(f['Sender'] || '', ''),
+    recipient: safeStr(f['Recipient'] || '', ''),
+    ocr: safeStr(f['OCR'] || '', ''),
     tags,
     shared: f['Shared'] === true,
     duplicate: f['Duplicate'] === true,
@@ -110,6 +117,7 @@ const STANDARD_KEYS = new Set([
   'Description', 'Notes',
   'Attachments', 'File', 'Scan', 'Document',
   'Tags', 'Shared', 'Duplicate',
+  'IsMail', 'Sender', 'Recipient', 'OCR',
   'Created', 'Last Modified', 'Needs Cleanup',
 ])
 
@@ -126,13 +134,6 @@ async function ensureDocsFields() {
     if (!table) return
     const fieldNames = new Set((table.fields || []).map(f => f.name))
     const creates = []
-    if (!fieldNames.has('Tags')) {
-      creates.push(fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Tags', type: 'multipleSelects', options: { choices: [] } }),
-      }))
-    }
     if (!fieldNames.has('Duplicate')) {
       creates.push(fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
         method: 'POST',
@@ -322,14 +323,14 @@ export default function Documents() {
       </div>
 
       {/* Search + Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-48">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search documents…"
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full h-9 pl-9 pr-3 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -348,14 +349,14 @@ export default function Documents() {
         )}
 
         {entities.length > 0 && (
-          <select value={filterEntity} onChange={e => setFilterEntity(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+          <select value={filterEntity} onChange={e => setFilterEntity(e.target.value)} className="h-9 text-sm border border-gray-300 rounded-lg px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="">All Entities</option>
             {entities.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
         )}
 
         {years.length > 0 && (
-          <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+          <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="h-9 text-sm border border-gray-300 rounded-lg px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
             <option value="">All Years</option>
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
@@ -370,14 +371,14 @@ export default function Documents() {
           />
         )}
 
-        <select value={sort} onChange={e => setSort(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        <select value={sort} onChange={e => setSort(e.target.value)} className="h-9 text-sm border border-gray-300 rounded-lg px-3 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
           {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
         </select>
 
         {hasFilters && (
           <button
             onClick={() => { setFilterCategories([]); setFilterEntity(''); setFilterYear(''); setFilterTags([]) }}
-            className="text-sm text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-2"
+            className="h-9 text-sm text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3"
           >
             Clear filters
           </button>
@@ -452,7 +453,7 @@ function MultiSelectDropdown({ label, options, selected, onChange }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 whitespace-nowrap"
+        className="h-9 text-sm border border-gray-300 rounded-lg px-3 bg-white flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500 whitespace-nowrap"
       >
         {buttonLabel}
         <ChevronDown size={13} className="text-gray-400 flex-shrink-0" />
@@ -540,38 +541,47 @@ function PaginationBar({ page, pageCount, total, pageSize, onPage }) {
 function DocCard({ doc, onClick }) {
   const thumb = doc.attachments[0]?.thumbnails?.large?.url || doc.attachments[0]?.thumbnails?.small?.url
   const filedDate = fmtDate(doc.createdTime)
+  const ext = doc.attachments[0]?.filename?.split('.').pop()?.toLowerCase() || ''
+  const isPdf = ext === 'pdf' || doc.attachments[0]?.type === 'application/pdf'
+  const isImg = doc.attachments[0]?.type?.startsWith('image/')
 
   return (
     <button
       onClick={onClick}
-      className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow text-left w-full"
+      className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md hover:border-gray-300 transition-all text-left w-full"
     >
       {thumb ? (
-        <div className="h-36 overflow-hidden bg-gray-100">
+        <div className="h-20 overflow-hidden bg-gray-100 rounded-t-xl">
           <img src={thumb} alt={doc.name} className="w-full h-full object-cover" />
         </div>
       ) : doc.attachments.length > 0 ? (
-        <div className="h-36 bg-gray-50 flex items-center justify-center border-b border-gray-100">
-          <FileText size={36} className="text-gray-300" />
-          <span className="text-xs text-gray-400 ml-2">{doc.attachments.length} file{doc.attachments.length !== 1 ? 's' : ''}</span>
+        <div className={`h-20 flex items-center justify-center border-b rounded-t-xl ${isPdf ? 'bg-red-50' : isImg ? 'bg-blue-50' : 'bg-gray-50'}`}>
+          <span className={`text-3xl font-bold tracking-tight select-none ${isPdf ? 'text-red-200' : isImg ? 'text-blue-200' : 'text-gray-200'}`}>
+            {isPdf ? 'P' : isImg ? 'I' : 'F'}
+          </span>
         </div>
       ) : null}
 
-      <div className="p-4 space-y-2">
+      <div className="p-5 space-y-2">
         <div className="flex items-start justify-between gap-2">
-          <p className="font-medium text-gray-900 text-sm leading-snug line-clamp-2">{doc.name}</p>
+          <p className="font-medium text-gray-900 text-[14px] leading-snug line-clamp-2">{doc.name}</p>
           {doc.category && doc.category !== '—' && (
-            <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 font-medium ${categoryColor(doc.category)}`}>
+            <span className={`text-xs px-2.5 py-0.5 rounded-full flex-shrink-0 font-medium ${categoryColor(doc.category)}`}>
               {doc.category}
             </span>
           )}
         </div>
         {doc.entity && doc.entity !== '—' && <p className="text-xs text-gray-500">{doc.entity}</p>}
-        {filedDate && <p className="text-xs text-gray-400">Filed {filedDate}</p>}
+        {filedDate && (
+          <p className="text-xs text-gray-400 flex items-center gap-1">
+            <Calendar size={10} className="flex-shrink-0" />
+            Filed {filedDate}
+          </p>
+        )}
         {doc.tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {doc.tags.slice(0, 3).map(t => (
-              <span key={t} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{t}</span>
+              <span key={t} className="text-xs bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded">{t}</span>
             ))}
             {doc.tags.length > 3 && <span className="text-xs text-gray-400">+{doc.tags.length - 3}</span>}
           </div>
@@ -598,6 +608,7 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
 
   const [localTags, setLocalTags] = useState(doc.tags)
   const [tagInput, setTagInput] = useState('')
+  const [ocrOpen, setOcrOpen] = useState(false)
   const tagInputRef = useRef(null)
 
   const extraFields = Object.entries(doc.raw).filter(([k]) => !STANDARD_KEYS.has(k))
@@ -616,7 +627,7 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
     setLocalTags(newTags)
     setTagInput('')
     onUpdateDoc(doc.id, { tags: newTags })
-    const { error } = await updateRecord('Documents', doc.id, { Tags: newTags }, DOCS_BASE_ID)
+    const { error } = await updateRecord('Documents', doc.id, { Tags: newTags.join(', ') }, DOCS_BASE_ID)
     if (error) {
       toast.error('Failed to save tag')
       setLocalTags(localTags)
@@ -628,7 +639,7 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
     const newTags = localTags.filter(t => t !== tag)
     setLocalTags(newTags)
     onUpdateDoc(doc.id, { tags: newTags })
-    const { error } = await updateRecord('Documents', doc.id, { Tags: newTags }, DOCS_BASE_ID)
+    const { error } = await updateRecord('Documents', doc.id, { Tags: newTags.join(', ') }, DOCS_BASE_ID)
     if (error) {
       toast.error('Failed to remove tag')
       setLocalTags(localTags)
@@ -650,12 +661,17 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
         onClick={e => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-start justify-between gap-3 px-6 py-4 border-b border-gray-200 flex-shrink-0">
+        <div className="flex items-start justify-between gap-3 px-6 py-5 border-b border-gray-200 flex-shrink-0">
           <div className="flex-1 min-w-0">
-            <h2 className="font-semibold text-gray-900 text-lg leading-snug">{doc.name}</h2>
-            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+            <h2 className="font-semibold text-gray-900 text-xl leading-snug">{doc.name}</h2>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
               {doc.category && doc.category !== '—' && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${categoryColor(doc.category)}`}>{doc.category}</span>
+                <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${categoryColor(doc.category)}`}>{doc.category}</span>
+              )}
+              {doc.isMail && (
+                <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full font-medium bg-green-50 text-green-700">
+                  <Mail size={10} /> Physical mail
+                </span>
               )}
               {doc.entity && doc.entity !== '—' && <span className="text-xs text-gray-500">{doc.entity}</span>}
               {filedDate && <span className="text-xs text-gray-400">Filed: {filedDate}</span>}
@@ -760,25 +776,48 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
           <div className="px-6 py-5 space-y-5">
             {doc.summary && doc.summary !== '—' && (
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Summary</p>
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{doc.summary}</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Summary</p>
+                <div className="bg-blue-50/70 rounded-lg p-3">
+                  <p className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap">{doc.summary}</p>
+                </div>
               </div>
             )}
             {doc.notes && doc.notes !== '—' && (
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Notes</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Notes</p>
                 <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{doc.notes}</p>
+              </div>
+            )}
+
+            {/* Mail Details — only when IsMail = true */}
+            {doc.isMail && (doc.sender || doc.recipient) && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Mail Details</p>
+                <div className="border border-gray-200 rounded-lg p-3 grid grid-cols-[4rem_1fr] gap-x-4 gap-y-2">
+                  {doc.sender && (
+                    <>
+                      <span className="text-xs text-gray-400 font-medium pt-0.5">From</span>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{doc.sender}</p>
+                    </>
+                  )}
+                  {doc.recipient && (
+                    <>
+                      <span className="text-xs text-gray-400 font-medium pt-0.5">To</span>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{doc.recipient}</p>
+                    </>
+                  )}
+                </div>
               </div>
             )}
 
             {/* Tags */}
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Tags</p>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Tags</p>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {localTags.map(tag => (
-                  <span key={tag} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                  <span key={tag} className="inline-flex items-center gap-1 bg-teal-50 text-teal-700 text-xs font-medium px-2 py-0.5 rounded-full">
                     {tag}
-                    <button onClick={() => removeTag(tag)} className="text-blue-400 hover:text-blue-700 ml-0.5" title="Remove tag">
+                    <button onClick={() => removeTag(tag)} className="text-teal-400 hover:text-teal-700 ml-0.5" title="Remove tag">
                       <X size={11} />
                     </button>
                   </span>
@@ -819,6 +858,26 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
                     )
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* OCR text — collapsible, collapsed by default */}
+            {doc.ocr && doc.ocr !== '—' && (
+              <div className="border-t border-gray-100 pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Full OCR Text</p>
+                  <button
+                    onClick={() => setOcrOpen(o => !o)}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    {ocrOpen ? 'Hide text' : 'Show text'}
+                  </button>
+                </div>
+                {ocrOpen && (
+                  <pre className="font-mono text-xs text-gray-600 bg-gray-50 rounded-lg p-3 max-h-72 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                    {doc.ocr}
+                  </pre>
+                )}
               </div>
             )}
 
