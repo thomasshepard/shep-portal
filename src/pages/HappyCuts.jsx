@@ -20,12 +20,14 @@ const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
 const CF = {
   name: 'fldGL097AcMkuoEOV', phone: 'fld8Pvw9PVZ2NbFAK',
   address: 'fldKeMIk04Z0jDLGB', city: 'fldrU58CIWkwZSXdq',
-  status: 'fldffTQUz4vtdmdQC', source: 'fldo96pa3p3atK1II',
+  status: 'fldIYOLDa7aoEzYtf', // Status v2: Lead/Recurring/One-Time/Cold/Lost
+  source: 'fldo96pa3p3atK1II',
   lotSize: 'fldVU5PtL0plCLwNT', introMow: 'fldISodjHRyqQjxrW',
   rate: 'fldyMY0Ol45rigJB3', frequency: 'fldFhIhpjT7ZQ3uUR',
   specInstr: 'fldj6kBhVPzCMaodF', lastContact: 'fldL0kROy9gmqGn6n',
   notes: 'fldnB5pgFTZCrtnKp', mows: 'fldZEPF6RRobDt68t',
   intLog: 'fldjvR4YIoKITpbbn',
+  email: 'fldQyQqbLZFDYvNzL', stripeCustomerId: 'fld01FQpuNajt1eB3',
 }
 
 // Schedule field IDs
@@ -36,6 +38,8 @@ const SF = {
   payMethod: 'fldZx0GDaJkLML2ID', stripeId: 'fldC06DE4htmBScNM',
   invStatus: 'fldhiIRXuRlvp3QXO', duration: 'fldsVZmdyFnXAIszv',
   notes: 'fldos2p3iwvUCKlH6', contacts: 'fldemlueed8aZMi7J',
+  timePreference: 'fldAc9skq3oOTrjiE', // singleSelect: Specific Time/Morning/Afternoon/Anytime
+  scheduledTime: 'fldtwRBQ5DcQ2UQCF',  // singleLineText: "8:00 AM", "Morning", etc.
 }
 
 // ─── Airtable helpers ─────────────────────────────────────────────────────────
@@ -119,6 +123,8 @@ function parseMow(r) {
     invStatus: safeStr(f[SF.invStatus]),
     duration: safeNum(f[SF.duration]),
     notes: safeStr(f[SF.notes]),
+    scheduledTime: safeStr(f[SF.scheduledTime]),
+    timePreference: safeStr(f[SF.timePreference]),
     contactIds: arr(f[SF.contacts]),
   }
 }
@@ -140,11 +146,11 @@ function dateToStr(d) { return d.toLocaleDateString('en-CA') }
 
 // ─── Status colors ────────────────────────────────────────────────────────────
 const CONTACT_STATUS = {
-  Active: 'bg-green-100 text-green-700',
-  Lead: 'bg-yellow-100 text-yellow-700',
-  Scheduled: 'bg-blue-100 text-blue-700',
-  Cold: 'bg-gray-100 text-gray-500',
-  Lost: 'bg-red-100 text-red-700',
+  'Lead':      'bg-yellow-100 text-yellow-800',
+  'Recurring': 'bg-green-100 text-green-800',
+  'One-Time':  'bg-blue-100 text-blue-800',
+  'Cold':      'bg-gray-100 text-gray-600',
+  'Lost':      'bg-red-100 text-red-700',
 }
 const MOW_STATUS = {
   Scheduled: 'bg-blue-100 text-blue-700',
@@ -255,10 +261,11 @@ function ConfirmCompleteModal({ mow, contact, onClose, onConfirm }) {
     setLoading(true)
     try {
       await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
-      // Also update linked contact status to Active
+      // Update linked contact status: Recurring mow → Recurring, otherwise → One-Time
       const contactId = mow.contactIds?.[0]
       if (contactId) {
-        await atPatch(CONTACTS_TABLE, contactId, { [CF.status]: 'Active' })
+        const newStatus = mow.type === 'Recurring' ? 'Recurring' : 'One-Time'
+        await atPatch(CONTACTS_TABLE, contactId, { [CF.status]: newStatus })
       }
       // TODO: Replace with actual Stripe invoice link from fldC06DE4htmBScNM once Stripe integration built
       window.open('https://dashboard.stripe.com/invoices', '_blank')
@@ -510,9 +517,12 @@ function MowCard({ mow, contact, onOpenJob }) {
       {contact && (
         <p className="text-sm text-gray-500 mb-1">{contact.address}{contact.city ? `, ${contact.city}` : ''}</p>
       )}
-      <p className="text-sm text-gray-600 mb-3">
+      <p className="text-sm text-gray-600 mb-1">
         {mow.type}{mow.type && mow.amount != null ? ' · ' : ''}{mow.amount != null ? fmtCurrency(mow.amount) : ''}
       </p>
+      {(mow.scheduledTime || mow.timePreference) && (
+        <p className="text-xs text-gray-400 mb-3">🕐 {mow.scheduledTime || mow.timePreference}</p>
+      )}
       {contact?.specInstr && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
           <p className="text-xs font-bold text-amber-700">⚠️ Special Instructions</p>
@@ -972,7 +982,7 @@ function ClientsTab({ contacts, onRefresh }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('All')
   const [addOpen, setAddOpen] = useState(false)
-  const statuses = ['All', 'Active', 'Lead', 'Scheduled', 'Cold', 'Lost']
+  const statuses = ['All', 'Lead', 'Recurring', 'One-Time', 'Cold', 'Lost']
 
   const filtered = contacts.filter(c => {
     const matchSearch = !search || `${c.name} ${c.address}`.toLowerCase().includes(search.toLowerCase())

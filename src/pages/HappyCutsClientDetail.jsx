@@ -18,12 +18,14 @@ const INTLOG_TABLE   = 'tblTnQsV4POQ5da1X'
 const CF = {
   name: 'fldGL097AcMkuoEOV', phone: 'fld8Pvw9PVZ2NbFAK',
   address: 'fldKeMIk04Z0jDLGB', city: 'fldrU58CIWkwZSXdq',
-  status: 'fldffTQUz4vtdmdQC', source: 'fldo96pa3p3atK1II',
+  status: 'fldIYOLDa7aoEzYtf', // Status v2: Lead/Recurring/One-Time/Cold/Lost
+  source: 'fldo96pa3p3atK1II',
   lotSize: 'fldVU5PtL0plCLwNT', introMow: 'fldISodjHRyqQjxrW',
   rate: 'fldyMY0Ol45rigJB3', frequency: 'fldFhIhpjT7ZQ3uUR',
   specInstr: 'fldj6kBhVPzCMaodF', lastContact: 'fldL0kROy9gmqGn6n',
   notes: 'fldnB5pgFTZCrtnKp', mows: 'fldZEPF6RRobDt68t',
   intLog: 'fldjvR4YIoKITpbbn',
+  email: 'fldQyQqbLZFDYvNzL', stripeCustomerId: 'fld01FQpuNajt1eB3',
 }
 
 // Schedule field IDs
@@ -34,6 +36,8 @@ const SF = {
   payMethod: 'fldZx0GDaJkLML2ID', stripeId: 'fldC06DE4htmBScNM',
   invStatus: 'fldhiIRXuRlvp3QXO', duration: 'fldsVZmdyFnXAIszv',
   notes: 'fldos2p3iwvUCKlH6', contacts: 'fldemlueed8aZMi7J',
+  timePreference: 'fldAc9skq3oOTrjiE',
+  scheduledTime: 'fldtwRBQ5DcQ2UQCF',
 }
 
 // Interaction Log field IDs
@@ -158,11 +162,11 @@ function fmtTimestamp(str) {
 
 // ─── Status colors ────────────────────────────────────────────────────────────
 const CONTACT_STATUS = {
-  Active: 'bg-green-100 text-green-700',
-  Lead: 'bg-yellow-100 text-yellow-700',
-  Scheduled: 'bg-blue-100 text-blue-700',
-  Cold: 'bg-gray-100 text-gray-500',
-  Lost: 'bg-red-100 text-red-700',
+  'Lead':      'bg-yellow-100 text-yellow-800',
+  'Recurring': 'bg-green-100 text-green-800',
+  'One-Time':  'bg-blue-100 text-blue-800',
+  'Cold':      'bg-gray-100 text-gray-600',
+  'Lost':      'bg-red-100 text-red-700',
 }
 const MOW_STATUS = {
   Scheduled: 'bg-blue-100 text-blue-700',
@@ -364,6 +368,134 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   )
 }
 
+// ─── Schedule Mow Modal ───────────────────────────────────────────────────────
+function ScheduleMowModal({ contact, onClose, onSave }) {
+  const tomorrow = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
+  const [form, setForm] = useState({
+    date: tomorrow,
+    timePreference: 'Anytime',
+    specificTime: '',
+    type: 'One-Time',
+    amount: contact.rate ? String(contact.rate) : '20',
+    notes: '',
+  })
+  const [loading, setLoading] = useState(false)
+  function set(k, v) { setForm(p => ({ ...p, [k]: v })) }
+
+  function getScheduledTime() {
+    if (form.timePreference === 'Specific Time' && form.specificTime) {
+      // Convert 24h time input to "8:00 AM" format
+      const [h, m] = form.specificTime.split(':').map(Number)
+      const ampm = h >= 12 ? 'PM' : 'AM'
+      const hr = h % 12 || 12
+      return `${hr}:${String(m).padStart(2, '0')} ${ampm}`
+    }
+    return form.timePreference
+  }
+
+  async function handleSave() {
+    if (!form.date) { toast.error('Date required'); return }
+    setLoading(true)
+    try {
+      const mowId = `${contact.name} – ${form.date}`
+      const scheduledTime = getScheduledTime()
+      await atPost(SCHEDULE_TABLE, {
+        records: [{
+          fields: {
+            [SF.mowId]: mowId,
+            [SF.clientName]: contact.name,
+            [SF.date]: form.date,
+            [SF.type]: form.type,
+            [SF.status]: 'Scheduled',
+            [SF.amount]: parseFloat(form.amount) || 0,
+            [SF.invStatus]: 'Not Sent',
+            [SF.timePreference]: form.timePreference,
+            [SF.scheduledTime]: scheduledTime,
+            [SF.notes]: form.notes || null,
+            [SF.contacts]: [contact.id],
+          },
+        }],
+        typecast: true,
+      })
+      toast.success('Mow scheduled ✓')
+      onSave()
+    } catch {
+      toast.error('Failed to schedule mow')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800">Schedule Mow — {contact.name}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Date *</label>
+            <input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={form.date} onChange={e => set('date', e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-2">Time Preference *</label>
+            <div className="grid grid-cols-2 gap-2">
+              {['Specific Time', 'Morning', 'Afternoon', 'Anytime'].map(opt => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => set('timePreference', opt)}
+                  className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                    form.timePreference === opt
+                      ? 'bg-green-600 text-white border-green-600'
+                      : 'border-gray-200 text-gray-600 hover:border-green-300'
+                  }`}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+          {form.timePreference === 'Specific Time' && (
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Time</label>
+              <input type="time" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={form.specificTime} onChange={e => set('specificTime', e.target.value)} />
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Type *</label>
+            <select className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={form.type} onChange={e => set('type', e.target.value)}>
+              <option>Intro</option>
+              <option>One-Time</option>
+              <option>Recurring</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Amount ($) *</label>
+            <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={form.amount} onChange={e => set('amount', e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+            <textarea className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} />
+          </div>
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 text-sm font-medium">Cancel</button>
+          <button onClick={handleSave} disabled={loading} className="flex-1 py-3 rounded-xl bg-green-600 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2">
+            {loading && <Loader2 size={14} className="animate-spin" />} Schedule
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Edit Contact Modal ───────────────────────────────────────────────────────
 function EditContactModal({ contact, onClose, onSave }) {
   const [form, setForm] = useState({
@@ -436,7 +568,7 @@ function EditContactModal({ contact, onClose, onSave }) {
           {inp('Phone', 'phone', 'tel')}
           {inp('Address', 'address')}
           {inp('City', 'city')}
-          {inp('Status', 'status', 'text', ['Lead', 'Active', 'Scheduled', 'Cold', 'Lost'])}
+          {inp('Status', 'status', 'text', ['Lead', 'Recurring', 'One-Time', 'Cold', 'Lost'])}
           {inp('Source', 'source')}
           {inp('Lot Size', 'lotSize')}
           {inp('Recurring Rate ($)', 'rate', 'number')}
@@ -558,6 +690,7 @@ export default function HappyCutsClientDetail() {
   const [loading, setLoading] = useState(true)
   const [jobDetail, setJobDetail] = useState(null)
   const [editOpen, setEditOpen] = useState(false)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const [addLogOpen, setAddLogOpen] = useState(false)
   const [notes, setNotes] = useState('')
 
@@ -672,6 +805,14 @@ export default function HappyCutsClientDetail() {
             </a>
           )}
         </div>
+
+        {/* Schedule Mow button */}
+        <button
+          onClick={() => setScheduleOpen(true)}
+          className="w-full bg-green-600 text-white py-3 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+        >
+          📅 Schedule Mow
+        </button>
 
         {/* Details grid */}
         <div className="bg-white border border-gray-200 rounded-2xl p-4">
@@ -799,6 +940,15 @@ export default function HappyCutsClientDetail() {
           contact={contact}
           onBack={() => setJobDetail(null)}
           onRefresh={() => { setJobDetail(null); load() }}
+        />
+      )}
+
+      {/* Schedule Mow Modal */}
+      {scheduleOpen && (
+        <ScheduleMowModal
+          contact={contact}
+          onClose={() => setScheduleOpen(false)}
+          onSave={() => { setScheduleOpen(false); load() }}
         />
       )}
 
