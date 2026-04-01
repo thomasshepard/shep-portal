@@ -74,7 +74,7 @@ async function fetchAll(table) {
   do {
     const qs = offset ? `?offset=${offset}` : ''
     const json = await atGet(table, qs)
-    if (!json.records) throw new Error(json.error?.message || 'Fetch failed')
+    if (!json.records) throw new Error(`[${table}] ${json.error?.type || ''}: ${json.error?.message || JSON.stringify(json)}`)
     records.push(...json.records); offset = json.offset || null
   } while (offset)
   return records
@@ -1224,6 +1224,10 @@ export default function HappyCuts() {
   const [nudgesFetched, setNudgesFetched] = useState(false)
 
   const load = useCallback(async () => {
+    if (!HC_BASE) {
+      toast.error('VITE_AIRTABLE_HAPPY_CUTS_BASE_ID is not set')
+      return
+    }
     setLoading(true)
     try {
       const [rawContacts, rawSchedules] = await Promise.all([
@@ -1240,7 +1244,8 @@ export default function HappyCuts() {
       setSchedules(parsedSchedules)
       setContactsById(Object.fromEntries(parsedContacts.map(c => [c.id, c])))
     } catch (e) {
-      toast.error('Failed to load data')
+      console.error('Happy Cuts load error:', e)
+      toast.error('Failed to load data: ' + (e.message || 'unknown'))
     } finally {
       setLoading(false)
     }
