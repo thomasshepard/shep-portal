@@ -255,6 +255,11 @@ function ConfirmCompleteModal({ mow, contact, onClose, onConfirm }) {
     setLoading(true)
     try {
       await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
+      // Also update linked contact status to Active
+      const contactId = mow.contactIds?.[0]
+      if (contactId) {
+        await atPatch(CONTACTS_TABLE, contactId, { [CF.status]: 'Active' })
+      }
       // TODO: Replace with actual Stripe invoice link from fldC06DE4htmBScNM once Stripe integration built
       window.open('https://dashboard.stripe.com/invoices', '_blank')
       toast.success(`${name} marked complete!`)
@@ -743,28 +748,58 @@ function AddMowModal({ contacts, onClose, onSave }) {
 function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudges, nudgesFetched, setNudges, setNudgesFetched, contacts }) {
   const [addOpen, setAddOpen] = useState(false)
   const today = todayStr()
-  const todayMows = schedules.filter(m => m.date === today && m.status === 'Scheduled')
+
+  // End of current week (Sunday), same explicit format as todayStr()
+  const endOfWeek = (() => {
+    const d = new Date()
+    const daysUntilSunday = d.getDay() === 0 ? 0 : 7 - d.getDay()
+    d.setDate(d.getDate() + daysUntilSunday)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
+
+  const weekMows = schedules
+    .filter(m => m.date >= today && m.date <= endOfWeek && m.status === 'Scheduled')
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+
+  const grouped = weekMows.reduce((acc, mow) => {
+    if (!acc[mow.date]) acc[mow.date] = []
+    acc[mow.date].push(mow)
+    return acc
+  }, {})
 
   return (
     <div className="px-4 py-4 pb-28">
       <WeatherBanner weather={weather} />
-      <h2 className="text-lg font-bold text-gray-800 mb-3">Today's Mows</h2>
+      <h2 className="text-lg font-bold text-gray-800 mb-3">This Week's Mows</h2>
 
-      {todayMows.length === 0 ? (
+      {weekMows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
           <Scissors size={40} className="mb-3 opacity-40" />
-          <p className="text-base font-medium">No mows scheduled today</p>
+          <p className="text-base font-medium">No mows scheduled this week</p>
           <p className="text-sm mt-1">Tap + Add Mow to schedule one</p>
         </div>
       ) : (
-        todayMows.map(mow => (
-          <MowCard
-            key={mow.id}
-            mow={mow}
-            contact={contactsById[mow.contactIds[0]]}
-            onOpenJob={() => onOpenJob(mow)}
-          />
-        ))
+        Object.entries(grouped).sort().map(([date, mows]) => {
+          const isToday = date === today
+          const label = new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric',
+          })
+          return (
+            <div key={date} className="mb-5">
+              <p className={`text-sm font-semibold mb-2 ${isToday ? 'text-green-600' : 'text-gray-500'}`}>
+                {isToday ? `Today — ${label}` : label}
+              </p>
+              {mows.map(mow => (
+                <MowCard
+                  key={mow.id}
+                  mow={mow}
+                  contact={contactsById[mow.contactIds[0]]}
+                  onOpenJob={() => onOpenJob(mow)}
+                />
+              ))}
+            </div>
+          )
+        })
       )}
 
       <NudgesPanel

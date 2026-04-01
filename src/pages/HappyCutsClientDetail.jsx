@@ -565,7 +565,7 @@ export default function HappyCutsClientDetail() {
     setLoading(true)
     try {
       // Fetch contact directly
-      const r = await fetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+      const r = await fetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}?returnFieldsByFieldId=true`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
       const contactData = await r.json()
       if (!contactData.fields) throw new Error('Contact not found')
       const parsed = parseContact(contactData)
