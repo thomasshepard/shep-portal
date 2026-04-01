@@ -123,13 +123,13 @@ function parseMow(r) {
 }
 
 // ─── Date / format helpers ────────────────────────────────────────────────────
-function todayStr() { return new Date().toISOString().split('T')[0] }
+function todayStr() { return new Date().toLocaleDateString('en-CA') }
 function mapsUrl(address, city) { return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address} ${city} TN`)}` }
 function fmtCurrency(val) { const n = safeNum(val); return n == null ? '—' : `$${n % 1 === 0 ? n : n.toFixed(2)}` }
 function fmtDateShort(str) { if (!str) return ''; const d = new Date(str.includes('T') ? str : str + 'T12:00:00'); return isNaN(d) ? str : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
 function getMonday(date) { const d = new Date(date); const day = d.getDay(); const diff = d.getDate() - day + (day === 0 ? -6 : 1); d.setDate(diff); d.setHours(0,0,0,0); return d }
 function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d }
-function dateToStr(d) { return d.toISOString().split('T')[0] }
+function dateToStr(d) { return d.toLocaleDateString('en-CA') }
 
 // ─── Status colors ────────────────────────────────────────────────────────────
 const CONTACT_STATUS = {
