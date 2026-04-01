@@ -755,6 +755,7 @@ function EditContactModal({ contact, onClose, onSave }) {
   const [form, setForm] = useState({
     name: contact.name || '',
     phone: contact.phone || '',
+    email: contact.email || '',
     address: contact.address || '',
     city: contact.city || '',
     status: contact.status || 'Lead',
@@ -777,6 +778,7 @@ function EditContactModal({ contact, onClose, onSave }) {
       await atPatch(CONTACTS_TABLE, contact.id, {
         [CF.name]: form.name,
         [CF.phone]: form.phone || undefined,
+        [CF.email]: form.email || undefined,
         [CF.address]: form.address || undefined,
         [CF.city]: form.city || undefined,
         [CF.status]: form.status,
@@ -820,6 +822,7 @@ function EditContactModal({ contact, onClose, onSave }) {
         <div className="space-y-3">
           {inp('Name *', 'name')}
           {inp('Phone', 'phone', 'tel')}
+          {inp('Email', 'email', 'email')}
           {inp('Address', 'address')}
           {inp('City', 'city')}
           {inp('Status', 'status', 'text', ['Lead', 'Recurring', 'One-Time', 'Cold', 'Lost'])}
@@ -1050,6 +1053,11 @@ export default function HappyCutsClientDetail() {
           {contact.phone && (
             <a href={`sms:${contact.phone}`} className="text-blue-600 font-medium text-sm min-h-[44px] flex items-center gap-1">
               💬 {contact.phone}
+            </a>
+          )}
+          {contact.email && (
+            <a href={`mailto:${contact.email}`} className="text-blue-600 font-medium text-sm min-h-[44px] flex items-center gap-1">
+              ✉️ {contact.email}
             </a>
           )}
           {contact.address && (
