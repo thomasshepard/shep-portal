@@ -24,6 +24,8 @@ import ErrorBoundary from './components/ErrorBoundary'
 import Documents from './pages/Documents'
 import Deals from './pages/Deals'
 import DealsSearchCriteria from './pages/DealsSearchCriteria'
+import HappyCuts from './pages/HappyCuts'
+import HappyCutsClientDetail from './pages/HappyCutsClientDetail'
 
 export default function App() {
   return (
@@ -54,6 +56,8 @@ export default function App() {
             <Route path="documents" element={<PermRoute permission="documents"><Documents /></PermRoute>} />
             <Route path="deals" element={<PermRoute permission="deals"><Deals /></PermRoute>} />
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
+            <Route path="happy-cuts" element={<AdminRoute><HappyCuts /></AdminRoute>} />
+            <Route path="happy-cuts/client/:id" element={<AdminRoute><HappyCutsClientDetail /></AdminRoute>} />
             <Route
               path="admin"
               element={
