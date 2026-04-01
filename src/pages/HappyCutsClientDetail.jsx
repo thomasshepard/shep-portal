@@ -78,7 +78,8 @@ async function atPatch(table, id, fields) {
 async function fetchAll(table) {
   const records = []; let offset = null
   do {
-    const qs = offset ? `?offset=${offset}` : ''
+    let qs = '?returnFieldsByFieldId=true'
+    if (offset) qs += `&offset=${offset}`
     const json = await atGet(table, qs)
     if (!json.records) throw new Error(json.error?.message || 'Fetch failed')
     records.push(...json.records); offset = json.offset || null
