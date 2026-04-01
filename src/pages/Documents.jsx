@@ -609,6 +609,7 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
   const [localTags, setLocalTags] = useState(doc.tags)
   const [tagInput, setTagInput] = useState('')
   const [ocrOpen, setOcrOpen] = useState(false)
+  const [localShared, setLocalShared] = useState(doc.shared)
   const tagInputRef = useRef(null)
 
   const extraFields = Object.entries(doc.raw).filter(([k]) => !STANDARD_KEYS.has(k))
@@ -644,6 +645,18 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
       toast.error('Failed to remove tag')
       setLocalTags(localTags)
       onUpdateDoc(doc.id, { tags: localTags })
+    }
+  }
+
+  async function toggleShared() {
+    const newVal = !localShared
+    setLocalShared(newVal)
+    onUpdateDoc(doc.id, { shared: newVal })
+    const { error } = await updateRecord('Documents', doc.id, { Shared: newVal }, DOCS_BASE_ID)
+    if (error) {
+      toast.error('Failed to update shared status')
+      setLocalShared(!newVal)
+      onUpdateDoc(doc.id, { shared: !newVal })
     }
   }
 
@@ -841,6 +854,28 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
                   <Plus size={15} />
                 </button>
               </div>
+            </div>
+
+            {/* Shared with partners */}
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Shared with Partners</p>
+                <p className="text-xs text-gray-400 mt-0.5">Visible to partner users</p>
+              </div>
+              <button
+                onClick={isAdmin ? toggleShared : undefined}
+                disabled={!isAdmin}
+                title={isAdmin ? (localShared ? 'Click to unshare' : 'Click to share') : 'Admin only'}
+                className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                  localShared ? 'bg-blue-500' : 'bg-gray-200'
+                } ${isAdmin ? 'cursor-pointer' : 'cursor-default opacity-60'}`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                    localShared ? 'translate-x-4' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
             </div>
 
             {extraFields.length > 0 && (
