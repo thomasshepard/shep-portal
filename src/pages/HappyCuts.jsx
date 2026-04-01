@@ -538,6 +538,8 @@ function EditMowModal({ mow, onClose, onSave }) {
 
 // ─── JobDetail ────────────────────────────────────────────────────────────────
 function JobDetail({ mow, contact, onBack, onRefresh }) {
+  const navigate = useNavigate()
+  const contactRecordId = contact?.id || mow.contactIds?.[0] || null
   const [editOpen, setEditOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [visitNotes, setVisitNotes] = useState(mow.visitNotes || '')
@@ -605,6 +607,14 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
           Back
         </button>
         <h2 className="text-lg font-bold text-gray-800 flex-1">{contact?.name || mow.clientName}</h2>
+        {contactRecordId && (
+          <button
+            onClick={() => navigate(`/happy-cuts/client/${contactRecordId}`)}
+            className="text-sm text-green-600 font-medium shrink-0"
+          >
+            Contact →
+          </button>
+        )}
       </div>
 
       <div className="px-4 py-5 space-y-4 pb-32">
@@ -759,11 +769,23 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
 
 // ─── MowCard ──────────────────────────────────────────────────────────────────
 function MowCard({ mow, contact, onOpenJob }) {
+  const navigate = useNavigate()
+  const contactRecordId = contact?.id || mow.contactIds?.[0] || null
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-3 shadow-sm">
       <div className="flex items-center justify-between mb-2">
-        <span className="font-semibold text-gray-800">{contact?.name || mow.clientName}</span>
-        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-semibold text-gray-800 truncate">{contact?.name || mow.clientName}</span>
+          {contactRecordId && (
+            <button
+              onClick={e => { e.stopPropagation(); navigate(`/happy-cuts/client/${contactRecordId}`) }}
+              className="text-xs text-green-600 border border-green-200 rounded-full px-2 py-0.5 shrink-0"
+            >
+              Contact →
+            </button>
+          )}
+        </div>
+        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ml-2 ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
           {mow.status}
         </span>
       </div>

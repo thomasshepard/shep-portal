@@ -822,7 +822,11 @@ function EditContactModal({ contact, onClose, onSave }) {
         <div className="space-y-3">
           {inp('Name *', 'name')}
           {inp('Phone', 'phone', 'tel')}
-          {inp('Email', 'email', 'email')}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+            <input type="email" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={form.email} onChange={e => set('email', e.target.value)} placeholder="client@email.com" />
+            <p className="text-xs text-gray-400 mt-1">Used for Stripe invoice delivery</p>
+          </div>
           {inp('Address', 'address')}
           {inp('City', 'city')}
           {inp('Status', 'status', 'text', ['Lead', 'Recurring', 'One-Time', 'Cold', 'Lost'])}
