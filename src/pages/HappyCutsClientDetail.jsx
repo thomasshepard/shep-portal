@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
@@ -38,6 +38,8 @@ const SF = {
   notes: 'fldos2p3iwvUCKlH6', contacts: 'fldemlueed8aZMi7J',
   timePreference: 'fldAc9skq3oOTrjiE',
   scheduledTime: 'fldtwRBQ5DcQ2UQCF',
+  visitNotes: 'fldGQgvRXisiOTYyF',
+  photos: 'fldEGXwnsm0xbBmrg',
 }
 
 // Interaction Log field IDs
@@ -129,6 +131,10 @@ function parseMow(r) {
     invStatus: safeStr(f[SF.invStatus]),
     duration: safeNum(f[SF.duration]),
     notes: safeStr(f[SF.notes]),
+    scheduledTime: safeStr(f[SF.scheduledTime]),
+    timePreference: safeStr(f[SF.timePreference]),
+    visitNotes: safeStr(f[SF.visitNotes]),
+    photos: arr(f[SF.photos]),
     contactIds: arr(f[SF.contacts]),
   }
 }
@@ -305,11 +311,60 @@ function EditMowModal({ mow, onClose, onSave }) {
 function JobDetail({ mow, contact, onBack, onRefresh }) {
   const [editOpen, setEditOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [visitNotes, setVisitNotes] = useState(mow.visitNotes || '')
+  const [visitNotesDirty, setVisitNotesDirty] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [fullscreenPhoto, setFullscreenPhoto] = useState(null)
+  const [localPhotos, setLocalPhotos] = useState(mow.photos || [])
+  const fileInputRef = useRef(null)
 
   function handleComplete() {
     setConfirmOpen(false)
     onRefresh()
     onBack()
+  }
+
+  async function saveNotes() {
+    try {
+      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.visitNotes]: visitNotes })
+      setVisitNotesDirty(false)
+      toast.success('Notes saved ✓')
+    } catch {
+      toast.error('Failed to save notes')
+    }
+  }
+
+  async function handlePhotoSelect(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploadingPhoto(true)
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result.split(',')[1])
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const existing = localPhotos.map(p => ({ url: p.url }))
+      const newAttachment = {
+        url: `data:${file.type};base64,${base64}`,
+        filename: file.name || `photo-${Date.now()}.jpg`,
+      }
+      const res = await fetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: { [SF.photos]: [...existing, newAttachment] }, typecast: true }),
+      })
+      if (!res.ok) throw new Error('Upload failed')
+      const updated = await res.json()
+      setLocalPhotos(arr(updated.fields?.[SF.photos]))
+      toast.success('Photo added ✓')
+    } catch {
+      toast.error('Failed to upload photo')
+    } finally {
+      setUploadingPhoto(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }
 
   return (
@@ -346,6 +401,51 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
             💬 Text {contact.name}
           </a>
         )}
+
+        {/* Visit Notes */}
+        <div>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📝 Visit Notes</p>
+          <textarea
+            value={visitNotes}
+            onChange={e => { setVisitNotes(e.target.value); setVisitNotesDirty(e.target.value !== (mow.visitNotes || '')) }}
+            placeholder="Notes about this visit..."
+            rows={3}
+            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-green-400"
+            style={{ minHeight: '80px' }}
+          />
+          {visitNotesDirty && (
+            <button onClick={saveNotes} className="mt-2 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg">
+              Save Notes
+            </button>
+          )}
+        </div>
+
+        {/* Photos */}
+        <div>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📷 Photos</p>
+          {localPhotos.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {localPhotos.map((photo, i) => (
+                <img
+                  key={i}
+                  src={photo.thumbnails?.large?.url || photo.url}
+                  alt={`Visit photo ${i + 1}`}
+                  className="w-full aspect-square object-cover rounded-lg cursor-pointer"
+                  onClick={() => setFullscreenPhoto(photo.url)}
+                />
+              ))}
+            </div>
+          )}
+          <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelect} className="hidden" ref={fileInputRef} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingPhoto}
+            className="w-full py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 disabled:opacity-50"
+          >
+            {uploadingPhoto ? 'Uploading…' : '📷 Add Photo'}
+          </button>
+        </div>
+
         <button onClick={() => setEditOpen(true)} className="w-full py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">
           ✏️ Edit This Mow
         </button>
@@ -358,6 +458,18 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
           <CheckCircle size={20} /> ✅ Mark Complete + Invoice
         </button>
       </div>
+
+      {/* Fullscreen photo modal */}
+      {fullscreenPhoto && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center"
+          onClick={() => setFullscreenPhoto(null)}
+        >
+          <img src={fullscreenPhoto} className="max-w-full max-h-full object-contain" alt="Full size" />
+          <button className="absolute top-4 right-4 text-white text-3xl leading-none">×</button>
+        </div>
+      )}
+
       {editOpen && (
         <EditMowModal mow={mow} onClose={() => setEditOpen(false)} onSave={() => { setEditOpen(false); onRefresh() }} />
       )}
