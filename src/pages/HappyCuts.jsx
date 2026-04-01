@@ -44,6 +44,8 @@ const SF = {
   visitNotes: 'fldGQgvRXisiOTYyF',      // multilineText
   photos: 'fldEGXwnsm0xbBmrg',          // multipleAttachments
   stripeInvoiceUrl: 'fldoHweTNKKE7hjyy', // url
+  sortOrder: 'fldkJxYo2JQZ25lLi',          // number — drag order within day
+  appointmentDateTime: 'fldyXThNomMSb9joa', // dateTime — specific appointment time
 }
 
 // ─── Airtable helpers ─────────────────────────────────────────────────────────
@@ -133,6 +135,8 @@ function parseMow(r) {
     timePreference: safeStr(f[SF.timePreference]),
     visitNotes: safeStr(f[SF.visitNotes]),
     photos: arr(f[SF.photos]),
+    sortOrder: safeNum(f[SF.sortOrder]),
+    appointmentDateTime: safeStr(f[SF.appointmentDateTime]),
     contactIds: arr(f[SF.contacts]),
   }
 }
@@ -148,6 +152,35 @@ function todayStr() {
 function mapsUrl(address, city) { return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address} ${city} TN`)}` }
 function fmtCurrency(val) { const n = safeNum(val); return n == null ? '—' : `$${n % 1 === 0 ? n : n.toFixed(2)}` }
 function fmtDateShort(str) { if (!str) return ''; const d = new Date(str.includes('T') ? str : str + 'T12:00:00'); return isNaN(d) ? str : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
+function buildGoogleCalendarUrl(mow, contact) {
+  const title = encodeURIComponent(`Happy Cuts — ${mow.clientName}`)
+  const location = encodeURIComponent(`${contact?.address || ''}, ${contact?.city || ''}, TN`)
+  const details = encodeURIComponent([
+    `${mow.type} mow · $${mow.amount ?? ''}`,
+    contact?.specInstr ? `Notes: ${contact.specInstr}` : '',
+    'Happy Cuts — (931) 284-3503',
+  ].filter(Boolean).join('\n'))
+  let dates = ''
+  if (mow.appointmentDateTime) {
+    const start = new Date(mow.appointmentDateTime)
+    const end = new Date(start.getTime() + 60 * 60 * 1000)
+    const fmt = d => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+    dates = `${fmt(start)}/${fmt(end)}`
+  } else if (mow.timePreference === 'Morning') {
+    const ds = (mow.date || '').replace(/-/g, '')
+    dates = `${ds}T130000Z/${ds}T170000Z`
+  } else if (mow.timePreference === 'Afternoon') {
+    const ds = (mow.date || '').replace(/-/g, '')
+    dates = `${ds}T170000Z/${ds}T220000Z`
+  } else {
+    const ds = (mow.date || '').replace(/-/g, '')
+    const next = new Date((mow.date || '') + 'T12:00:00')
+    next.setDate(next.getDate() + 1)
+    const ns = next.toLocaleDateString('en-CA').replace(/-/g, '')
+    dates = `${ds}/${ns}`
+  }
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dates}&details=${details}&location=${location}`
+}
 function getMonday(date) { const d = new Date(date); const day = d.getDay(); const diff = d.getDate() - day + (day === 0 ? -6 : 1); d.setDate(diff); d.setHours(0,0,0,0); return d }
 function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d }
 function dateToStr(d) { return d.toLocaleDateString('en-CA') }
@@ -257,6 +290,39 @@ function WeatherBanner({ weather }) {
       </button>
       {showModal && <WeatherModal weather={weather} onClose={() => setShowModal(false)} />}
     </>
+  )
+}
+
+// ─── CancelMowModal ───────────────────────────────────────────────────────────
+function CancelMowModal({ mow, contact, onClose, onCancelled }) {
+  const [loading, setLoading] = useState(false)
+  const name = contact?.name || mow.clientName
+  async function handleCancel() {
+    setLoading(true)
+    try {
+      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Cancelled' })
+      toast.success('Mow cancelled')
+      onCancelled()
+    } catch {
+      toast.error('Failed to cancel')
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold text-gray-800 text-lg mb-2">Cancel this mow?</h3>
+        <p className="text-gray-600 text-sm mb-1"><strong>{name}</strong> · {fmtDateShort(mow.date)}</p>
+        <p className="text-gray-400 text-xs mb-6">This will mark it cancelled. It won't be deleted.</p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Keep It</button>
+          <button onClick={handleCancel} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+            {loading && <Loader2 size={14} className="animate-spin" />} Yes, Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -547,6 +613,7 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [fullscreenPhoto, setFullscreenPhoto] = useState(null)
   const [localPhotos, setLocalPhotos] = useState(mow.photos || [])
+  const [cancelOpen, setCancelOpen] = useState(false)
   const fileInputRef = useRef(null)
 
   function handleComplete() {
@@ -663,6 +730,16 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
           </a>
         )}
 
+        {/* Google Calendar */}
+        <a
+          href={buildGoogleCalendarUrl(mow, contact)}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 text-blue-600 font-medium text-sm min-h-[48px]"
+        >
+          📅 Add to Google Calendar
+        </a>
+
         {/* Visit Notes */}
         <div>
           <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">📝 Visit Notes</p>
@@ -724,6 +801,16 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
         >
           ✏️ Edit This Mow
         </button>
+
+        {/* Cancel link */}
+        {mow.status === 'Scheduled' && (
+          <button
+            onClick={() => setCancelOpen(true)}
+            className="w-full text-red-500 text-sm py-2 text-center"
+          >
+            🚫 Cancel This Mow
+          </button>
+        )}
       </div>
 
       {/* Mark Complete pinned to bottom */}
@@ -763,17 +850,41 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
           onConfirm={handleComplete}
         />
       )}
+      {cancelOpen && (
+        <CancelMowModal
+          mow={mow}
+          contact={contact}
+          onClose={() => setCancelOpen(false)}
+          onCancelled={() => { setCancelOpen(false); onRefresh(); onBack() }}
+        />
+      )}
     </div>
   )
 }
 
 // ─── MowCard ──────────────────────────────────────────────────────────────────
-function MowCard({ mow, contact, onOpenJob }) {
+function MowCard({ mow, contact, onOpenJob, onCancel, dragHandleProps, isDragging, isDragOver }) {
   const navigate = useNavigate()
   const contactRecordId = contact?.id || mow.contactIds?.[0] || null
+  const isScheduled = mow.status === 'Scheduled'
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-3 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
+    <div className={`relative bg-white border rounded-2xl p-4 mb-3 shadow-sm transition-all ${isDragOver ? 'border-2 border-green-400' : 'border-gray-200'} ${isDragging ? 'opacity-50' : ''}`}>
+      {/* Drag handle */}
+      {isScheduled && dragHandleProps && (
+        <div {...dragHandleProps} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 cursor-grab active:cursor-grabbing select-none text-xl px-1">
+          ⠿
+        </div>
+      )}
+      {/* Cancel × */}
+      {isScheduled && onCancel && (
+        <button
+          onClick={e => { e.stopPropagation(); onCancel(mow) }}
+          className="absolute top-2 right-2 text-gray-300 hover:text-red-500 text-xl leading-none w-8 h-8 flex items-center justify-center"
+        >
+          ×
+        </button>
+      )}
+      <div className={`flex items-center justify-between mb-2 ${isScheduled && dragHandleProps ? 'pl-6' : ''}`}>
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-semibold text-gray-800 truncate">{contact?.name || mow.clientName}</span>
           {contactRecordId && (
@@ -785,12 +896,12 @@ function MowCard({ mow, contact, onOpenJob }) {
             </button>
           )}
         </div>
-        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ml-2 ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
+        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ml-2 ${isScheduled && onCancel ? 'mr-6' : ''} ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
           {mow.status}
         </span>
       </div>
       {contact && (
-        <p className="text-sm text-gray-500 mb-1">{contact.address}{contact.city ? `, ${contact.city}` : ''}</p>
+        <p className={`text-sm text-gray-500 mb-1 ${isScheduled && dragHandleProps ? 'pl-6' : ''}`}>{contact.address}{contact.city ? `, ${contact.city}` : ''}</p>
       )}
       <p className="text-sm text-gray-600 mb-1">
         {mow.type}{mow.type && mow.amount != null ? ' · ' : ''}{mow.amount != null ? fmtCurrency(mow.amount) : ''}
@@ -823,6 +934,14 @@ function MowCard({ mow, contact, onOpenJob }) {
             🗺 Maps
           </a>
         )}
+        <a
+          href={buildGoogleCalendarUrl(mow, contact)}
+          target="_blank"
+          rel="noreferrer"
+          className="flex-1 min-h-[48px] flex items-center justify-center rounded-xl bg-gray-50 text-gray-700 font-medium text-sm"
+        >
+          📅 Cal
+        </a>
         <button
           onClick={onOpenJob}
           className="flex-1 min-h-[48px] flex items-center justify-center rounded-xl bg-green-600 text-white font-medium text-sm"
@@ -1032,9 +1151,12 @@ function AddMowModal({ contacts, onClose, onSave }) {
 // ─── TodayTab ─────────────────────────────────────────────────────────────────
 function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudges, nudgesFetched, setNudges, setNudgesFetched, contacts }) {
   const [addOpen, setAddOpen] = useState(false)
+  const [cancelTarget, setCancelTarget] = useState(null)
+  const [draggedId, setDraggedId] = useState(null)
+  const [dragOverId, setDragOverId] = useState(null)
+  const [localGroups, setLocalGroups] = useState({})
   const today = todayStr()
 
-  // End of current week (Sunday), same explicit format as todayStr()
   const endOfWeek = (() => {
     const d = new Date()
     const daysUntilSunday = d.getDay() === 0 ? 0 : 7 - d.getDay()
@@ -1042,29 +1164,57 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })()
 
-  const weekMows = schedules
-    .filter(m => m.date >= today && m.date <= endOfWeek && m.status === 'Scheduled')
-    .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+  // Sync localGroups from schedules prop
+  useEffect(() => {
+    const filtered = schedules
+      .filter(m => m.date >= today && m.date <= endOfWeek && m.status === 'Scheduled')
+      .sort((a, b) => {
+        if (a.date !== b.date) return (a.date || '').localeCompare(b.date || '')
+        return (a.sortOrder ?? 999) - (b.sortOrder ?? 999)
+      })
+    const g = filtered.reduce((acc, mow) => {
+      if (!acc[mow.date]) acc[mow.date] = []
+      acc[mow.date].push(mow)
+      return acc
+    }, {})
+    setLocalGroups(g)
+  }, [schedules])
 
-  const grouped = weekMows.reduce((acc, mow) => {
-    if (!acc[mow.date]) acc[mow.date] = []
-    acc[mow.date].push(mow)
-    return acc
-  }, {})
+  const totalMows = Object.values(localGroups).reduce((s, arr) => s + arr.length, 0)
+
+  async function handleDrop(date, fromId, toId) {
+    if (fromId === toId) return
+    const dayMows = localGroups[date] || []
+    const fromIndex = dayMows.findIndex(m => m.id === fromId)
+    const toIndex = dayMows.findIndex(m => m.id === toId)
+    if (fromIndex === -1 || toIndex === -1) return
+    const reordered = [...dayMows]
+    const [moved] = reordered.splice(fromIndex, 1)
+    reordered.splice(toIndex, 0, moved)
+    setLocalGroups(prev => ({ ...prev, [date]: reordered }))
+    const updates = reordered.map((mow, i) => ({ id: mow.id, fields: { [SF.sortOrder]: i + 1 } }))
+    for (let i = 0; i < updates.length; i += 10) {
+      await fetch(`${AT_BASE}/${SCHEDULE_TABLE}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records: updates.slice(i, i + 10), typecast: true }),
+      })
+    }
+  }
 
   return (
     <div className="px-4 py-4 pb-28">
       <WeatherBanner weather={weather} />
       <h2 className="text-lg font-bold text-gray-800 mb-3">This Week's Mows</h2>
 
-      {weekMows.length === 0 ? (
+      {totalMows === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
           <Leaf size={40} className="mb-3 opacity-40" />
           <p className="text-base font-medium">No mows scheduled this week</p>
           <p className="text-sm mt-1">Tap + Add Mow to schedule one</p>
         </div>
       ) : (
-        Object.entries(grouped).sort().map(([date, mows]) => {
+        Object.entries(localGroups).sort().map(([date, mows]) => {
           const isToday = date === today
           const label = new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
             weekday: 'short', month: 'short', day: 'numeric',
@@ -1080,11 +1230,30 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
                   mow={mow}
                   contact={contactsById[mow.contactIds[0]]}
                   onOpenJob={() => onOpenJob(mow)}
+                  onCancel={m => setCancelTarget(m)}
+                  isDragging={draggedId === mow.id}
+                  isDragOver={dragOverId === mow.id}
+                  dragHandleProps={{
+                    draggable: true,
+                    onDragStart: () => setDraggedId(mow.id),
+                    onDragOver: e => { e.preventDefault(); setDragOverId(mow.id) },
+                    onDrop: () => { handleDrop(date, draggedId, mow.id); setDraggedId(null); setDragOverId(null) },
+                    onDragEnd: () => { setDraggedId(null); setDragOverId(null) },
+                  }}
                 />
               ))}
             </div>
           )
         })
+      )}
+
+      {cancelTarget && (
+        <CancelMowModal
+          mow={cancelTarget}
+          contact={contactsById[cancelTarget.contactIds?.[0]]}
+          onClose={() => setCancelTarget(null)}
+          onCancelled={() => { setCancelTarget(null); onRefresh() }}
+        />
       )}
 
       <NudgesPanel
@@ -1319,6 +1488,7 @@ function ClientsTab({ contacts, onRefresh }) {
 // ─── ScheduleTab ──────────────────────────────────────────────────────────────
 function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJob, onRefresh, contacts }) {
   const [addOpen, setAddOpen] = useState(false)
+  const [cancelTarget, setCancelTarget] = useState(null)
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
   const weekStr = weekStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
@@ -1360,7 +1530,7 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
         const dayStr = dateToStr(day)
         const dayMows = schedules
           .filter(m => m.date === dayStr)
-          .sort((a, b) => (a.notes || '').localeCompare(b.notes || ''))
+          .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999))
         const isToday = dayStr === todayStr()
         const label = day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 
@@ -1402,12 +1572,29 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
                   >
                     Open →
                   </button>
+                  {mow.status === 'Scheduled' && (
+                    <button
+                      onClick={() => setCancelTarget(mow)}
+                      className="text-gray-300 hover:text-red-500 text-xl leading-none w-7 h-7 flex items-center justify-center"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               ))
             )}
           </div>
         )
       })}
+
+      {cancelTarget && (
+        <CancelMowModal
+          mow={cancelTarget}
+          contact={contactsById[cancelTarget.contactIds?.[0]]}
+          onClose={() => setCancelTarget(null)}
+          onCancelled={() => { setCancelTarget(null); onRefresh() }}
+        />
+      )}
 
       {addOpen && (
         <AddMowModal

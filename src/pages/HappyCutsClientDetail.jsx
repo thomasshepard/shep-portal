@@ -42,6 +42,8 @@ const SF = {
   visitNotes: 'fldGQgvRXisiOTYyF',
   photos: 'fldEGXwnsm0xbBmrg',
   stripeInvoiceUrl: 'fldoHweTNKKE7hjyy',
+  sortOrder: 'fldkJxYo2JQZ25lLi',
+  appointmentDateTime: 'fldyXThNomMSb9joa',
 }
 
 // Interaction Log field IDs
@@ -658,6 +660,9 @@ function ScheduleMowModal({ contact, onClose, onSave }) {
     try {
       const mowId = `${contact.name} – ${form.date}`
       const scheduledTime = getScheduledTime()
+      const appointmentDateTime = (form.timePreference === 'Specific Time' && form.specificTime)
+        ? new Date(`${form.date}T${form.specificTime}:00`).toISOString()
+        : null
       await atPost(SCHEDULE_TABLE, {
         records: [{
           fields: {
@@ -670,6 +675,7 @@ function ScheduleMowModal({ contact, onClose, onSave }) {
             [SF.invStatus]: 'Not Sent',
             [SF.timePreference]: form.timePreference,
             [SF.scheduledTime]: scheduledTime,
+            ...(appointmentDateTime ? { [SF.appointmentDateTime]: appointmentDateTime } : {}),
             [SF.notes]: form.notes || null,
             [SF.contacts]: [contact.id],
           },
