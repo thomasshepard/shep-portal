@@ -45,7 +45,8 @@ const SF = {
   photos: 'fldEGXwnsm0xbBmrg',          // multipleAttachments
   stripeInvoiceUrl: 'fldoHweTNKKE7hjyy', // url
   sortOrder: 'fldkJxYo2JQZ25lLi',          // number — drag order within day
-  appointmentDateTime: 'fldyXThNomMSb9joa', // dateTime — specific appointment time
+  appointmentDateTime: 'fldyXThNomMSb9joa', // dateTime — kept for compat
+  scheduleDateTime: 'fldcfkVEvuLciPD8z',    // dateTime — PRIMARY schedule field
 }
 
 // ─── Airtable helpers ─────────────────────────────────────────────────────────
@@ -137,6 +138,7 @@ function parseMow(r) {
     photos: arr(f[SF.photos]),
     sortOrder: safeNum(f[SF.sortOrder]),
     appointmentDateTime: safeStr(f[SF.appointmentDateTime]),
+    scheduleDateTime: safeStr(f[SF.scheduleDateTime]),
     contactIds: arr(f[SF.contacts]),
   }
 }
@@ -152,6 +154,22 @@ function todayStr() {
 function mapsUrl(address, city) { return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address} ${city} TN`)}` }
 function fmtCurrency(val) { const n = safeNum(val); return n == null ? '—' : `$${n % 1 === 0 ? n : n.toFixed(2)}` }
 function fmtDateShort(str) { if (!str) return ''; const d = new Date(str.includes('T') ? str : str + 'T12:00:00'); return isNaN(d) ? str : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
+function buildScheduleDateTime(date, timeType, specificTime) {
+  let timeStr = '12:00'
+  if (timeType === 'Specific Time' && specificTime) timeStr = specificTime
+  else if (timeType === 'Morning') timeStr = '08:00'
+  else if (timeType === 'Afternoon') timeStr = '12:00'
+  return new Date(`${date}T${timeStr}:00`).toISOString()
+}
+function buildTimeDisplayString(timeType, specificTime) {
+  if (timeType === 'Specific Time' && specificTime) {
+    const [h, m] = specificTime.split(':')
+    const hour = parseInt(h)
+    const ampm = hour >= 12 ? 'PM' : 'AM'
+    return `${hour % 12 || 12}:${m} ${ampm}`
+  }
+  return timeType
+}
 function buildGoogleCalendarUrl(mow, contact) {
   const title = encodeURIComponent(`Happy Cuts — ${mow.clientName}`)
   const location = encodeURIComponent(`${contact?.address || ''}, ${contact?.city || ''}, TN`)
@@ -160,24 +178,27 @@ function buildGoogleCalendarUrl(mow, contact) {
     contact?.specInstr ? `Notes: ${contact.specInstr}` : '',
     'Happy Cuts — (931) 284-3503',
   ].filter(Boolean).join('\n'))
+  const fmt = d => d.toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z'
+  const tp = mow.timePreference
+  const schedDT = mow.scheduleDateTime
   let dates = ''
-  if (mow.appointmentDateTime) {
-    const start = new Date(mow.appointmentDateTime)
-    const end = new Date(start.getTime() + 60 * 60 * 1000)
-    const fmt = d => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
-    dates = `${fmt(start)}/${fmt(end)}`
-  } else if (mow.timePreference === 'Morning') {
-    const ds = (mow.date || '').replace(/-/g, '')
-    dates = `${ds}T130000Z/${ds}T170000Z`
-  } else if (mow.timePreference === 'Afternoon') {
-    const ds = (mow.date || '').replace(/-/g, '')
-    dates = `${ds}T170000Z/${ds}T220000Z`
-  } else {
-    const ds = (mow.date || '').replace(/-/g, '')
-    const next = new Date((mow.date || '') + 'T12:00:00')
-    next.setDate(next.getDate() + 1)
-    const ns = next.toLocaleDateString('en-CA').replace(/-/g, '')
-    dates = `${ds}/${ns}`
+  if (schedDT) {
+    const start = new Date(schedDT)
+    if (tp === 'Specific Time') {
+      dates = `${fmt(start)}/${fmt(new Date(start.getTime() + 60 * 60 * 1000))}`
+    } else if (tp === 'Morning') {
+      dates = `${fmt(start)}/${fmt(new Date(start.getTime() + 4 * 60 * 60 * 1000))}`
+    } else if (tp === 'Afternoon') {
+      dates = `${fmt(start)}/${fmt(new Date(start.getTime() + 5 * 60 * 60 * 1000))}`
+    } else {
+      const ds = (mow.date || '').replace(/-/g, '')
+      const next = new Date((mow.date || '') + 'T12:00:00'); next.setDate(next.getDate() + 1)
+      dates = `${ds}/${next.toLocaleDateString('en-CA').replace(/-/g, '')}`
+    }
+  } else if (mow.date) {
+    const ds = mow.date.replace(/-/g, '')
+    const next = new Date(mow.date + 'T12:00:00'); next.setDate(next.getDate() + 1)
+    dates = `${ds}/${next.toLocaleDateString('en-CA').replace(/-/g, '')}`
   }
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dates}&details=${details}&location=${location}`
 }
@@ -513,6 +534,18 @@ function InvoiceModal({ mow, contact, onClose, onConfirm }) {
 
 // ─── EditMowModal ─────────────────────────────────────────────────────────────
 function EditMowModal({ mow, onClose, onSave }) {
+  const initTimeType = () => {
+    const tp = mow.timePreference
+    if (tp === 'Specific Time' || tp === 'Morning' || tp === 'Afternoon') return tp
+    return 'Anytime'
+  }
+  const initSpecificTime = () => {
+    if (mow.timePreference === 'Specific Time' && mow.scheduleDateTime) {
+      const d = new Date(mow.scheduleDateTime)
+      return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    }
+    return '08:00'
+  }
   const [form, setForm] = useState({
     date: mow.date || '',
     notes: mow.notes || '',
@@ -523,11 +556,15 @@ function EditMowModal({ mow, onClose, onSave }) {
     invStatus: mow.invStatus || 'Not Sent',
     duration: mow.duration != null ? String(mow.duration) : '',
   })
+  const [timeType, setTimeType] = useState(initTimeType)
+  const [specificTime, setSpecificTime] = useState(initSpecificTime)
   const [loading, setLoading] = useState(false)
 
   async function handleSave() {
     setLoading(true)
     try {
+      const scheduleDateTime = form.date ? buildScheduleDateTime(form.date, timeType, specificTime) : undefined
+      const scheduledTime = buildTimeDisplayString(timeType, specificTime)
       await atPatch(SCHEDULE_TABLE, mow.id, {
         [SF.date]: form.date || undefined,
         [SF.notes]: form.notes || undefined,
@@ -537,6 +574,10 @@ function EditMowModal({ mow, onClose, onSave }) {
         [SF.payMethod]: form.payMethod || undefined,
         [SF.invStatus]: form.invStatus || undefined,
         [SF.duration]: form.duration ? parseFloat(form.duration) : undefined,
+        [SF.timePreference]: timeType,
+        [SF.scheduledTime]: scheduledTime,
+        [SF.scheduleDateTime]: scheduleDateTime,
+        [SF.appointmentDateTime]: timeType === 'Specific Time' ? scheduleDateTime : null,
       })
       toast.success('Mow updated')
       onSave()
@@ -551,20 +592,11 @@ function EditMowModal({ mow, onClose, onSave }) {
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
       {opts ? (
-        <select
-          className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm"
-          value={form[key]}
-          onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
-        >
+        <select className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={form[key]} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}>
           {opts.map(o => <option key={o}>{o}</option>)}
         </select>
       ) : (
-        <input
-          type={type}
-          className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm"
-          value={form[key]}
-          onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
-        />
+        <input type={type} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={form[key]} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} />
       )}
     </div>
   )
@@ -578,23 +610,37 @@ function EditMowModal({ mow, onClose, onSave }) {
         </div>
         <div className="space-y-3">
           {field('Date', 'date', 'date')}
-          {field('Time Note (e.g. 8am start)', 'notes')}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-2">Time</label>
+            <div className="space-y-2.5">
+              {[
+                { value: 'Anytime', label: 'Anytime' },
+                { value: 'Morning', label: 'Morning (8am – 12pm)' },
+                { value: 'Afternoon', label: 'Afternoon (12pm – 5pm)' },
+                { value: 'Specific Time', label: 'Specific Time' },
+              ].map(opt => (
+                <label key={opt.value} className="flex items-center gap-3 cursor-pointer">
+                  <input type="radio" name="editTimeType" value={opt.value} checked={timeType === opt.value} onChange={() => setTimeType(opt.value)} className="w-4 h-4 accent-green-600" />
+                  <span className="text-sm text-gray-700">{opt.label}</span>
+                  {opt.value === 'Specific Time' && timeType === 'Specific Time' && (
+                    <input type="time" value={specificTime} onChange={e => setSpecificTime(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-sm" />
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
           {field('Type', 'type', 'text', ['Intro', 'One-time', 'Recurring'])}
           {field('Status', 'status', 'text', ['Scheduled', 'Completed', 'Cancelled', 'No-show'])}
           {field('Amount ($)', 'amount', 'number')}
           {field('Pay Method', 'payMethod', 'text', ['Cash', 'Stripe', 'Venmo', 'Zelle', 'Other'])}
           {field('Invoice Status', 'invStatus', 'text', ['Not Sent', 'Sent', 'Paid', 'Waived'])}
           {field('Duration (min)', 'duration', 'number')}
+          {field('Notes', 'notes')}
         </div>
         <div className="flex gap-3 mt-5">
           <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 text-sm font-medium">Cancel</button>
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="flex-1 py-3 rounded-xl bg-green-600 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {loading && <Loader2 size={14} className="animate-spin" />}
-            Save
+          <button onClick={handleSave} disabled={loading} className="flex-1 py-3 rounded-xl bg-green-600 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2">
+            {loading && <Loader2 size={14} className="animate-spin" />} Save
           </button>
         </div>
       </div>
@@ -701,6 +747,7 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
         {/* Details row */}
         <div className="flex flex-wrap gap-3 text-sm text-gray-600">
           <span>{fmtDateShort(mow.date)}</span>
+          {(() => { const t = mow.scheduledTime && mow.scheduledTime !== 'Anytime' ? mow.scheduledTime : mow.timePreference && mow.timePreference !== 'Anytime' ? mow.timePreference : ''; return t ? <><span className="text-gray-400">·</span><span>{t}</span></> : null })()}
           {mow.type && <span className="text-gray-400">·</span>}
           {mow.type && <span>{mow.type}</span>}
           {mow.amount != null && <span className="text-gray-400">·</span>}
@@ -906,9 +953,7 @@ function MowCard({ mow, contact, onOpenJob, onCancel, dragHandleProps, isDraggin
       <p className="text-sm text-gray-600 mb-1">
         {mow.type}{mow.type && mow.amount != null ? ' · ' : ''}{mow.amount != null ? fmtCurrency(mow.amount) : ''}
       </p>
-      {(mow.scheduledTime || mow.timePreference) && (
-        <p className="text-xs text-gray-400 mb-3">🕐 {mow.scheduledTime || mow.timePreference}</p>
-      )}
+      {(() => { const t = mow.scheduledTime && mow.scheduledTime !== 'Anytime' ? mow.scheduledTime : mow.timePreference && mow.timePreference !== 'Anytime' ? mow.timePreference : ''; return t ? <p className="text-xs text-gray-400 mb-3">🕐 {t}</p> : null })()}
       {contact?.specInstr && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3">
           <p className="text-xs font-bold text-amber-700">⚠️ Special Instructions</p>
@@ -1050,7 +1095,8 @@ function AddMowModal({ contacts, onClose, onSave }) {
   const sorted = [...contacts].sort((a, b) => a.name.localeCompare(b.name))
   const [contactId, setContactId] = useState(sorted[0]?.id || '')
   const [date, setDate] = useState(todayStr())
-  const [timeNote, setTimeNote] = useState('')
+  const [timeType, setTimeType] = useState('Anytime')
+  const [specificTime, setSpecificTime] = useState('08:00')
   const [type, setType] = useState('Recurring')
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
@@ -1064,6 +1110,8 @@ function AddMowModal({ contacts, onClose, onSave }) {
     setLoading(true)
     try {
       const mowId = `${clientName} – ${date}`
+      const scheduleDateTime = buildScheduleDateTime(date, timeType, specificTime)
+      const scheduledTime = buildTimeDisplayString(timeType, specificTime)
       await atPost(SCHEDULE_TABLE, {
         records: [{
           fields: {
@@ -1072,10 +1120,14 @@ function AddMowModal({ contacts, onClose, onSave }) {
             [SF.date]: date,
             [SF.type]: type,
             [SF.amount]: parseFloat(amount) || 0,
-            [SF.notes]: timeNote || notes || undefined,
+            [SF.notes]: notes || undefined,
             [SF.status]: 'Scheduled',
             [SF.contacts]: [contactId],
             [SF.invStatus]: 'Not Sent',
+            [SF.timePreference]: timeType,
+            [SF.scheduledTime]: scheduledTime,
+            [SF.scheduleDateTime]: scheduleDateTime,
+            [SF.appointmentDateTime]: timeType === 'Specific Time' ? scheduleDateTime : null,
           },
         }],
         typecast: true,
@@ -1099,11 +1151,7 @@ function AddMowModal({ contacts, onClose, onSave }) {
         <div className="space-y-3">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Client</label>
-            <select
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm"
-              value={contactId}
-              onChange={e => setContactId(e.target.value)}
-            >
+            <select className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={contactId} onChange={e => setContactId(e.target.value)}>
               {sorted.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
@@ -1112,8 +1160,23 @@ function AddMowModal({ contacts, onClose, onSave }) {
             <input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={date} onChange={e => setDate(e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Time Note (e.g. 8am start)</label>
-            <input type="text" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm" value={timeNote} onChange={e => setTimeNote(e.target.value)} placeholder="8am start" />
+            <label className="block text-xs font-medium text-gray-500 mb-2">Time</label>
+            <div className="space-y-2.5">
+              {[
+                { value: 'Anytime', label: 'Anytime' },
+                { value: 'Morning', label: 'Morning (8am – 12pm)' },
+                { value: 'Afternoon', label: 'Afternoon (12pm – 5pm)' },
+                { value: 'Specific Time', label: 'Specific Time' },
+              ].map(opt => (
+                <label key={opt.value} className="flex items-center gap-3 cursor-pointer">
+                  <input type="radio" name="addTimeType" value={opt.value} checked={timeType === opt.value} onChange={() => setTimeType(opt.value)} className="w-4 h-4 accent-green-600" />
+                  <span className="text-sm text-gray-700">{opt.label}</span>
+                  {opt.value === 'Specific Time' && timeType === 'Specific Time' && (
+                    <input type="time" value={specificTime} onChange={e => setSpecificTime(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-sm" />
+                  )}
+                </label>
+              ))}
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
@@ -1134,13 +1197,8 @@ function AddMowModal({ contacts, onClose, onSave }) {
         </div>
         <div className="flex gap-3 mt-5">
           <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 text-sm font-medium">Cancel</button>
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="flex-1 py-3 rounded-xl bg-green-600 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {loading && <Loader2 size={14} className="animate-spin" />}
-            Add Mow
+          <button onClick={handleSave} disabled={loading} className="flex-1 py-3 rounded-xl bg-green-600 text-white text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2">
+            {loading && <Loader2 size={14} className="animate-spin" />} Add Mow
           </button>
         </div>
       </div>

@@ -44,6 +44,7 @@ const SF = {
   stripeInvoiceUrl: 'fldoHweTNKKE7hjyy',
   sortOrder: 'fldkJxYo2JQZ25lLi',
   appointmentDateTime: 'fldyXThNomMSb9joa',
+  scheduleDateTime: 'fldcfkVEvuLciPD8z',
 }
 
 // Interaction Log field IDs
@@ -141,6 +142,7 @@ function parseMow(r) {
     timePreference: safeStr(f[SF.timePreference]),
     visitNotes: safeStr(f[SF.visitNotes]),
     photos: arr(f[SF.photos]),
+    scheduleDateTime: safeStr(f[SF.scheduleDateTime]),
     contactIds: arr(f[SF.contacts]),
   }
 }
@@ -164,6 +166,22 @@ function parseLog(r) {
 function mapsUrl(address, city) { return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address} ${city} TN`)}` }
 function fmtCurrency(val) { const n = safeNum(val); return n == null ? '—' : `$${n % 1 === 0 ? n : n.toFixed(2)}` }
 function fmtDateShort(str) { if (!str) return ''; const d = new Date(str.includes('T') ? str : str + 'T12:00:00'); return isNaN(d) ? str : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }
+function buildScheduleDateTime(date, timeType, specificTime) {
+  let timeStr = '12:00'
+  if (timeType === 'Specific Time' && specificTime) timeStr = specificTime
+  else if (timeType === 'Morning') timeStr = '08:00'
+  else if (timeType === 'Afternoon') timeStr = '12:00'
+  return new Date(`${date}T${timeStr}:00`).toISOString()
+}
+function buildTimeDisplayString(timeType, specificTime) {
+  if (timeType === 'Specific Time' && specificTime) {
+    const [h, m] = specificTime.split(':')
+    const hour = parseInt(h)
+    const ampm = hour >= 12 ? 'PM' : 'AM'
+    return `${hour % 12 || 12}:${m} ${ampm}`
+  }
+  return timeType
+}
 function fmtTimestamp(str) {
   if (!str) return ''
   try {
@@ -660,9 +678,8 @@ function ScheduleMowModal({ contact, onClose, onSave }) {
     try {
       const mowId = `${contact.name} – ${form.date}`
       const scheduledTime = getScheduledTime()
-      const appointmentDateTime = (form.timePreference === 'Specific Time' && form.specificTime)
-        ? new Date(`${form.date}T${form.specificTime}:00`).toISOString()
-        : null
+      const scheduleDateTime = buildScheduleDateTime(form.date, form.timePreference, form.specificTime)
+      const appointmentDateTime = form.timePreference === 'Specific Time' ? scheduleDateTime : null
       await atPost(SCHEDULE_TABLE, {
         records: [{
           fields: {
@@ -675,6 +692,7 @@ function ScheduleMowModal({ contact, onClose, onSave }) {
             [SF.invStatus]: 'Not Sent',
             [SF.timePreference]: form.timePreference,
             [SF.scheduledTime]: scheduledTime,
+            [SF.scheduleDateTime]: scheduleDateTime,
             ...(appointmentDateTime ? { [SF.appointmentDateTime]: appointmentDateTime } : {}),
             [SF.notes]: form.notes || null,
             [SF.contacts]: [contact.id],
