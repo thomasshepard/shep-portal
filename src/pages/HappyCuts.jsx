@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import {
-  Scissors, MapPin, ChevronLeft, ChevronRight, X, Plus,
+  Leaf, MapPin, ChevronLeft, ChevronRight, X, Plus,
   CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2,
 } from 'lucide-react'
 
@@ -12,6 +12,7 @@ const HC_BASE = import.meta.env.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID
 const HC_PAT  = import.meta.env.VITE_AIRTABLE_PAT
 const AT_BASE = `https://api.airtable.com/v0/${HC_BASE}`
 const ANTH_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
+const N8N_HC_WEBHOOK = import.meta.env.VITE_N8N_HAPPY_CUTS_WEBHOOK_URL
 
 const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
@@ -42,6 +43,7 @@ const SF = {
   scheduledTime: 'fldtwRBQ5DcQ2UQCF',  // singleLineText: "8:00 AM", "Morning", etc.
   visitNotes: 'fldGQgvRXisiOTYyF',      // multilineText
   photos: 'fldEGXwnsm0xbBmrg',          // multipleAttachments
+  stripeInvoiceUrl: 'fldoHweTNKKE7hjyy', // url
 }
 
 // ─── Airtable helpers ─────────────────────────────────────────────────────────
@@ -105,6 +107,8 @@ function parseContact(r) {
     specInstr: safeStr(f[CF.specInstr]),
     lastContact: safeStr(f[CF.lastContact]),
     notes: safeStr(f[CF.notes]),
+    email: safeStr(f[CF.email]),
+    stripeCustomerId: safeStr(f[CF.stripeCustomerId]),
     mowIds: arr(f[CF.mows]),
     intLogIds: arr(f[CF.intLog]),
   }
@@ -256,55 +260,186 @@ function WeatherBanner({ weather }) {
   )
 }
 
-// ─── ConfirmCompleteModal ─────────────────────────────────────────────────────
-function ConfirmCompleteModal({ mow, contact, onClose, onConfirm }) {
-  const [loading, setLoading] = useState(false)
-  const name = contact?.name || mow.clientName
+// ─── InvoiceModal ─────────────────────────────────────────────────────────────
+function InvoiceModal({ mow, contact, onClose, onConfirm }) {
+  const [step, setStep] = useState('preview') // preview | loading | success | error
+  const [emailInput, setEmailInput] = useState(contact?.email || '')
+  const [invoiceUrl, setInvoiceUrl] = useState('')
+  const [copied, setCopied] = useState(false)
 
-  async function handleConfirm() {
-    setLoading(true)
+  const clientName = contact?.name || mow.clientName
+  const firstName = clientName.split(' ')[0]
+  const phone = contact?.phone || ''
+  const amountNum = mow.amount != null ? Number(mow.amount).toFixed(2) : '0.00'
+  const dateDisplay = fmtDateShort(mow.date)
+  const contactId = mow.contactIds?.[0]
+
+  const message = `Hey ${firstName}! Your lawn looks great 🌿 Here's your invoice for $${amountNum} — pay online by card or bank transfer:\n${invoiceUrl}\n\nThanks! – Thomas, Happy Cuts\n(931) 284-3503`
+  const smsLink = phone ? `sms:${phone.replace(/\D/g, '')}&body=${encodeURIComponent(message)}` : ''
+
+  async function sendInvoice() {
+    setStep('loading')
+    try {
+      const payload = {
+        mowRecordId: mow.id,
+        contactRecordId: contactId,
+        clientName,
+        clientEmail: emailInput.trim() || null,
+        clientPhone: phone,
+        stripeCustomerId: contact?.stripeCustomerId || null,
+        amount: mow.amount,
+        description: `Happy Cuts – Lawn Mow – ${dateDisplay}`,
+        productId: 'prod_UDsZmMCKFg8SoC',
+        ccEmail: 'thomas@eastmeadowproperties.com',
+        hasEmail: !!emailInput.trim(),
+        airtableBaseId: HC_BASE,
+        scheduleTableId: SCHEDULE_TABLE,
+        contactsTableId: CONTACTS_TABLE,
+        stripeInvoiceUrlFieldId: SF.stripeInvoiceUrl,
+        stripeInvoiceIdFieldId: SF.stripeId,
+        stripeCustomerIdFieldId: CF.stripeCustomerId,
+        invoiceStatusFieldId: SF.invStatus,
+      }
+      const res = await fetch(N8N_HC_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (data.success && data.invoiceUrl) {
+        setInvoiceUrl(data.invoiceUrl)
+        setStep('success')
+      } else {
+        setStep('error')
+      }
+    } catch {
+      setStep('error')
+    }
+  }
+
+  async function handleDone() {
     try {
       await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
-      // Update linked contact status: Recurring mow → Recurring, otherwise → One-Time
-      const contactId = mow.contactIds?.[0]
       if (contactId) {
         const newStatus = mow.type === 'Recurring' ? 'Recurring' : 'One-Time'
         await atPatch(CONTACTS_TABLE, contactId, { [CF.status]: newStatus })
       }
-      // TODO: Replace with actual Stripe invoice link from fldC06DE4htmBScNM once Stripe integration built
-      window.open('https://dashboard.stripe.com/invoices', '_blank')
-      toast.success(`${name} marked complete!`)
-      onConfirm()
     } catch {
-      toast.error('Failed to update')
-    } finally {
-      setLoading(false)
+      toast.error('Failed to update mow status')
+    }
+    onConfirm()
+  }
+
+  async function copyText() {
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopied(true)
+      toast.success('Copied!')
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error('Failed to copy')
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-        <h3 className="font-semibold text-gray-800 text-lg mb-2">Mark Complete</h3>
-        <p className="text-gray-600 text-sm mb-6">
-          Mark <strong>{name}</strong> complete and open {fmtCurrency(mow.amount)} invoice?
-        </p>
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={loading}
-            className="flex-1 py-3 rounded-xl bg-green-600 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-            Confirm
-          </button>
-        </div>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={step === 'preview' ? onClose : undefined}>
+      <div className="bg-white rounded-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+
+        {/* Preview */}
+        {step === 'preview' && (
+          <>
+            <div className="px-5 pt-5 pb-4 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">📋 Invoice Preview</h3>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm">
+              <div className="text-gray-500 text-xs font-semibold uppercase tracking-wide">Happy Cuts Lawn Care · (931) 284-3503</div>
+              <div className="space-y-1">
+                <div><span className="text-gray-500">Bill to:</span> <span className="font-medium text-gray-800">{clientName}</span></div>
+                <div><span className="text-gray-500">For:</span> <span className="text-gray-800">Lawn Mow – {dateDisplay}</span></div>
+                <div><span className="text-gray-500">Amount:</span> <span className="font-semibold text-gray-800">{fmtCurrency(mow.amount)}</span></div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Client email</label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={e => setEmailInput(e.target.value)}
+                  placeholder="client@email.com"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                />
+                {!emailInput.trim() && (
+                  <p className="text-xs text-gray-400 mt-1">No email — invoice link will be texted manually</p>
+                )}
+              </div>
+              <div className="text-xs text-gray-400">You'll be CC'd at: thomas@eastmeadowproperties.com</div>
+            </div>
+            <div className="px-5 pb-5 flex gap-3">
+              <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+              <button onClick={sendInvoice} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-semibold text-sm">Send Invoice →</button>
+            </div>
+          </>
+        )}
+
+        {/* Loading */}
+        {step === 'loading' && (
+          <div className="px-5 py-10 flex flex-col items-center gap-3">
+            <Loader2 size={32} className="animate-spin text-green-600" />
+            <p className="text-gray-600 text-sm font-medium">Sending invoice…</p>
+          </div>
+        )}
+
+        {/* Success */}
+        {step === 'success' && (
+          <>
+            <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">
+                {emailInput.trim() ? '✅ Invoice Sent!' : '✅ Invoice Created'}
+              </h3>
+              {!emailInput.trim() && <p className="text-xs text-gray-400 mt-0.5">No email — send link below</p>}
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm">
+              <p className="text-gray-700 font-medium">{clientName} · {fmtCurrency(mow.amount)}</p>
+              <p className="text-gray-500">Lawn Mow – {dateDisplay}</p>
+              <a href={invoiceUrl} target="_blank" rel="noreferrer" className="block w-full text-center py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700">
+                📋 View Invoice
+              </a>
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Text payment link</p>
+                <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-700 whitespace-pre-wrap break-words leading-relaxed">{message}</div>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={copyText} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700">
+                    {copied ? 'Copied!' : '📋 Copy Text'}
+                  </button>
+                  {smsLink && (
+                    <a href={smsLink} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium text-center">
+                      💬 Open SMS
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="px-5 pb-5">
+              <button onClick={handleDone} className="w-full py-3 bg-green-600 text-white rounded-xl font-semibold text-sm">Done</button>
+            </div>
+          </>
+        )}
+
+        {/* Error */}
+        {step === 'error' && (
+          <>
+            <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">❌ Something went wrong</h3>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-gray-600 text-sm">Invoice not sent. Check your n8n workflow.</p>
+            </div>
+            <div className="px-5 pb-5 flex gap-3">
+              <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+              <button onClick={() => setStep('preview')} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-medium text-sm">Try Again</button>
+            </div>
+          </>
+        )}
+
       </div>
     </div>
   )
@@ -611,7 +746,7 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
         />
       )}
       {confirmOpen && (
-        <ConfirmCompleteModal
+        <InvoiceModal
           mow={mow}
           contact={contact}
           onClose={() => setConfirmOpen(false)}
@@ -902,7 +1037,7 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
 
       {weekMows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-          <Scissors size={40} className="mb-3 opacity-40" />
+          <Leaf size={40} className="mb-3 opacity-40" />
           <p className="text-base font-medium">No mows scheduled this week</p>
           <p className="text-sm mt-1">Tap + Add Mow to schedule one</p>
         </div>
@@ -1437,7 +1572,7 @@ export default function HappyCuts() {
   }, [])
 
   const TABS = [
-    { id: 'today', label: 'Today', icon: Scissors },
+    { id: 'today', label: 'Today', icon: Leaf },
     { id: 'clients', label: 'Clients', icon: Users },
     { id: 'schedule', label: 'Schedule', icon: Calendar },
     { id: 'revenue', label: 'Revenue', icon: BarChart2 },
@@ -1456,7 +1591,7 @@ export default function HappyCuts() {
       {/* Header */}
       <div className="bg-white border-b border-gray-100 px-4 py-4">
         <div className="flex items-center gap-3">
-          <Scissors size={24} className="text-green-600" />
+          <Leaf size={24} className="text-green-600" />
           <h1 className="text-xl font-bold text-gray-800">Happy Cuts</h1>
         </div>
       </div>
