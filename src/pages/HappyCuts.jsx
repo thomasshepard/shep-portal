@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import {
-  Leaf, MapPin, ChevronLeft, ChevronRight, X, Plus,
+  Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
   CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2,
 } from 'lucide-react'
 
