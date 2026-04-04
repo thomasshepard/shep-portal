@@ -314,34 +314,128 @@ function WeatherBanner({ weather }) {
   )
 }
 
+// ─── Recurring scheduling helpers ────────────────────────────────────────────
+function calcNextDateStr(mow, contact) {
+  const frequencyDays = { 'Weekly': 7, 'Bi-weekly': 14, 'Monthly': 30 }
+  const intervalDays = frequencyDays[contact.frequency]
+  if (!intervalDays || !mow.date) return null
+  const baseDate = new Date(mow.date + 'T12:00:00')
+  const baseDow = baseDate.getDay()
+  const rawNext = new Date(baseDate)
+  rawNext.setDate(rawNext.getDate() + intervalDays)
+  const dowDiff = (baseDow - rawNext.getDay() + 7) % 7
+  rawNext.setDate(rawNext.getDate() + dowDiff)
+  return rawNext.toLocaleDateString('en-CA')
+}
+
+async function createNextRecurringMow(completedMow, contact) {
+  if (!contact || contact.status !== 'Recurring') return null
+  if (!contact.frequency) return null
+  if (!contact.rate) return null
+  const nextDateStr = calcNextDateStr(completedMow, contact)
+  if (!nextDateStr) return null
+  // Duplicate check
+  const dupFilter = encodeURIComponent(
+    `AND({${SF.date}}='${nextDateStr}', {${SF.status}}='Scheduled', FIND('${contact.id}', ARRAYJOIN({${SF.contacts}})))`
+  )
+  const dupJson = await atGet(SCHEDULE_TABLE, `?returnFieldsByFieldId=true&filterByFormula=${dupFilter}`)
+  if (dupJson.records?.length > 0) return null
+  const contactName = contact.name
+  const scheduleDateTime = new Date(`${nextDateStr}T08:00:00`).toISOString()
+  const result = await atPost(SCHEDULE_TABLE, {
+    records: [{
+      fields: {
+        [SF.mowId]: `${contactName} – ${nextDateStr}`,
+        [SF.clientName]: contactName,
+        [SF.date]: nextDateStr,
+        [SF.scheduleDateTime]: scheduleDateTime,
+        [SF.type]: 'Recurring',
+        [SF.status]: 'Scheduled',
+        [SF.amount]: contact.rate,
+        [SF.timePreference]: 'Morning',
+        [SF.scheduledTime]: 'Morning',
+        [SF.invStatus]: 'Not Sent',
+        [SF.contacts]: [contact.id],
+      },
+    }],
+    typecast: true,
+  })
+  if (result.error) throw new Error(result.error.message || 'Create failed')
+  return result.records?.[0] || null
+}
+
 // ─── CancelMowModal ───────────────────────────────────────────────────────────
 function CancelMowModal({ mow, contact, onClose, onCancelled }) {
+  const [step, setStep] = useState('confirm')
   const [loading, setLoading] = useState(false)
+  const [scheduling, setScheduling] = useState(false)
   const name = contact?.name || mow.clientName
+  const isRecurring = contact?.status === 'Recurring'
+  const nextDateStr = isRecurring ? calcNextDateStr(mow, contact) : null
+  const nextDateFormatted = nextDateStr
+    ? new Date(nextDateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    : null
+
   async function handleCancel() {
     setLoading(true)
     try {
       await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Cancelled' })
       toast.success('Mow cancelled')
-      onCancelled()
+      if (isRecurring && nextDateStr) {
+        setStep('skip')
+      } else {
+        onCancelled()
+      }
     } catch {
       toast.error('Failed to cancel')
     } finally {
       setLoading(false)
     }
   }
+
+  async function handleScheduleNext() {
+    setScheduling(true)
+    try {
+      await createNextRecurringMow(mow, contact)
+      toast.success(`Next mow scheduled for ${nextDateFormatted}`)
+    } catch (err) {
+      console.error('Skip-schedule failed:', err)
+      toast.error('Could not schedule next mow')
+    } finally {
+      setScheduling(false)
+      onCancelled()
+    }
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={step === 'confirm' ? onClose : undefined}>
       <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-        <h3 className="font-semibold text-gray-800 text-lg mb-2">Cancel this mow?</h3>
-        <p className="text-gray-600 text-sm mb-1"><strong>{name}</strong> · {fmtDateShort(mow.date)}</p>
-        <p className="text-gray-400 text-xs mb-6">This will mark it cancelled. It won't be deleted.</p>
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Keep It</button>
-          <button onClick={handleCancel} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
-            {loading && <Loader2 size={14} className="animate-spin" />} Yes, Cancel
-          </button>
-        </div>
+        {step === 'confirm' && (
+          <>
+            <h3 className="font-semibold text-gray-800 text-lg mb-2">Cancel this mow?</h3>
+            <p className="text-gray-600 text-sm mb-1"><strong>{name}</strong> · {fmtDateShort(mow.date)}</p>
+            <p className="text-gray-400 text-xs mb-6">This will mark it cancelled. It won't be deleted.</p>
+            <div className="flex gap-3">
+              <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Keep It</button>
+              <button onClick={handleCancel} disabled={loading} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                {loading && <Loader2 size={14} className="animate-spin" />} Yes, Cancel
+              </button>
+            </div>
+          </>
+        )}
+        {step === 'skip' && (
+          <>
+            <h3 className="font-semibold text-gray-800 text-lg mb-2">Skip this mow?</h3>
+            <p className="text-gray-500 text-sm mb-5">The mow was cancelled. Keep the recurring chain going?</p>
+            <div className="flex flex-col gap-2">
+              <button onClick={handleScheduleNext} disabled={scheduling} className="w-full py-3 rounded-xl bg-green-600 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                {scheduling && <Loader2 size={14} className="animate-spin" />}
+                Schedule next mow for {nextDateFormatted}
+              </button>
+              <button onClick={onCancelled} className="w-full py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Just cancel</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -673,6 +767,7 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
 
   async function markComplete() {
     setMarkCompleting(true)
+    // Step 1: Mark completion (must succeed)
     try {
       await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
       const contactId = mow.contactIds?.[0]
@@ -682,12 +777,28 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
       }
       setIsCompleted(true)
       setMarkCompleteOpen(false)
-      toast.success('Mow marked complete ✅')
     } catch {
       toast.error('Failed to mark complete')
-    } finally {
       setMarkCompleting(false)
+      return
     }
+    // Step 2: Auto-schedule next mow (failure is non-fatal)
+    try {
+      const nextMow = await createNextRecurringMow(mow, contact)
+      if (nextMow) {
+        const nextDate = nextMow.fields?.[SF.date]
+        const formatted = nextDate
+          ? new Date(nextDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+          : ''
+        toast.success(`✓ Complete! Next mow scheduled for ${formatted}`)
+      } else {
+        toast.success('Mow marked complete ✓')
+      }
+    } catch (err) {
+      console.error('Auto-schedule failed:', err)
+      toast.error("Mow marked complete, but next mow couldn't be scheduled. Open the Schedule tab to add it manually.")
+    }
+    setMarkCompleting(false)
   }
 
   async function saveNotes() {
@@ -965,8 +1076,10 @@ function MowCard({ mow, contact, onOpenJob, onCancel, dragHandleProps, isDraggin
   const navigate = useNavigate()
   const contactRecordId = contact?.id || mow.contactIds?.[0] || null
   const isScheduled = mow.status === 'Scheduled'
+  const todayLocal = new Date().toLocaleDateString('en-CA')
+  const isOverdue = isScheduled && mow.date < todayLocal
   return (
-    <div className={`relative bg-white border rounded-2xl p-4 mb-3 shadow-sm transition-all ${isDragOver ? 'border-2 border-green-400' : 'border-gray-200'} ${isDragging ? 'opacity-50' : ''}`}>
+    <div className={`relative bg-white border rounded-2xl p-4 mb-3 shadow-sm transition-all ${isOverdue ? 'border-amber-300' : isDragOver ? 'border-2 border-green-400' : 'border-gray-200'} ${isDragging ? 'opacity-50' : ''}`}>
       {/* Drag handle */}
       {isScheduled && dragHandleProps && (
         <div {...dragHandleProps} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 cursor-grab active:cursor-grabbing select-none text-xl px-1">
@@ -994,9 +1107,16 @@ function MowCard({ mow, contact, onOpenJob, onCancel, dragHandleProps, isDraggin
             </button>
           )}
         </div>
-        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ml-2 ${isScheduled && onCancel ? 'mr-6' : ''} ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
-          {mow.status}
-        </span>
+        <div className="flex items-center gap-1 shrink-0 ml-2">
+          {isOverdue && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+              Overdue
+            </span>
+          )}
+          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${isScheduled && onCancel ? 'mr-6' : ''} ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
+            {mow.status}
+          </span>
+        </div>
       </div>
       {contact && (
         <p className={`text-sm text-gray-500 mb-1 ${isScheduled && dragHandleProps ? 'pl-6' : ''}`}>{contact.address}{contact.city ? `, ${contact.city}` : ''}</p>
@@ -1276,10 +1396,11 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   })()
 
-  // Sync localGroups from schedules prop
+  // Sync localGroups from schedules prop — include past 7 days for overdue detection
   useEffect(() => {
+    const sevenDaysAgo = dateToStr(addDays(new Date(), -7))
     const filtered = schedules
-      .filter(m => m.date >= today && m.date <= endOfWeek && m.status === 'Scheduled')
+      .filter(m => m.date >= sevenDaysAgo && m.date <= endOfWeek && m.status === 'Scheduled')
       .sort((a, b) => {
         if (a.date !== b.date) return (a.date || '').localeCompare(b.date || '')
         return (a.sortOrder ?? 999) - (b.sortOrder ?? 999)
@@ -1819,10 +1940,40 @@ function RevenueTab({ onOpenJob }) {
   const [cache, setCache] = useState({})          // YYYY-MM → mow[]
   const [revLoading, setRevLoading] = useState(false)
   const [filterChip, setFilterChip] = useState('Completed')
+  const [allFuture, setAllFuture] = useState(null) // total $ of all future Scheduled mows
+  const [allFutureLoading, setAllFutureLoading] = useState(false)
 
   useEffect(() => {
     if (!cache[selectedYM]) fetchMonthData(selectedYM)
   }, [selectedYM])
+
+  useEffect(() => {
+    fetchAllFuture()
+  }, [])
+
+  async function fetchAllFuture() {
+    setAllFutureLoading(true)
+    try {
+      const todayLocal = new Date().toLocaleDateString('en-CA')
+      const filter = encodeURIComponent(`AND({${SF.status}}='Scheduled', {${SF.date}}>='${todayLocal}')`)
+      const records = []
+      let offset = null
+      do {
+        let qs = `?returnFieldsByFieldId=true&filterByFormula=${filter}`
+        if (offset) qs += `&offset=${offset}`
+        const json = await atGet(SCHEDULE_TABLE, qs)
+        if (!json.records) throw new Error(json.error?.message || 'Fetch failed')
+        records.push(...json.records)
+        offset = json.offset || null
+      } while (offset)
+      const total = records.reduce((s, r) => s + (safeNum(r.fields?.[SF.amount]) || 0), 0)
+      setAllFuture(total)
+    } catch {
+      setAllFuture(0)
+    } finally {
+      setAllFutureLoading(false)
+    }
+  }
 
   async function fetchMonthData(ym) {
     setRevLoading(true)
@@ -1872,7 +2023,9 @@ function RevenueTab({ onOpenJob }) {
 
   const listMows = (filterChip === 'Completed' ? completedMows : scheduledMows)
     .slice()
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    .sort((a, b) => filterChip === 'Scheduled'
+      ? (a.date || '').localeCompare(b.date || '')
+      : (b.date || '').localeCompare(a.date || ''))
 
   const monthLabel = new Date(selectedYM + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   const isCurrentMonth = selectedYM === currentYM
@@ -1905,7 +2058,7 @@ function RevenueTab({ onOpenJob }) {
           <p className="text-lg font-bold text-gray-800">{completedMows.length}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
-          <p className="text-xs text-gray-400 mb-1">Mows Upcoming</p>
+          <p className="text-xs text-gray-400 mb-1">Mows Booked</p>
           <p className="text-lg font-bold text-gray-800">{scheduledMows.length}</p>
         </div>
       </div>
@@ -1938,7 +2091,7 @@ function RevenueTab({ onOpenJob }) {
         <div className="space-y-2">
           {listMows.map(mow => {
             const dateStr = mow.scheduleDateTime
-              ? new Date(mow.scheduleDateTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              ? new Date(mow.scheduleDateTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
               : fmtDateShort(mow.date)
             return (
               <div
@@ -1948,7 +2101,7 @@ function RevenueTab({ onOpenJob }) {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="text-sm text-gray-500 flex-shrink-0 w-14">{dateStr}</span>
+                    <span className="text-sm text-gray-500 flex-shrink-0 w-20">{dateStr}</span>
                     <span className="font-medium text-gray-800 truncate">{safeStr(mow.clientName, '—')}</span>
                     {mow.type && <span className="text-xs text-gray-400 flex-shrink-0">{mow.type}</span>}
                   </div>
@@ -1960,11 +2113,22 @@ function RevenueTab({ onOpenJob }) {
                   </div>
                 </div>
                 {mow.invStatus && mow.invStatus !== 'Not Sent' && (
-                  <p className="text-xs text-gray-400 mt-0.5 pl-16">{safeStr(mow.invStatus)}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 pl-20">{safeStr(mow.invStatus)}</p>
                 )}
               </div>
             )
           })}
+          {filterChip === 'Scheduled' && (
+            <div className="pt-4 border-t border-gray-100 text-sm text-gray-500 text-center">
+              <span className="font-semibold text-gray-700">Forecasted this month: {fmtCurrency(forecasted)}</span>
+              {' · '}
+              {allFutureLoading ? (
+                <span>Loading…</span>
+              ) : allFuture != null ? (
+                <span>All future booked: {fmtCurrency(allFuture)}</span>
+              ) : null}
+            </div>
+          )}
         </div>
       )}
     </div>

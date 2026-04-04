@@ -211,6 +211,56 @@ const INV_STATUS = {
   Waived: 'bg-purple-100 text-purple-600',
 }
 
+// ─── Recurring scheduling helpers ────────────────────────────────────────────
+function calcNextDateStr(mow, contact) {
+  const frequencyDays = { 'Weekly': 7, 'Bi-weekly': 14, 'Monthly': 30 }
+  const intervalDays = frequencyDays[contact.frequency]
+  if (!intervalDays || !mow.date) return null
+  const baseDate = new Date(mow.date + 'T12:00:00')
+  const baseDow = baseDate.getDay()
+  const rawNext = new Date(baseDate)
+  rawNext.setDate(rawNext.getDate() + intervalDays)
+  const dowDiff = (baseDow - rawNext.getDay() + 7) % 7
+  rawNext.setDate(rawNext.getDate() + dowDiff)
+  return rawNext.toLocaleDateString('en-CA')
+}
+
+async function createNextRecurringMow(completedMow, contact) {
+  if (!contact || contact.status !== 'Recurring') return null
+  if (!contact.frequency) return null
+  if (!contact.rate) return null
+  const nextDateStr = calcNextDateStr(completedMow, contact)
+  if (!nextDateStr) return null
+  // Duplicate check
+  const dupFilter = encodeURIComponent(
+    `AND({${SF.date}}='${nextDateStr}', {${SF.status}}='Scheduled', FIND('${contact.id}', ARRAYJOIN({${SF.contacts}})))`
+  )
+  const dupJson = await atGet(SCHEDULE_TABLE, `?returnFieldsByFieldId=true&filterByFormula=${dupFilter}`)
+  if (dupJson.records?.length > 0) return null
+  const contactName = contact.name
+  const scheduleDateTime = new Date(`${nextDateStr}T08:00:00`).toISOString()
+  const result = await atPost(SCHEDULE_TABLE, {
+    records: [{
+      fields: {
+        [SF.mowId]: `${contactName} – ${nextDateStr}`,
+        [SF.clientName]: contactName,
+        [SF.date]: nextDateStr,
+        [SF.scheduleDateTime]: scheduleDateTime,
+        [SF.type]: 'Recurring',
+        [SF.status]: 'Scheduled',
+        [SF.amount]: contact.rate,
+        [SF.timePreference]: 'Morning',
+        [SF.scheduledTime]: 'Morning',
+        [SF.invStatus]: 'Not Sent',
+        [SF.contacts]: [contact.id],
+      },
+    }],
+    typecast: true,
+  })
+  if (result.error) throw new Error(result.error.message || 'Create failed')
+  return result.records?.[0] || null
+}
+
 // ─── InvoiceModal ─────────────────────────────────────────────────────────────
 function InvoiceModal({ mow, contact, onClose, onConfirm }) {
   const [step, setStep] = useState('preview') // preview | loading | success | error
@@ -491,6 +541,7 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
 
   async function markComplete() {
     setMarkCompleting(true)
+    // Step 1: Mark completion (must succeed)
     try {
       await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
       const contactId = mow.contactIds?.[0]
@@ -500,12 +551,28 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
       }
       setIsCompleted(true)
       setMarkCompleteOpen(false)
-      toast.success('Mow marked complete ✅')
     } catch {
       toast.error('Failed to mark complete')
-    } finally {
       setMarkCompleting(false)
+      return
     }
+    // Step 2: Auto-schedule next mow (failure is non-fatal)
+    try {
+      const nextMow = await createNextRecurringMow(mow, contact)
+      if (nextMow) {
+        const nextDate = nextMow.fields?.[SF.date]
+        const formatted = nextDate
+          ? new Date(nextDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+          : ''
+        toast.success(`✓ Complete! Next mow scheduled for ${formatted}`)
+      } else {
+        toast.success('Mow marked complete ✓')
+      }
+    } catch (err) {
+      console.error('Auto-schedule failed:', err)
+      toast.error("Mow marked complete, but next mow couldn't be scheduled. Open the Schedule tab to add it manually.")
+    }
+    setMarkCompleting(false)
   }
 
   async function saveNotes() {
