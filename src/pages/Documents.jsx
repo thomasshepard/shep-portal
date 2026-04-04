@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
+import DocumentActionCenter from '../components/DocumentActionCenter'
 import {
   Search, X, FileText, AlertTriangle, ExternalLink, Calendar,
   ChevronLeft, ChevronRight, ChevronDown, Plus, Upload, Share2, Flag, Mail,
@@ -175,6 +176,7 @@ export default function Documents() {
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState(null)
   const [attachIdx, setAttachIdx] = useState(0)
+  const [actionCenterOpen, setActionCenterOpen] = useState(false)
 
   const fileInputRef = useRef(null)
   const gridRef = useRef(null)
@@ -240,6 +242,14 @@ export default function Documents() {
     const s = new Set()
     docs.forEach(d => d.tags.forEach(t => s.add(t)))
     return [...s].sort()
+  }, [docs])
+
+  const actionCount = useMemo(() => {
+    return docs.filter(d => {
+      const req = d.raw?.['Action Required'] || ''
+      const done = d.raw?.['Action Done'] === true
+      return String(req).trim() !== '' && !done
+    }).length
   }, [docs])
 
   // Tags the current non-admin user is allowed to see (null = admin, sees all)
@@ -321,6 +331,35 @@ export default function Documents() {
           onChange={handleFileChange}
         />
       </div>
+
+      {/* Tab bar */}
+      {actionCount > 0 && (
+        <div className="flex border-b border-gray-200 -mt-1">
+          <button
+            onClick={() => setActionCenterOpen(false)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              !actionCenterOpen ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            All Documents
+          </button>
+          <button
+            onClick={() => setActionCenterOpen(true)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+              actionCenterOpen ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Action Required
+            <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">
+              {actionCount}
+            </span>
+          </button>
+        </div>
+      )}
+
+      {actionCenterOpen ? (
+        <DocumentActionCenter />
+      ) : (<>
 
       {/* Search + Filters */}
       <div className="flex flex-wrap gap-2">
@@ -412,8 +451,10 @@ export default function Documents() {
         />
       )}
 
+      </>)}
+
       {/* Detail Modal */}
-      {selected && (
+      {!actionCenterOpen && selected && (
         <DocModal
           doc={selected}
           attachIdx={attachIdx}
