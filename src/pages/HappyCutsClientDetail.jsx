@@ -478,12 +478,34 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [fullscreenPhoto, setFullscreenPhoto] = useState(null)
   const [localPhotos, setLocalPhotos] = useState(mow.photos || [])
+  const [isCompleted, setIsCompleted] = useState(mow.status === 'Completed')
+  const [markCompleteOpen, setMarkCompleteOpen] = useState(false)
+  const [markCompleting, setMarkCompleting] = useState(false)
   const fileInputRef = useRef(null)
 
   function handleComplete() {
     setConfirmOpen(false)
     onRefresh()
     onBack()
+  }
+
+  async function markComplete() {
+    setMarkCompleting(true)
+    try {
+      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
+      const contactId = mow.contactIds?.[0]
+      if (contactId) {
+        const newStatus = mow.type === 'Recurring' ? 'Recurring' : 'One-Time'
+        await atPatch(CONTACTS_TABLE, contactId, { [CF.status]: newStatus })
+      }
+      setIsCompleted(true)
+      setMarkCompleteOpen(false)
+      toast.success('Mow marked complete ✅')
+    } catch {
+      toast.error('Failed to mark complete')
+    } finally {
+      setMarkCompleting(false)
+    }
   }
 
   async function saveNotes() {
@@ -598,7 +620,7 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
               ))}
             </div>
           )}
-          <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelect} className="hidden" ref={fileInputRef} />
+          <input type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" ref={fileInputRef} />
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploadingPhoto}
@@ -612,14 +634,46 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
           ✏️ Edit This Mow
         </button>
       </div>
+      {/* Action buttons pinned to bottom */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100">
-        <button
-          onClick={() => setConfirmOpen(true)}
-          className="w-full h-14 bg-green-600 text-white font-semibold rounded-xl text-base flex items-center justify-center gap-2"
-        >
-          <CheckCircle size={20} /> ✅ Mark Complete + Invoice
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setMarkCompleteOpen(true)}
+            disabled={isCompleted}
+            className={`flex-1 h-[52px] font-semibold rounded-xl text-sm flex items-center justify-center gap-1.5 ${
+              isCompleted ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-600 text-white'
+            }`}
+          >
+            <CheckCircle size={17} />
+            {isCompleted ? 'Completed ✅' : 'Mark Complete'}
+          </button>
+          <button
+            onClick={() => setConfirmOpen(true)}
+            className={`flex-1 h-[52px] font-semibold rounded-xl text-sm flex items-center justify-center gap-1.5 ${
+              mow.invStatus === 'Sent' || mow.invStatus === 'Paid'
+                ? 'bg-blue-100 text-blue-400'
+                : 'bg-blue-600 text-white'
+            }`}
+          >
+            {mow.invStatus === 'Sent' || mow.invStatus === 'Paid' ? 'Invoice Sent ✅' : 'Send Invoice'}
+          </button>
+        </div>
       </div>
+
+      {/* Mark Complete confirm modal */}
+      {markCompleteOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setMarkCompleteOpen(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-800 text-lg mb-3">Mark this mow as complete?</h3>
+            <div className="flex gap-3">
+              <button onClick={() => setMarkCompleteOpen(false)} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+              <button onClick={markComplete} disabled={markCompleting} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                {markCompleting && <Loader2 size={14} className="animate-spin" />} Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fullscreen photo modal */}
       {fullscreenPhoto && (

@@ -660,12 +660,34 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   const [fullscreenPhoto, setFullscreenPhoto] = useState(null)
   const [localPhotos, setLocalPhotos] = useState(mow.photos || [])
   const [cancelOpen, setCancelOpen] = useState(false)
+  const [isCompleted, setIsCompleted] = useState(mow.status === 'Completed')
+  const [markCompleteOpen, setMarkCompleteOpen] = useState(false)
+  const [markCompleting, setMarkCompleting] = useState(false)
   const fileInputRef = useRef(null)
 
   function handleComplete() {
     setConfirmOpen(false)
     onRefresh()
     onBack()
+  }
+
+  async function markComplete() {
+    setMarkCompleting(true)
+    try {
+      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
+      const contactId = mow.contactIds?.[0]
+      if (contactId) {
+        const newStatus = mow.type === 'Recurring' ? 'Recurring' : 'One-Time'
+        await atPatch(CONTACTS_TABLE, contactId, { [CF.status]: newStatus })
+      }
+      setIsCompleted(true)
+      setMarkCompleteOpen(false)
+      toast.success('Mow marked complete ✅')
+    } catch {
+      toast.error('Failed to mark complete')
+    } finally {
+      setMarkCompleting(false)
+    }
   }
 
   async function saveNotes() {
@@ -827,7 +849,6 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
           <input
             type="file"
             accept="image/*"
-            capture="environment"
             onChange={handlePhotoSelect}
             className="hidden"
             ref={fileInputRef}
@@ -860,16 +881,46 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
         )}
       </div>
 
-      {/* Mark Complete pinned to bottom */}
+      {/* Action buttons pinned to bottom */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100">
-        <button
-          onClick={() => setConfirmOpen(true)}
-          className="w-full h-14 bg-green-600 text-white font-semibold rounded-xl text-base flex items-center justify-center gap-2"
-        >
-          <CheckCircle size={20} />
-          ✅ Mark Complete + Invoice
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setMarkCompleteOpen(true)}
+            disabled={isCompleted}
+            className={`flex-1 h-[52px] font-semibold rounded-xl text-sm flex items-center justify-center gap-1.5 ${
+              isCompleted ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-600 text-white'
+            }`}
+          >
+            <CheckCircle size={17} />
+            {isCompleted ? 'Completed ✅' : 'Mark Complete'}
+          </button>
+          <button
+            onClick={() => setConfirmOpen(true)}
+            className={`flex-1 h-[52px] font-semibold rounded-xl text-sm flex items-center justify-center gap-1.5 ${
+              mow.invStatus === 'Sent' || mow.invStatus === 'Paid'
+                ? 'bg-blue-100 text-blue-400'
+                : 'bg-blue-600 text-white'
+            }`}
+          >
+            {mow.invStatus === 'Sent' || mow.invStatus === 'Paid' ? 'Invoice Sent ✅' : 'Send Invoice'}
+          </button>
+        </div>
       </div>
+
+      {/* Mark Complete confirm modal */}
+      {markCompleteOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setMarkCompleteOpen(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-800 text-lg mb-3">Mark this mow as complete?</h3>
+            <div className="flex gap-3">
+              <button onClick={() => setMarkCompleteOpen(false)} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+              <button onClick={markComplete} disabled={markCompleting} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                {markCompleting && <Loader2 size={14} className="animate-spin" />} Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fullscreen photo modal */}
       {fullscreenPhoto && (
@@ -1213,6 +1264,9 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
   const [draggedId, setDraggedId] = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
   const [localGroups, setLocalGroups] = useState({})
+  const [showNextWeek, setShowNextWeek] = useState(false)
+  const [nextWeekMows, setNextWeekMows] = useState(null) // null = not yet fetched
+  const [nextWeekLoading, setNextWeekLoading] = useState(false)
   const today = todayStr()
 
   const endOfWeek = (() => {
@@ -1240,6 +1294,45 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
 
   const totalMows = Object.values(localGroups).reduce((s, arr) => s + arr.length, 0)
 
+  const nextWeekRange = (() => {
+    const thisMon = getMonday(new Date())
+    const nextMon = addDays(thisMon, 7)
+    const nextSun = addDays(nextMon, 6)
+    return {
+      start: dateToStr(nextMon),
+      end: dateToStr(nextSun),
+      label: `Next Week — ${nextMon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${nextSun.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+    }
+  })()
+
+  async function handleNextWeekToggle() {
+    const next = !showNextWeek
+    setShowNextWeek(next)
+    if (next && nextWeekMows === null) {
+      setNextWeekLoading(true)
+      try {
+        const { start, end } = nextWeekRange
+        const filter = encodeURIComponent(`AND({${SF.status}}='Scheduled', {${SF.date}}>='${start}', {${SF.date}}<='${end}')`)
+        const records = []
+        let offset = null
+        do {
+          let qs = `?returnFieldsByFieldId=true&filterByFormula=${filter}`
+          if (offset) qs += `&offset=${offset}`
+          const json = await atGet(SCHEDULE_TABLE, qs)
+          if (!json.records) throw new Error(json.error?.message || 'Fetch failed')
+          records.push(...json.records)
+          offset = json.offset || null
+        } while (offset)
+        setNextWeekMows(records.map(parseMow))
+      } catch {
+        toast.error('Failed to load next week')
+        setNextWeekMows([])
+      } finally {
+        setNextWeekLoading(false)
+      }
+    }
+  }
+
   async function handleDrop(date, fromId, toId) {
     if (fromId === toId) return
     const dayMows = localGroups[date] || []
@@ -1263,6 +1356,16 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
   return (
     <div className="px-4 py-4 pb-28">
       <WeatherBanner weather={weather} />
+
+      {/* Next week toggle */}
+      <button
+        onClick={handleNextWeekToggle}
+        className="w-full mt-1 mb-4 flex items-center justify-between px-4 py-2.5 rounded-xl bg-gray-100 text-gray-600 text-sm font-medium"
+      >
+        <span>{showNextWeek ? 'Hide Next Week' : 'Show Next Week'}</span>
+        <ChevronDown size={15} className={`transition-transform duration-200 ${showNextWeek ? 'rotate-180' : ''}`} />
+      </button>
+
       <h2 className="text-lg font-bold text-gray-800 mb-3">This Week's Mows</h2>
 
       {totalMows === 0 ? (
@@ -1303,6 +1406,48 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
             </div>
           )
         })
+      )}
+
+      {/* Next week section */}
+      {showNextWeek && (
+        <div className="mt-2">
+          <h3 className="text-base font-bold text-gray-700 mb-3">{nextWeekRange.label}</h3>
+          {nextWeekLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 size={20} className="animate-spin text-green-600" />
+            </div>
+          ) : arr(nextWeekMows).length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No scheduled mows next week</p>
+          ) : (
+            Object.entries(
+              arr(nextWeekMows).reduce((acc, mow) => {
+                const d = mow.date || ''
+                if (!acc[d]) acc[d] = []
+                acc[d].push(mow)
+                return acc
+              }, {})
+            ).sort().map(([date, mows]) => {
+              const label = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+              return (
+                <div key={date} className="mb-5">
+                  <p className="text-sm font-semibold mb-2 text-gray-500">{label}</p>
+                  {mows.map(mow => (
+                    <MowCard
+                      key={mow.id}
+                      mow={mow}
+                      contact={contactsById[mow.contactIds[0]]}
+                      onOpenJob={() => onOpenJob(mow)}
+                      onCancel={m => setCancelTarget(m)}
+                      isDragging={false}
+                      isDragOver={false}
+                      dragHandleProps={null}
+                    />
+                  ))}
+                </div>
+              )
+            })
+          )}
+        </div>
       )}
 
       {cancelTarget && (
@@ -1666,111 +1811,160 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
 }
 
 // ─── RevenueTab ───────────────────────────────────────────────────────────────
-const INV_CYCLE = ['Not Sent', 'Sent', 'Paid', 'Waived']
-
-function RevenueTab({ schedules, contactsById, onOpenJob, onRefresh }) {
-  const [page, setPage] = useState(0)
-  const PAGE_SIZE = 20
-
+function RevenueTab({ onOpenJob }) {
   const now = new Date()
-  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const completed = schedules.filter(m => m.status === 'Completed')
-  const monthTotal = completed.filter(m => m.date?.startsWith(thisMonth)).reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
-  const allTotal = completed.reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
-  const cashCount = schedules.filter(m => safeStr(m.payMethod).toLowerCase() === 'cash').length
-  const stripeCount = schedules.filter(m => safeStr(m.payMethod).toLowerCase() === 'stripe').length
+  const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
-  const sorted = [...schedules].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-  const total = sorted.length
-  const pageItems = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const [selectedYM, setSelectedYM] = useState(currentYM)
+  const [cache, setCache] = useState({})          // YYYY-MM → mow[]
+  const [revLoading, setRevLoading] = useState(false)
+  const [filterChip, setFilterChip] = useState('Completed')
 
-  async function cycleInvStatus(mow) {
-    const cur = mow.invStatus || 'Not Sent'
-    const idx = INV_CYCLE.indexOf(cur)
-    const next = INV_CYCLE[(idx + 1) % INV_CYCLE.length]
+  useEffect(() => {
+    if (!cache[selectedYM]) fetchMonthData(selectedYM)
+  }, [selectedYM])
+
+  async function fetchMonthData(ym) {
+    setRevLoading(true)
     try {
-      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.invStatus]: next })
-      toast.success(`Invoice: ${next}`)
-      onRefresh()
-    } catch {
-      toast.error('Failed to update')
+      const [year, month] = ym.split('-').map(Number)
+      const start = `${ym}-01`
+      const nextM = new Date(year, month, 1) // month is 1-indexed; Date uses 0-indexed, so this gives 1st of next month
+      const end = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}-01`
+      const filter = encodeURIComponent(`AND({${SF.date}}>='${start}', {${SF.date}}<'${end}')`)
+      const records = []
+      let offset = null
+      do {
+        let qs = `?returnFieldsByFieldId=true&filterByFormula=${filter}`
+        if (offset) qs += `&offset=${offset}`
+        const json = await atGet(SCHEDULE_TABLE, qs)
+        if (!json.records) throw new Error(json.error?.message || 'Fetch failed')
+        records.push(...json.records)
+        offset = json.offset || null
+      } while (offset)
+      setCache(prev => ({ ...prev, [ym]: records.map(parseMow) }))
+    } catch (e) {
+      toast.error('Failed to load month')
+      setCache(prev => ({ ...prev, [ym]: [] }))
+    } finally {
+      setRevLoading(false)
     }
   }
 
+  function prevMonth() {
+    const [y, m] = selectedYM.split('-').map(Number)
+    const d = new Date(y, m - 2, 1)
+    setSelectedYM(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    setFilterChip('Completed')
+  }
+  function nextMonth() {
+    const [y, m] = selectedYM.split('-').map(Number)
+    const d = new Date(y, m, 1)
+    setSelectedYM(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    setFilterChip('Completed')
+  }
+
+  const mows = arr(cache[selectedYM])
+  const completedMows = mows.filter(m => m.status === 'Completed')
+  const scheduledMows = mows.filter(m => m.status === 'Scheduled')
+  const revenueCollected = completedMows.reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
+  const forecasted      = scheduledMows.reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
+
+  const listMows = (filterChip === 'Completed' ? completedMows : scheduledMows)
+    .slice()
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+  const monthLabel = new Date(selectedYM + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const isCurrentMonth = selectedYM === currentYM
+
   return (
-    <div className="px-4 py-4">
-      {/* KPI cards */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
+    <div className="px-4 py-4 pb-8">
+      {/* Month navigator */}
+      <div className="flex items-center justify-between mb-5">
+        <button onClick={prevMonth} className="min-h-[44px] px-3 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600">
+          <ChevronLeft size={20} />
+        </button>
+        <span className="font-semibold text-gray-800">{monthLabel}</span>
+        <button onClick={nextMonth} disabled={isCurrentMonth} className="min-h-[44px] px-3 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 disabled:opacity-30">
+          <ChevronRight size={20} />
+        </button>
+      </div>
+
+      {/* KPI cards 2×2 */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
-          <p className="text-xs text-gray-400 mb-1">This Month</p>
-          <p className="text-lg font-bold text-green-600">{fmtCurrency(monthTotal)}</p>
+          <p className="text-xs text-gray-400 mb-1">Revenue Collected</p>
+          <p className="text-lg font-bold text-green-600">{fmtCurrency(revenueCollected)}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
-          <p className="text-xs text-gray-400 mb-1">All Time</p>
-          <p className="text-lg font-bold text-gray-800">{fmtCurrency(allTotal)}</p>
+          <p className="text-xs text-gray-400 mb-1">Forecasted</p>
+          <p className="text-lg font-bold text-blue-500">{fmtCurrency(forecasted)}</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
-          <p className="text-xs text-gray-400 mb-1">Cash / Stripe</p>
-          <p className="text-lg font-bold text-gray-800">{cashCount}/{stripeCount}</p>
+          <p className="text-xs text-gray-400 mb-1">Mows Done</p>
+          <p className="text-lg font-bold text-gray-800">{completedMows.length}</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
+          <p className="text-xs text-gray-400 mb-1">Mows Upcoming</p>
+          <p className="text-lg font-bold text-gray-800">{scheduledMows.length}</p>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
-              <th className="text-left py-2 pr-3">Date</th>
-              <th className="text-left py-2 pr-3">Client</th>
-              <th className="text-left py-2 pr-3">Type</th>
-              <th className="text-right py-2 pr-3">Amt</th>
-              <th className="text-left py-2 pr-3">Pay</th>
-              <th className="text-left py-2">Inv</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pageItems.map(mow => (
-              <tr
+      {/* Filter chips */}
+      <div className="flex gap-2 mb-4">
+        {['Completed', 'Scheduled'].map(chip => (
+          <button
+            key={chip}
+            onClick={() => setFilterChip(chip)}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+              filterChip === chip ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            {chip}
+          </button>
+        ))}
+      </div>
+
+      {/* Mow list */}
+      {revLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 size={24} className="animate-spin text-green-600" />
+        </div>
+      ) : listMows.length === 0 ? (
+        <div className="py-12 text-center text-gray-400">
+          <p className="text-sm">No {filterChip.toLowerCase()} mows in {monthLabel}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {listMows.map(mow => {
+            const dateStr = mow.scheduleDateTime
+              ? new Date(mow.scheduleDateTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              : fmtDateShort(mow.date)
+            return (
+              <div
                 key={mow.id}
-                className="border-b border-gray-50 cursor-pointer hover:bg-gray-50"
+                className="bg-white border border-gray-100 rounded-xl px-4 py-3 cursor-pointer active:bg-gray-50 transition-colors"
                 onClick={() => onOpenJob(mow)}
               >
-                <td className="py-2.5 pr-3 text-gray-600 whitespace-nowrap">{fmtDateShort(mow.date)}</td>
-                <td className="py-2.5 pr-3 font-medium text-gray-800">{mow.clientName}</td>
-                <td className="py-2.5 pr-3 text-gray-500">{mow.type}</td>
-                <td className="py-2.5 pr-3 text-right font-medium text-gray-800">{fmtCurrency(mow.amount)}</td>
-                <td className="py-2.5 pr-3 text-gray-500">{mow.payMethod}</td>
-                <td className="py-2.5" onClick={e => { e.stopPropagation(); cycleInvStatus(mow) }}>
-                  <span className={`px-2 py-1 rounded-full text-xs font-semibold cursor-pointer ${INV_STATUS[mow.invStatus] || 'bg-gray-100 text-gray-500'}`}>
-                    {mow.invStatus || 'Not Sent'}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-          <button
-            onClick={() => setPage(p => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="px-4 py-2 text-sm font-medium text-gray-600 disabled:opacity-30 flex items-center gap-1"
-          >
-            <ChevronLeft size={16} /> Prev
-          </button>
-          <span className="text-sm text-gray-400">
-            {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
-          </span>
-          <button
-            onClick={() => setPage(p => p + 1)}
-            disabled={(page + 1) * PAGE_SIZE >= total}
-            className="px-4 py-2 text-sm font-medium text-gray-600 disabled:opacity-30 flex items-center gap-1"
-          >
-            Next <ChevronRight size={16} />
-          </button>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="text-sm text-gray-500 flex-shrink-0 w-14">{dateStr}</span>
+                    <span className="font-medium text-gray-800 truncate">{safeStr(mow.clientName, '—')}</span>
+                    {mow.type && <span className="text-xs text-gray-400 flex-shrink-0">{mow.type}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                    <span className="font-semibold text-gray-800 text-sm">{fmtCurrency(mow.amount)}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
+                      {safeStr(mow.status, '—')}
+                    </span>
+                  </div>
+                </div>
+                {mow.invStatus && mow.invStatus !== 'Not Sent' && (
+                  <p className="text-xs text-gray-400 mt-0.5 pl-16">{safeStr(mow.invStatus)}</p>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -1914,10 +2108,7 @@ export default function HappyCuts() {
       )}
       {activeTab === 'revenue' && (
         <RevenueTab
-          schedules={schedules}
-          contactsById={contactsById}
           onOpenJob={setJobDetail}
-          onRefresh={load}
         />
       )}
 
