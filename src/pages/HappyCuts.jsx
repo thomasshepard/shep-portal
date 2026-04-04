@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import {
   Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
-  CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2,
+  CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen,
 } from 'lucide-react'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -2217,7 +2217,14 @@ export default function HappyCuts() {
       <div className="bg-white border-b border-gray-100 px-4 py-4">
         <div className="flex items-center gap-3">
           <Leaf size={24} className="text-green-600" />
-          <h1 className="text-xl font-bold text-gray-800">Happy Cuts</h1>
+          <h1 className="text-xl font-bold text-gray-800 flex-1">Happy Cuts</h1>
+          <button
+            onClick={() => navigate('/happy-cuts/guide')}
+            className="flex items-center gap-1 text-sm text-green-700 hover:text-green-900 font-medium"
+          >
+            <BookOpen size={15} />
+            Guide
+          </button>
         </div>
       </div>
 

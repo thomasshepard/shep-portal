@@ -26,6 +26,7 @@ import Deals from './pages/Deals'
 import DealsSearchCriteria from './pages/DealsSearchCriteria'
 import HappyCuts from './pages/HappyCuts'
 import HappyCutsClientDetail from './pages/HappyCutsClientDetail'
+import HappyCutsGuide from './pages/HappyCutsGuide'
 
 export default function App() {
   return (
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
             <Route path="happy-cuts" element={<AdminRoute><HappyCuts /></AdminRoute>} />
             <Route path="happy-cuts/client/:id" element={<AdminRoute><HappyCutsClientDetail /></AdminRoute>} />
+            <Route path="happy-cuts/guide" element={<AdminRoute><HappyCutsGuide /></AdminRoute>} />
             <Route
               path="admin"
               element={
