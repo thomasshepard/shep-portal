@@ -532,6 +532,10 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
       if (res.ok && data.success && data.invoiceUrl) {
         setInvoiceUrl(data.invoiceUrl)
         setStep('success')
+        // Save email back to contact if one was entered
+        if (emailInput.trim() && mowContactId) {
+          atPatch(CONTACTS_TABLE, mowContactId, { [CF.email]: emailInput.trim() }).catch(() => {})
+        }
       } else {
         console.error('Invoice error:', data.error || 'Unknown error')
         setStep('error')

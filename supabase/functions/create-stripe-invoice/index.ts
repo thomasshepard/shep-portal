@@ -76,10 +76,11 @@ Deno.serve(async (req) => {
     if (contactRecordId) {
       try {
         const contactRes = await fetch(
-          `https://api.airtable.com/v0/${AIRTABLE_BASE}/${CONTACTS_TABLE}/${contactRecordId}`,
+          `https://api.airtable.com/v0/${AIRTABLE_BASE}/${CONTACTS_TABLE}/${contactRecordId}?returnFieldsByFieldId=true`,
           { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } }
         )
         const contactData = await contactRes.json()
+        console.log('[Invoice] Airtable contact fields:', JSON.stringify(contactData?.fields))
         const storedId = contactData?.fields?.[FIELDS.stripeCustomerId]
         if (storedId) {
           // Verify it's still valid in Stripe
