@@ -9,7 +9,8 @@ import {
 const HC_BASE = import.meta.env.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID
 const HC_PAT  = import.meta.env.VITE_AIRTABLE_PAT
 const AT_BASE = `https://api.airtable.com/v0/${HC_BASE}`
-const N8N_HC_WEBHOOK = import.meta.env.VITE_N8N_HAPPY_CUTS_WEBHOOK_URL
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
@@ -281,39 +282,32 @@ function InvoiceModal({ mow, contact, onClose, onConfirm }) {
   async function sendInvoice() {
     setStep('loading')
     try {
-      const payload = {
-        mowRecordId: mow.id,
-        contactRecordId: contactId,
-        clientName,
-        clientEmail: emailInput.trim() || null,
-        clientPhone: phone,
-        stripeCustomerId: contact?.stripeCustomerId || null,
-        amount: mow.amount,
-        description: `Happy Cuts – Lawn Mow – ${dateDisplay}`,
-        productId: 'prod_UDsZmMCKFg8SoC',
-        ccEmail: 'thomas@eastmeadowproperties.com',
-        hasEmail: !!emailInput.trim(),
-        airtableBaseId: HC_BASE,
-        scheduleTableId: SCHEDULE_TABLE,
-        contactsTableId: CONTACTS_TABLE,
-        stripeInvoiceUrlFieldId: SF.stripeInvoiceUrl,
-        stripeInvoiceIdFieldId: SF.stripeId,
-        stripeCustomerIdFieldId: CF.stripeCustomerId,
-        invoiceStatusFieldId: SF.invStatus,
-      }
-      const res = await fetch(N8N_HC_WEBHOOK, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-stripe-invoice`, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(payload),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          mowRecordId: mow.id,
+          contactRecordId: contactId,
+          clientName,
+          clientEmail: emailInput.trim() || null,
+          stripeCustomerId: contact?.stripeCustomerId || null,
+          amount: mow.amount,
+          description: `Happy Cuts – Lawn Mow – ${dateDisplay}`,
+        }),
       })
       const data = await res.json()
-      if (data.success && data.invoiceUrl) {
+      if (res.ok && data.success && data.invoiceUrl) {
         setInvoiceUrl(data.invoiceUrl)
         setStep('success')
       } else {
+        console.error('Invoice error:', data.error || 'Unknown error')
         setStep('error')
       }
-    } catch {
+    } catch (err) {
+      console.error('Invoice fetch error:', err)
       setStep('error')
     }
   }
