@@ -69,28 +69,41 @@ Deno.serve(async (req) => {
     }
 
     // --- Step 1: Find or create Stripe customer ---
-    // Simple rule: use stored ID if valid, otherwise create new. Never search by email.
-    let customerId = existingCustomerId || null
+    // IGNORE portal-passed stripeCustomerId — it can be stale/wrong contact.
+    // Always look up from Airtable using contactRecordId as source of truth.
+    let customerId: string | null = null
 
-    if (customerId) {
-      // Verify the stored customer ID is still valid in Stripe
+    if (contactRecordId) {
       try {
-        const existing = await stripe.customers.retrieve(customerId)
-        if ((existing as any).deleted) {
-          console.log('[Invoice] Stored customer was deleted — creating new one')
-          customerId = null
+        const contactRes = await fetch(
+          `https://api.airtable.com/v0/${AIRTABLE_BASE}/${CONTACTS_TABLE}/${contactRecordId}`,
+          { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } }
+        )
+        const contactData = await contactRes.json()
+        const storedId = contactData?.fields?.[FIELDS.stripeCustomerId]
+        if (storedId) {
+          // Verify it's still valid in Stripe
+          try {
+            const existing = await stripe.customers.retrieve(storedId)
+            if (!(existing as any).deleted) {
+              customerId = storedId
+              console.log('[Invoice] Using stored Stripe customer from Airtable:', customerId, (existing as any).name)
+            } else {
+              console.log('[Invoice] Stored customer was deleted in Stripe — creating new')
+            }
+          } catch {
+            console.log('[Invoice] Stored customer ID invalid in Stripe — creating new')
+          }
         } else {
-          console.log('[Invoice] Using existing Stripe customer:', customerId, (existing as any).name)
+          console.log('[Invoice] No Stripe customer ID on Airtable contact:', contactRecordId)
         }
-      } catch {
-        console.log('[Invoice] Stored customer ID not found in Stripe — creating new one')
-        customerId = null
+      } catch (err) {
+        console.warn('[Invoice] Could not fetch contact from Airtable:', err)
       }
     }
 
     if (!customerId) {
-      // No valid customer found — always create a fresh one
-      console.log('[Invoice] Creating new Stripe customer for:', clientName)
+      console.log('[Invoice] Creating new Stripe customer for:', clientName, '(contact:', contactRecordId, ')')
       const customer = await stripe.customers.create({
         name: clientName || 'Happy Cuts Client',
         email: clientEmail || undefined,
@@ -102,7 +115,6 @@ Deno.serve(async (req) => {
       customerId = customer.id
       console.log('[Invoice] Created new customer:', customerId)
 
-      // Write the new customer ID back to the Airtable contact record
       if (contactRecordId) {
         await updateAirtable(CONTACTS_TABLE, contactRecordId, {
           [FIELDS.stripeCustomerId]: customerId,
