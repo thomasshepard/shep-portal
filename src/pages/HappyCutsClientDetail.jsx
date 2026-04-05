@@ -104,6 +104,7 @@ function parseContact(r) {
   const f = r.fields || {}
   return {
     id: r.id,
+    fields: f, // preserve raw fields for invoice access
     name: safeStr(f[CF.name]),
     phone: safeStr(f[CF.phone]),
     address: safeStr(f[CF.address]),
@@ -128,6 +129,7 @@ function parseMow(r) {
   const f = r.fields || {}
   return {
     id: r.id,
+    fields: f, // preserve raw fields for invoice access
     mowId: safeStr(f[SF.mowId]),
     clientName: safeStr(f[SF.clientName]),
     date: safeStr(f[SF.date]),
@@ -263,23 +265,60 @@ async function createNextRecurringMow(completedMow, contact) {
 }
 
 // ─── InvoiceModal ─────────────────────────────────────────────────────────────
-function InvoiceModal({ mow, contact, onClose, onConfirm }) {
+function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
   const [step, setStep] = useState('preview') // preview | loading | success | error
-  const [emailInput, setEmailInput] = useState(contact?.email || '')
+  const [contact, setContact] = useState(initialContact)
+  const [emailInput, setEmailInput] = useState(safeStr(initialContact?.fields?.[CF.email]) || '')
   const [invoiceUrl, setInvoiceUrl] = useState('')
   const [copied, setCopied] = useState(false)
+
+  // Bug 3 fix: Verify the contact matches the mow's linked contact; re-fetch if mismatch
+  const linkedContactIds = arr(mow.fields?.[SF.contacts])
+  const mowContactId = linkedContactIds[0] || null
+
+  useEffect(() => {
+    if (!mowContactId) return
+    if (contact?.id === mowContactId) return // already correct
+    console.warn('[Invoice] Contact mismatch — re-fetching correct contact')
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `${AT_BASE}/${CONTACTS_TABLE}/${mowContactId}?returnFieldsByFieldId=true`,
+          { headers: { Authorization: `Bearer ${HC_PAT}` } }
+        )
+        const data = await res.json()
+        if (data.id) {
+          const parsed = parseContact(data)
+          setContact(parsed)
+          setEmailInput(safeStr(parsed.fields?.[CF.email]) || '')
+        }
+      } catch (err) {
+        console.error('[Invoice] Failed to fetch correct contact:', err)
+      }
+    })()
+  }, [mowContactId, contact?.id])
 
   const clientName = contact?.name || mow.clientName
   const firstName = clientName.split(' ')[0]
   const phone = contact?.phone || ''
-  const amountNum = mow.amount != null ? Number(mow.amount).toFixed(2) : '0.00'
+  const amountNum = safeNum(mow.fields?.[SF.amount]) != null ? safeNum(mow.fields?.[SF.amount]).toFixed(2) : '0.00'
   const dateDisplay = fmtDateShort(mow.date)
-  const contactId = mow.contactIds?.[0]
 
   const message = `Hey ${firstName}! Your lawn looks great 🌿 Here's your invoice for $${amountNum} — pay online by card or bank transfer:\n${invoiceUrl}\n\nThanks! – Thomas, Happy Cuts\n(931) 284-3503`
   const smsLink = phone ? `sms:${phone.replace(/\D/g, '')}&body=${encodeURIComponent(message)}` : ''
 
   async function sendInvoice() {
+    // Debug: Log invoice payload before sending
+    const invoiceAmount = safeNum(mow.fields?.[SF.amount])
+    console.log('[Invoice] amount being sent:', invoiceAmount)
+    console.log('[Invoice] Sending invoice with:', {
+      mowId: mow.id,
+      contactId: mowContactId,
+      clientName,
+      email: emailInput.trim() || null,
+      amount: invoiceAmount,
+    })
+
     setStep('loading')
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-stripe-invoice`, {
@@ -290,11 +329,14 @@ function InvoiceModal({ mow, contact, onClose, onConfirm }) {
         },
         body: JSON.stringify({
           mowRecordId: mow.id,
-          contactRecordId: contactId,
+          contactRecordId: mowContactId,
           clientName,
           clientEmail: emailInput.trim() || null,
-          stripeCustomerId: contact?.stripeCustomerId || null,
-          amount: mow.amount,
+          // Only pass stripeCustomerId if the contact in state matches the mow's contact
+          stripeCustomerId: contact?.id === mowContactId
+            ? (safeStr(contact?.fields?.[CF.stripeCustomerId]) || null)
+            : null,
+          amount: invoiceAmount,
           description: `Happy Cuts – Lawn Mow – ${dateDisplay}`,
         }),
       })
@@ -315,9 +357,9 @@ function InvoiceModal({ mow, contact, onClose, onConfirm }) {
   async function handleDone() {
     try {
       await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
-      if (contactId) {
+      if (mowContactId) {
         const newStatus = mow.type === 'Recurring' ? 'Recurring' : 'One-Time'
-        await atPatch(CONTACTS_TABLE, contactId, { [CF.status]: newStatus })
+        await atPatch(CONTACTS_TABLE, mowContactId, { [CF.status]: newStatus })
       }
     } catch {
       toast.error('Failed to update mow status')
@@ -350,7 +392,7 @@ function InvoiceModal({ mow, contact, onClose, onConfirm }) {
               <div className="space-y-1">
                 <div><span className="text-gray-500">Bill to:</span> <span className="font-medium text-gray-800">{clientName}</span></div>
                 <div><span className="text-gray-500">For:</span> <span className="text-gray-800">Lawn Mow – {dateDisplay}</span></div>
-                <div><span className="text-gray-500">Amount:</span> <span className="font-semibold text-gray-800">{fmtCurrency(mow.amount)}</span></div>
+                <div><span className="text-gray-500">Amount:</span> <span className="font-semibold text-gray-800">{fmtCurrency(safeNum(mow.fields?.[SF.amount]))}</span></div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Client email</label>
@@ -390,7 +432,7 @@ function InvoiceModal({ mow, contact, onClose, onConfirm }) {
               {!emailInput.trim() && <p className="text-xs text-gray-400 mt-0.5">No email — send link below</p>}
             </div>
             <div className="px-5 py-4 space-y-3 text-sm">
-              <p className="text-gray-700 font-medium">{clientName} · {fmtCurrency(mow.amount)}</p>
+              <p className="text-gray-700 font-medium">{clientName} · {fmtCurrency(safeNum(mow.fields?.[SF.amount]))}</p>
               <p className="text-gray-500">Lawn Mow – {dateDisplay}</p>
               <a href={invoiceUrl} target="_blank" rel="noreferrer" className="block w-full text-center py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700">
                 📋 View Invoice
