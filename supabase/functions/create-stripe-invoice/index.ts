@@ -135,10 +135,19 @@ Deno.serve(async (req) => {
     console.log('[Invoice] Created invoice item:', invoiceItem.id, 'customer:', customerId, 'amount:', amountInCents)
 
     // --- Step 3: Create invoice (explicitly include pending items) ---
+    // Use mow service date as due date if provided, otherwise due immediately
+    let dueDate: number | undefined
+    if (body.mowDate) {
+      const d = new Date(body.mowDate + 'T23:59:59Z')
+      if (!isNaN(d.getTime())) {
+        dueDate = Math.floor(d.getTime() / 1000)
+      }
+    }
+
     const invoice = await stripe.invoices.create({
       customer: customerId,
       collection_method: 'send_invoice',
-      days_until_due: 7,
+      ...(dueDate ? { due_date: dueDate } : { days_until_due: 0 }),
       pending_invoice_items_behavior: 'include',
       metadata: {
         airtable_mow_id: mowRecordId,

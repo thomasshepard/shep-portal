@@ -143,6 +143,7 @@ function parseMow(r) {
     appointmentDateTime: safeStr(f[SF.appointmentDateTime]),
     scheduleDateTime: safeStr(f[SF.scheduleDateTime]),
     contactIds: arr(f[SF.contacts]),
+    stripeInvoiceUrl: safeStr(f[SF.stripeInvoiceUrl]),
   }
 }
 
@@ -525,6 +526,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
             ? (contact?.stripeCustomerId || null)
             : null,
           amount: mow.amount,
+          mowDate: mow.date || null,
           description: `Happy Cuts – Lawn Mow – ${dateDisplay}`,
         }),
       })
@@ -805,12 +807,36 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   const [isCompleted, setIsCompleted] = useState(mow.status === 'Completed')
   const [markCompleteOpen, setMarkCompleteOpen] = useState(false)
   const [markCompleting, setMarkCompleting] = useState(false)
+  const [showInvoiceMenu, setShowInvoiceMenu] = useState(false)
+  const [cashLoading, setCashLoading] = useState(false)
+  const [localInvStatus, setLocalInvStatus] = useState(mow.invStatus || '')
+  const [localInvoiceUrl, setLocalInvoiceUrl] = useState(mow.stripeInvoiceUrl || '')
   const fileInputRef = useRef(null)
 
   function handleComplete() {
     setConfirmOpen(false)
     onRefresh()
     onBack()
+  }
+
+  async function handleMarkPaidCash() {
+    setCashLoading(true)
+    try {
+      const existingNotes = mow.notes || ''
+      const cashNote = 'Paid cash in person'
+      const updatedNotes = existingNotes ? `${existingNotes}\n${cashNote}` : cashNote
+      await atPatch(SCHEDULE_TABLE, mow.id, {
+        [SF.invStatus]: 'Paid',
+        [SF.notes]: updatedNotes,
+      })
+      setLocalInvStatus('Paid')
+      toast.success('Marked as paid (cash) ✓')
+    } catch (err) {
+      console.error('Cash payment error:', err)
+      toast.error('Could not save — try again')
+    } finally {
+      setCashLoading(false)
+    }
   }
 
   async function markComplete() {
@@ -1053,16 +1079,47 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
             <CheckCircle size={17} />
             {isCompleted ? 'Completed ✅' : 'Mark Complete'}
           </button>
-          <button
-            onClick={() => setConfirmOpen(true)}
-            className={`flex-1 h-[52px] font-semibold rounded-xl text-sm flex items-center justify-center gap-1.5 ${
-              mow.invStatus === 'Sent' || mow.invStatus === 'Paid'
-                ? 'bg-blue-100 text-blue-400'
-                : 'bg-blue-600 text-white'
-            }`}
-          >
-            {mow.invStatus === 'Sent' || mow.invStatus === 'Paid' ? 'Invoice Sent ✅' : 'Send Invoice'}
-          </button>
+          {localInvStatus === 'Paid' ? (
+            <div className="flex-1 h-[52px] flex items-center justify-center rounded-xl text-sm font-semibold bg-green-50 text-green-700 border border-green-200">
+              💰 Invoice Paid
+            </div>
+          ) : localInvStatus === 'Sent' ? (
+            <div className="flex-1 relative">
+              <button
+                onClick={() => setShowInvoiceMenu(prev => !prev)}
+                className="w-full h-[52px] flex items-center justify-center gap-1.5 rounded-xl text-sm font-semibold bg-blue-50 text-blue-600 border border-blue-200"
+              >
+                📄 Invoice Sent ▾
+              </button>
+              {showInvoiceMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowInvoiceMenu(false)} />
+                  <div className="absolute bottom-full mb-2 left-0 right-0 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-50">
+                    <button
+                      onClick={() => { window.open(localInvoiceUrl, '_blank'); setShowInvoiceMenu(false) }}
+                      className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100"
+                    >
+                      🔗 View Invoice
+                    </button>
+                    <button
+                      onClick={() => { handleMarkPaidCash(); setShowInvoiceMenu(false) }}
+                      disabled={cashLoading}
+                      className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      💵 Mark Paid (Cash)
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmOpen(true)}
+              className="flex-1 h-[52px] font-semibold rounded-xl text-sm flex items-center justify-center gap-1.5 bg-blue-600 text-white"
+            >
+              Send Invoice
+            </button>
+          )}
         </div>
       </div>
 
