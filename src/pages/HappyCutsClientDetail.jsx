@@ -307,6 +307,14 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
   const smsLink = phone ? `sms:${phone.replace(/\D/g, '')}&body=${encodeURIComponent(message)}` : ''
 
   async function sendInvoice() {
+    // Guard: verify env vars are present before attempting
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      console.error('[Invoice] Missing Supabase env vars:', { SUPABASE_URL, SUPABASE_ANON_KEY })
+      toast.error('Configuration error — missing Supabase credentials')
+      setStep('error')
+      return
+    }
+    console.log('[Invoice] Using Supabase URL:', SUPABASE_URL)
     // Debug: Log invoice payload before sending
     console.log('[Invoice] mow object:', mow)
     console.log('[Invoice] contact object:', contact)
@@ -464,7 +472,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
               <h3 className="font-semibold text-gray-800 text-lg">❌ Something went wrong</h3>
             </div>
             <div className="px-5 py-4">
-              <p className="text-gray-600 text-sm">Invoice not sent. Check your n8n workflow.</p>
+              <p className="text-gray-600 text-sm">Invoice not sent. Please try again or contact support.</p>
             </div>
             <div className="px-5 pb-5 flex gap-3">
               <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
