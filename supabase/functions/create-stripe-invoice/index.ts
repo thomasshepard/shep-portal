@@ -69,35 +69,62 @@ Deno.serve(async (req) => {
     }
 
     // --- Step 1: Find or create Stripe customer ---
-    let customerId = existingCustomerId
+    // Always look up the customer ID from Airtable using contactRecordId — do NOT
+    // trust the portal-passed stripeCustomerId, which may come from a stale/wrong contact.
+    let customerId: string | null = null
+
+    if (contactRecordId) {
+      try {
+        const contactRes = await fetch(
+          `https://api.airtable.com/v0/${AIRTABLE_BASE}/${CONTACTS_TABLE}/${contactRecordId}`,
+          { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } }
+        )
+        const contactData = await contactRes.json()
+        const storedId = contactData?.fields?.[FIELDS.stripeCustomerId]
+        if (storedId) {
+          customerId = storedId
+          console.log('[Invoice] Using stored Stripe customer ID from Airtable:', customerId, 'for contact:', contactRecordId)
+        }
+      } catch (err) {
+        console.warn('[Invoice] Could not fetch contact from Airtable:', err)
+      }
+    }
 
     if (!customerId) {
-      // Search for existing customer by email first
+      // Search Stripe by email
       if (clientEmail) {
         const existing = await stripe.customers.list({ email: clientEmail, limit: 1 })
         if (existing.data.length > 0) {
           customerId = existing.data[0].id
+          console.log('[Invoice] Found existing Stripe customer by email:', customerId)
+          // Save back to Airtable so future invoices skip this lookup
+          if (contactRecordId) {
+            await updateAirtable(CONTACTS_TABLE, contactRecordId, {
+              [FIELDS.stripeCustomerId]: customerId,
+            })
+          }
         }
       }
+    }
 
-      // Create new customer if still not found
-      if (!customerId) {
-        const customer = await stripe.customers.create({
-          name: clientName || 'Happy Cuts Client',
-          email: clientEmail || undefined,
-          metadata: {
-            airtable_contact_id: contactRecordId || '',
-            source: 'happy_cuts_portal',
-          },
+    if (!customerId) {
+      // Create new Stripe customer
+      const customer = await stripe.customers.create({
+        name: clientName || 'Happy Cuts Client',
+        email: clientEmail || undefined,
+        metadata: {
+          airtable_contact_id: contactRecordId || '',
+          source: 'happy_cuts_portal',
+        },
+      })
+      customerId = customer.id
+      console.log('[Invoice] Created new Stripe customer:', customerId)
+
+      // Save customer ID back to Airtable contact record
+      if (contactRecordId) {
+        await updateAirtable(CONTACTS_TABLE, contactRecordId, {
+          [FIELDS.stripeCustomerId]: customerId,
         })
-        customerId = customer.id
-
-        // Save customer ID back to Airtable contact record
-        if (contactRecordId) {
-          await updateAirtable(CONTACTS_TABLE, contactRecordId, {
-            [FIELDS.stripeCustomerId]: customerId,
-          })
-        }
       }
     }
 
