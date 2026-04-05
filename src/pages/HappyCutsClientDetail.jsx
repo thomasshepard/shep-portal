@@ -789,8 +789,13 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
             {isCompleted ? 'Completed ✅' : 'Mark Complete'}
           </button>
           {localInvStatus === 'Paid' ? (
-            <div className="flex-1 h-[52px] flex items-center justify-center rounded-xl text-sm font-semibold bg-green-50 text-green-700 border border-green-200">
-              💰 Invoice Paid
+            <div className="flex-1 relative">
+              <button
+                onClick={() => localInvoiceUrl ? window.open(localInvoiceUrl, '_blank') : null}
+                className="w-full h-[52px] flex items-center justify-center gap-1.5 rounded-xl text-sm font-semibold bg-green-50 text-green-700 border border-green-200"
+              >
+                💰 Invoice Paid {localInvoiceUrl ? '· View ↗' : ''}
+              </button>
             </div>
           ) : localInvStatus === 'Sent' ? (
             <div className="flex-1 relative">
