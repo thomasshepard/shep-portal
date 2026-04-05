@@ -124,23 +124,27 @@ Deno.serve(async (req) => {
 
     // --- Step 2: Create invoice item ---
     const amountInCents = Math.round(Number(amount) * 100)
-    await stripe.invoiceItems.create({
+    console.log('[Invoice] Amount received:', amount, typeof amount, '→ cents:', amountInCents)
+    const invoiceItem = await stripe.invoiceItems.create({
       customer: customerId,
       amount: amountInCents,
       currency: 'usd',
       description: description,
     })
+    console.log('[Invoice] Created invoice item:', invoiceItem.id, 'customer:', customerId, 'amount:', amountInCents)
 
-    // --- Step 3: Create invoice ---
+    // --- Step 3: Create invoice (explicitly include pending items) ---
     const invoice = await stripe.invoices.create({
       customer: customerId,
       collection_method: 'send_invoice',
       days_until_due: 7,
+      pending_invoice_items_behavior: 'include',
       metadata: {
         airtable_mow_id: mowRecordId,
         source: 'happy_cuts_portal',
       },
     })
+    console.log('[Invoice] Created invoice:', invoice.id, 'amount_due:', invoice.amount_due)
 
     // --- Step 4: Finalize invoice ---
     const finalized = await stripe.invoices.finalizeInvoice(invoice.id)
