@@ -1207,6 +1207,9 @@ function MowCard({ mow, contact, onOpenJob, onCancel, dragHandleProps, isDraggin
       )}
       <div className={`flex items-center justify-between mb-2 ${isScheduled && dragHandleProps ? 'pl-6' : ''}`}>
         <div className="flex items-center gap-2 min-w-0">
+          {mow.scheduledTime && mow.scheduledTime !== 'Anytime' && (
+            <span className="text-green-600 font-semibold text-sm whitespace-nowrap">{mow.scheduledTime}</span>
+          )}
           <span className="font-semibold text-gray-800 truncate">{contact?.name || mow.clientName}</span>
           {contactRecordId && (
             <button
@@ -1919,10 +1922,293 @@ function ClientsTab({ contacts, onRefresh }) {
   )
 }
 
+// ─── Map helpers ──────────────────────────────────────────────────────────────
+const DAY_COLORS = {
+  0: '#94A3B8', 1: '#3B82F6', 2: '#10B981', 3: '#F59E0B',
+  4: '#8B5CF6', 5: '#EF4444', 6: '#F97316',
+}
+const DAY_SHORT = { 0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat' }
+const DAY_NAMES = { 0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday' }
+const getDayOfWeek = (dateStr) => new Date(dateStr + 'T12:00:00').getDay()
+
+// Module-level geocode cache — persists across mounts for session
+const _geocodeCache = {}
+async function geocodeAddress(address) {
+  if (!address) return null
+  if (_geocodeCache[address]) return _geocodeCache[address]
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    )
+    const data = await res.json()
+    if (data && data.length > 0) {
+      const coords = { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) }
+      _geocodeCache[address] = coords
+      return coords
+    }
+  } catch (err) {
+    console.warn('[Map] Geocode failed for:', address, err)
+  }
+  return null
+}
+
+// ─── ScheduleMapView ──────────────────────────────────────────────────────────
+function ScheduleMapView({ weekMows, contactsById, contacts }) {
+  const mapDivRef = useRef(null)
+  const leafletMap = useRef(null)
+  const markersLayer = useRef(null)
+
+  const [dayFilter, setDayFilter] = useState(null)
+  const [showCompleted, setShowCompleted] = useState(false)
+  const [showAllRecurring, setShowAllRecurring] = useState(false)
+
+  const [geocodedMows, setGeocodedMows] = useState([])
+  const [geocodedRecurring, setGeocodedRecurring] = useState([])
+  const [geocoding, setGeocoding] = useState(false)
+  const [geocodedCount, setGeocodedCount] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
+
+  // Build mow list with addresses
+  const mowItems = arr(weekMows).map(m => {
+    const c = contactsById[m.contactIds?.[0]]
+    if (!c || !c.address) return null
+    const fullAddress = `${c.address}, ${c.city || ''}, TN`.replace(/, ,/, ',')
+    return {
+      id: m.id,
+      clientName: c.name || m.clientName,
+      fullAddress,
+      dateStr: m.date,
+      status: m.status,
+      amount: m.amount,
+      scheduledTime: m.scheduledTime,
+    }
+  }).filter(Boolean)
+
+  // Geocode mows when week changes
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      setGeocoding(true)
+      setTotalCount(mowItems.length)
+      setGeocodedCount(0)
+      const results = []
+      for (let i = 0; i < mowItems.length; i++) {
+        if (cancelled) return
+        const item = mowItems[i]
+        const needsDelay = !_geocodeCache[item.fullAddress]
+        const coords = await geocodeAddress(item.fullAddress)
+        results.push({ ...item, coords })
+        setGeocodedCount(i + 1)
+        if (needsDelay && i < mowItems.length - 1) {
+          await new Promise(r => setTimeout(r, 1100))
+        }
+      }
+      if (!cancelled) {
+        setGeocodedMows(results)
+        setGeocoding(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekMows])
+
+  // Geocode recurring clients once when toggle first flipped on
+  useEffect(() => {
+    if (!showAllRecurring) return
+    if (geocodedRecurring.length > 0) return
+    let cancelled = false
+    const run = async () => {
+      const recurring = arr(contacts).filter(c => c.status === 'Recurring' && c.address)
+      const results = []
+      for (let i = 0; i < recurring.length; i++) {
+        if (cancelled) return
+        const c = recurring[i]
+        const fullAddress = `${c.address}, ${c.city || ''}, TN`.replace(/, ,/, ',')
+        const needsDelay = !_geocodeCache[fullAddress]
+        const coords = await geocodeAddress(fullAddress)
+        results.push({
+          id: c.id, name: c.name, fullAddress, coords,
+          frequency: c.frequency, rate: c.rate,
+        })
+        if (needsDelay && i < recurring.length - 1) {
+          await new Promise(r => setTimeout(r, 1100))
+        }
+      }
+      if (!cancelled) setGeocodedRecurring(results)
+    }
+    run()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAllRecurring])
+
+  // Initialize map + render markers
+  useEffect(() => {
+    if (!mapDivRef.current) return
+    if (typeof window === 'undefined' || !window.L) return
+
+    if (!leafletMap.current) {
+      leafletMap.current = window.L.map(mapDivRef.current, {
+        center: [36.162, -85.501],
+        zoom: 12,
+        zoomControl: true,
+      })
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+      }).addTo(leafletMap.current)
+      markersLayer.current = window.L.layerGroup().addTo(leafletMap.current)
+    }
+
+    // Filter
+    let visible = geocodedMows.filter(m => m.coords)
+    if (!showCompleted) visible = visible.filter(m => m.status === 'Scheduled')
+    if (dayFilter !== null) visible = visible.filter(m => m.dateStr && getDayOfWeek(m.dateStr) === dayFilter)
+
+    markersLayer.current.clearLayers()
+
+    visible.forEach(mow => {
+      const dow = getDayOfWeek(mow.dateStr)
+      const color = DAY_COLORS[dow]
+      const isCompleted = mow.status === 'Completed'
+      const showTime = mow.scheduledTime && mow.scheduledTime !== 'Anytime'
+
+      const marker = window.L.circleMarker([mow.coords.lat, mow.coords.lon], {
+        radius: 11,
+        fillColor: color,
+        color: '#ffffff',
+        weight: 2.5,
+        opacity: 1,
+        fillOpacity: isCompleted ? 0.4 : 0.9,
+      })
+      marker.bindPopup(`
+        <div style="font-family:-apple-system,sans-serif;min-width:160px;padding:2px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:3px">${mow.clientName}</div>
+          <div style="font-size:11px;font-weight:600;color:${color};margin-bottom:4px">${DAY_NAMES[dow]}</div>
+          ${showTime ? `<div style="font-size:12px;color:#16A34A;font-weight:600;margin-bottom:4px">${mow.scheduledTime}</div>` : ''}
+          <div style="font-size:12px;color:#6B7280;margin-bottom:2px">${mow.fullAddress}</div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;align-items:center">
+            <span style="font-size:13px;font-weight:600;color:#16A34A">$${mow.amount ?? ''}</span>
+            <span style="font-size:11px;color:#9CA3AF">${mow.status}</span>
+          </div>
+        </div>
+      `)
+      marker.addTo(markersLayer.current)
+    })
+
+    if (showAllRecurring) {
+      geocodedRecurring.filter(c => c.coords).forEach(c => {
+        const marker = window.L.circleMarker([c.coords.lat, c.coords.lon], {
+          radius: 7,
+          fillColor: '#ffffff',
+          color: '#9CA3AF',
+          weight: 2,
+          opacity: 0.8,
+          fillOpacity: 0.5,
+        })
+        marker.bindPopup(`
+          <div style="font-family:-apple-system,sans-serif">
+            <div style="font-weight:700;font-size:13px">${c.name}</div>
+            <div style="font-size:11px;color:#6B7280">${c.fullAddress}</div>
+            <div style="font-size:11px;color:#16A34A;margin-top:3px">${c.frequency || ''} · $${c.rate || ''}/mow</div>
+          </div>
+        `)
+        marker.addTo(markersLayer.current)
+      })
+    }
+
+    const allPts = [
+      ...visible.map(m => [m.coords.lat, m.coords.lon]),
+      ...(showAllRecurring ? geocodedRecurring.filter(c => c.coords).map(c => [c.coords.lat, c.coords.lon]) : []),
+    ]
+    if (allPts.length > 0) {
+      const bounds = window.L.latLngBounds(allPts)
+      leafletMap.current.fitBounds(bounds, { padding: [50, 50] })
+    }
+
+    setTimeout(() => { leafletMap.current && leafletMap.current.invalidateSize() }, 100)
+  }, [geocodedMows, geocodedRecurring, dayFilter, showCompleted, showAllRecurring])
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (leafletMap.current) {
+        leafletMap.current.remove()
+        leafletMap.current = null
+      }
+    }
+  }, [])
+
+  // Active days this week
+  const activeDaysThisWeek = Array.from(new Set(
+    arr(weekMows).map(m => m.date).filter(Boolean).map(getDayOfWeek)
+  )).sort((a, b) => a - b)
+
+  const toggleDayFilter = (dow) => setDayFilter(prev => prev === dow ? null : dow)
+
+  return (
+    <div>
+      {/* Filter Bar */}
+      <div className="flex gap-2 px-4 py-2 overflow-x-auto bg-white border-b border-gray-100">
+        {activeDaysThisWeek.map(dow => {
+          const active = dayFilter === null || dayFilter === dow
+          return (
+            <button
+              key={dow}
+              onClick={() => toggleDayFilter(dow)}
+              className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                active ? 'text-white border-transparent' : 'bg-white text-gray-400 border-gray-200'
+              }`}
+              style={active ? { backgroundColor: DAY_COLORS[dow], borderColor: DAY_COLORS[dow] } : {}}
+            >
+              {DAY_SHORT[dow]}
+            </button>
+          )
+        })}
+        <div className="w-px bg-gray-200 flex-shrink-0 mx-1" />
+        <button
+          onClick={() => setShowCompleted(prev => !prev)}
+          className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${
+            showCompleted ? 'bg-gray-700 text-white border-gray-700' : 'bg-white text-gray-500 border-gray-200'
+          }`}
+        >
+          {showCompleted ? '✓ All' : 'Scheduled'}
+        </button>
+        <div className="w-px bg-gray-200 flex-shrink-0 mx-1" />
+        <button
+          onClick={() => setShowAllRecurring(prev => !prev)}
+          className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${
+            showAllRecurring ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-500 border-gray-200'
+          }`}
+        >
+          🌿 All Clients
+        </button>
+      </div>
+
+      {/* Map */}
+      <div className="relative">
+        <div ref={mapDivRef} style={{ height: 'calc(100vh - 260px)', width: '100%' }} />
+        {geocoding && totalCount > 0 && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-white rounded-full shadow-md px-4 py-2 flex items-center gap-2 z-[1000]">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-green-500 border-t-transparent" />
+            <span className="text-xs text-gray-600">Locating {geocodedCount}/{totalCount}</span>
+          </div>
+        )}
+        {!geocoding && mowItems.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <p className="text-sm text-gray-400">No mows scheduled this week</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── ScheduleTab ──────────────────────────────────────────────────────────────
 function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJob, onRefresh, contacts }) {
   const [addOpen, setAddOpen] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
+  const [scheduleView, setScheduleView] = useState('list')
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
   const weekStr = weekStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
@@ -1960,7 +2246,36 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
         </button>
       </div>
 
-      {days.map(day => {
+      {/* List / Map toggle */}
+      <div className="flex bg-gray-100 rounded-lg p-0.5 mb-3">
+        <button
+          onClick={() => setScheduleView('list')}
+          className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            scheduleView === 'list' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'
+          }`}
+        >
+          ☰ List
+        </button>
+        <button
+          onClick={() => setScheduleView('map')}
+          className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            scheduleView === 'map' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'
+          }`}
+        >
+          🗺 Map
+        </button>
+      </div>
+
+      {scheduleView === 'map' ? (
+        <ScheduleMapView
+          weekMows={schedules.filter(m => {
+            const end = addDays(weekStart, 7)
+            return m.date >= dateToStr(weekStart) && m.date < dateToStr(end)
+          })}
+          contactsById={contactsById}
+          contacts={contacts}
+        />
+      ) : days.map(day => {
         const dayStr = dateToStr(day)
         const dayMows = schedules
           .filter(m => m.date === dayStr)
@@ -1990,7 +2305,11 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
                   className={`flex items-center gap-2 py-2.5 px-3 rounded-xl border border-gray-100 mb-1.5 ${mow.status === 'Completed' ? 'bg-gray-50' : 'bg-white'}`}
                 >
                   <span className={`flex-1 text-sm font-medium ${mow.status === 'Completed' ? 'text-gray-400' : 'text-gray-800'}`}>
-                    {mow.status === 'Completed' ? '✓ ' : ''}{mow.clientName}
+                    {mow.status === 'Completed' ? '✓ ' : ''}
+                    {mow.scheduledTime && mow.scheduledTime !== 'Anytime' ? (
+                      <span className="text-green-600 font-semibold mr-1">{mow.scheduledTime}</span>
+                    ) : null}
+                    {mow.clientName}
                     {mow.notes ? <span className="text-xs text-gray-400 ml-1">({mow.notes})</span> : null}
                   </span>
                   <select
