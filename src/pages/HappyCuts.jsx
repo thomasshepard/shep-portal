@@ -822,18 +822,45 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   async function handleMarkPaidCash() {
     setCashLoading(true)
     try {
+      const stripeInvoiceId = mow.stripeId || ''
       const existingNotes = mow.notes || ''
-      const cashNote = 'Paid cash in person'
-      const updatedNotes = existingNotes ? `${existingNotes}\n${cashNote}` : cashNote
-      await atPatch(SCHEDULE_TABLE, mow.id, {
-        [SF.invStatus]: 'Paid',
-        [SF.notes]: updatedNotes,
-      })
+
+      if (!stripeInvoiceId) {
+        const cashNote = 'Paid cash in person'
+        const updatedNotes = existingNotes ? `${existingNotes}\n${cashNote}` : cashNote
+        await atPatch(SCHEDULE_TABLE, mow.id, {
+          [SF.invStatus]: 'Paid',
+          [SF.notes]: updatedNotes,
+        })
+        toast.success('Marked as paid (cash) ✓')
+      } else {
+        const res = await fetch(
+          `${SUPABASE_URL}/functions/v1/mark-invoice-paid`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+              stripeInvoiceId,
+              mowRecordId: mow.id,
+              existingNotes,
+            }),
+          }
+        )
+        const data = await res.json()
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to mark invoice paid')
+        }
+        toast.success('Invoice marked as paid (cash) ✓')
+      }
+
       setLocalInvStatus('Paid')
-      toast.success('Marked as paid (cash) ✓')
+      setShowInvoiceMenu(false)
     } catch (err) {
-      console.error('Cash payment error:', err)
-      toast.error('Could not save — try again')
+      console.error('[MarkPaid] Error:', err)
+      toast.error(`Could not mark as paid: ${err.message}`)
     } finally {
       setCashLoading(false)
     }
