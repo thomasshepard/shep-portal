@@ -29,6 +29,14 @@ function fmtDate(str) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+function formatBatchName(name) {
+  if (!name) return 'Untitled'
+  return name.replace(/(\d{4})-(\d{2})-(\d{2})/, (_, y, m, d) => {
+    const date = new Date(`${y}-${m}-${d}T12:00:00`)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  })
+}
+
 function shortDate(str) {
   if (!str) return ''
   const d = new Date(str + 'T12:00:00')
@@ -240,7 +248,7 @@ function ActiveBatchCard({ batch, onAction }) {
       <div className="p-4 space-y-3">
         <div className="flex items-start justify-between">
           <div>
-            <h3 className="font-semibold text-gray-900">{safeStr(f['Batch Name'], 'Untitled')}</h3>
+            <h3 className="font-semibold text-gray-900">{formatBatchName(safeStr(f['Batch Name'], 'Untitled'))}</h3>
             {f['Rooster'] && <p className="text-sm text-gray-500 mt-0.5">{'\uD83D\uDC13'} {safeStr(f['Rooster'])}</p>}
           </div>
           <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700">Active</span>
@@ -270,7 +278,7 @@ function CompletedBatchCard({ batch, onClick }) {
     <button onClick={onClick} className="bg-white rounded-xl border border-gray-200 p-4 text-left w-full hover:shadow-sm transition-shadow">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-medium text-gray-700">{safeStr(f['Batch Name'], 'Untitled')}</h3>
+          <h3 className="font-medium text-gray-700">{formatBatchName(safeStr(f['Batch Name'], 'Untitled'))}</h3>
           <p className="text-sm text-gray-500 mt-0.5">
             {f['Rooster'] && <>{'\uD83D\uDC13'} {safeStr(f['Rooster'])} &middot; </>}
             {isHatched ? `${hatched} of ${total} hatched (${pct}%)` : 'Failed'}
@@ -316,8 +324,9 @@ function NewBatchSheet({ onClose, onSaved }) {
     let photoUrl = null
     if (photo) photoUrl = await uploadPhoto(photo)
 
+    const friendly = new Date(setDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     const fields = {
-      'Batch Name': `Batch – ${setDate}`,
+      'Batch Name': `Batch – ${friendly}`,
       'Set Date': setDate,
       'Status': 'Active',
     }
@@ -615,7 +624,8 @@ function HatchSheet({ batch, onClose, onSaved }) {
 // ── Batch Detail View ────────────────────────────────────────────────────────
 
 function BatchDetail({ batch, onClose, onSaved, onDeleted }) {
-  const { isAdmin } = useAuth()
+  const { isAdmin, permissions } = useAuth()
+  const canEdit = isAdmin || permissions?.chickens
   const f = batch.fields
   const total = totalEggs(f)
   const hatched = safeNum(f['Chicks Hatched'])
@@ -695,7 +705,7 @@ function BatchDetail({ batch, onClose, onSaved, onDeleted }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="bg-white rounded-t-2xl sm:rounded-xl w-full max-w-md shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="font-semibold text-gray-900">{safeStr(f['Batch Name'], 'Batch')}</h2>
+          <h2 className="font-semibold text-gray-900">{formatBatchName(safeStr(f['Batch Name'], 'Batch'))}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
         </div>
 
@@ -747,13 +757,13 @@ function BatchDetail({ batch, onClose, onSaved, onDeleted }) {
                 </div>
               )}
 
-              {isAdmin && (
+              {canEdit && (
                 <div className="flex gap-3 pt-3 border-t border-gray-100">
                   <button onClick={() => setEditing(true)}
                     className="flex-1 flex items-center justify-center gap-2 border border-gray-200 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
                     <Pencil size={14} /> Edit
                   </button>
-                  {!confirmDelete ? (
+                  {isAdmin && (!confirmDelete ? (
                     <button onClick={() => setConfirmDelete(true)}
                       className="flex-1 flex items-center justify-center gap-2 border border-red-200 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50">
                       <Trash2 size={14} /> Delete Batch
@@ -763,7 +773,7 @@ function BatchDetail({ batch, onClose, onSaved, onDeleted }) {
                       className="flex-1 bg-red-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-60">
                       {deleting ? 'Deleting...' : 'Confirm Delete'}
                     </button>
-                  )}
+                  ))}
                 </div>
               )}
             </div>
@@ -810,7 +820,8 @@ function BatchDetail({ batch, onClose, onSaved, onDeleted }) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function ChickenIncubator() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, permissions } = useAuth()
+  const canEdit = isAdmin || permissions?.chickens
   const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
@@ -852,7 +863,7 @@ export default function ChickenIncubator() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-800">Incubator</h2>
-        {isAdmin && (
+        {canEdit && (
           <button onClick={() => setShowNew(true)}
             className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
             <Plus size={16} /> New Batch
@@ -865,7 +876,7 @@ export default function ChickenIncubator() {
         <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 text-center">
           <span className="text-5xl block mb-3">{'\uD83E\uDD5A'}</span>
           <p className="text-gray-500 font-medium">No batches yet</p>
-          {isAdmin && (
+          {canEdit && (
             <button onClick={() => setShowNew(true)} className="mt-4 text-sm text-amber-600 hover:text-amber-700 font-medium">
               + New Batch
             </button>
