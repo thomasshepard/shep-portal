@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, X, Trash2, Pencil, Check, BookOpen } from 'lucide-react'
+import { Plus, X, Check, BookOpen } from 'lucide-react'
+import ChickenBatchDetail from './ChickenBatchDetail'
 import { CHICKENS_BASE_ID } from '../lib/airtable'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -223,7 +224,7 @@ function NextActionCard({ phase, onAction }) {
     <div className={`rounded-lg border p-3 ${c.bg}`}>
       <p className="text-sm font-medium text-gray-800 mb-2">{c.label}</p>
       <button
-        onClick={() => onAction(phase.nextAction)}
+        onClick={(e) => { e.stopPropagation(); onAction(phase.nextAction) }}
         className="w-full bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
       >
         {c.btn}
@@ -234,13 +235,13 @@ function NextActionCard({ phase, onAction }) {
 
 // ── Active Batch Card ────────────────────────────────────────────────────────
 
-function ActiveBatchCard({ batch, onAction }) {
+function ActiveBatchCard({ batch, onAction, onClick }) {
   const f = batch.fields
   const phase = getBatchPhase(batch)
   const photoUrl = safeStr(f['Batch Photo URL'])
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer" onClick={onClick}>
       {photoUrl ? (
         <img src={photoUrl} alt="Batch" className="w-full h-48 object-cover" />
       ) : (
@@ -622,202 +623,6 @@ function HatchSheet({ batch, onClose, onSaved }) {
   )
 }
 
-// ── Batch Detail View ────────────────────────────────────────────────────────
-
-function BatchDetail({ batch, onClose, onSaved, onDeleted }) {
-  const { isAdmin, permissions } = useAuth()
-  const canEdit = isAdmin || permissions?.chickens
-  const f = batch.fields
-  const total = totalEggs(f)
-  const hatched = safeNum(f['Chicks Hatched'])
-  const pct = total > 0 ? Math.round((hatched / total) * 100) : 0
-  const bm = hatched > 0 ? hatchBenchmark(pct) : null
-  const [editing, setEditing] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-
-  // Edit state
-  const [editForm, setEditForm] = useState({
-    rooster: safeStr(f['Rooster']),
-    setDate: safeStr(f['Set Date']),
-    brown: String(safeNum(f['Brown Eggs']) || ''),
-    blue: String(safeNum(f['Blue/Green Eggs']) || ''),
-    white: String(safeNum(f['White Eggs']) || ''),
-    tan: String(safeNum(f['Tan/Pink Eggs']) || ''),
-    d7dev: String(safeNum(f['Day 7 Developing']) || ''),
-    d7notes: safeStr(f['Day 7 Notes']),
-    d14dev: String(safeNum(f['Day 14 Developing']) || ''),
-    d14notes: safeStr(f['Day 14 Notes']),
-    chicksHatched: String(hatched || ''),
-    hatchNotes: safeStr(f['Hatch Notes']),
-  })
-  const [saving, setSaving] = useState(false)
-
-  function setEF(key, val) { setEditForm(prev => ({ ...prev, [key]: val })) }
-
-  async function handleSaveEdit(e) {
-    e.preventDefault()
-    setSaving(true)
-    const totalEdit = (Number(editForm.brown) || 0) + (Number(editForm.blue) || 0) + (Number(editForm.white) || 0) + (Number(editForm.tan) || 0)
-    const fields = {
-      'Rooster': editForm.rooster.trim() || null,
-      'Set Date': editForm.setDate || null,
-      'Brown Eggs': Number(editForm.brown) || 0,
-      'Blue/Green Eggs': Number(editForm.blue) || 0,
-      'White Eggs': Number(editForm.white) || 0,
-      'Tan/Pink Eggs': Number(editForm.tan) || 0,
-    }
-    if (editForm.d7dev !== '') {
-      fields['Day 7 Developing'] = Number(editForm.d7dev) || 0
-      fields['Day 7 Removed'] = Math.max(0, totalEdit - (Number(editForm.d7dev) || 0))
-    }
-    if (editForm.d7notes.trim()) fields['Day 7 Notes'] = editForm.d7notes.trim()
-    if (editForm.d14dev !== '') {
-      fields['Day 14 Developing'] = Number(editForm.d14dev) || 0
-      fields['Day 14 Removed'] = Math.max(0, (Number(editForm.d7dev) || totalEdit) - (Number(editForm.d14dev) || 0))
-    }
-    if (editForm.d14notes.trim()) fields['Day 14 Notes'] = editForm.d14notes.trim()
-    if (editForm.chicksHatched !== '') fields['Chicks Hatched'] = Number(editForm.chicksHatched) || 0
-    if (editForm.hatchNotes.trim()) fields['Hatch Notes'] = editForm.hatchNotes.trim()
-
-    const { error } = await updateBatch(batch.id, fields)
-    if (error) { toast.error('Failed: ' + error); setSaving(false); return }
-    toast.success('Batch updated')
-    setSaving(false)
-    setEditing(false)
-    onSaved()
-  }
-
-  async function handleDelete() {
-    setDeleting(true)
-    const { error } = await deleteBatch(batch.id)
-    if (error) { toast.error('Delete failed: ' + error); setDeleting(false); return }
-    toast.success('Batch deleted')
-    onDeleted()
-  }
-
-  const photoUrl = safeStr(f['Batch Photo URL'])
-  const d7dev = safeNum(f['Day 7 Developing'])
-  const d7rem = safeNum(f['Day 7 Removed'])
-  const d14dev = safeNum(f['Day 14 Developing'])
-  const d14rem = safeNum(f['Day 14 Removed'])
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-xl w-full max-w-md shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="font-semibold text-gray-900">{formatBatchName(safeStr(f['Batch Name'], 'Batch'))}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {!editing ? (
-            <div className="px-5 py-4 space-y-4">
-              {photoUrl && <img src={photoUrl} alt="Batch" className="w-full h-48 object-cover rounded-lg" />}
-
-              <div className="text-sm text-gray-600">
-                {f['Rooster'] && <p>{'\uD83D\uDC13'} {safeStr(f['Rooster'])}</p>}
-                <p>Set {fmtDate(f['Set Date'])} &middot; Hatch {fmtDate(expectedHatchDate(f['Set Date']))}</p>
-              </div>
-
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Eggs Set</p>
-                <EggCounts fields={f} />
-              </div>
-
-              {(d7dev > 0 || d7rem > 0) && (
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Day 7 Candle</p>
-                  <p className="text-sm text-gray-700">{d7dev} developing / {d7rem} removed</p>
-                  {f['Day 7 Notes'] && <p className="text-xs text-gray-500 mt-0.5">{safeStr(f['Day 7 Notes'])}</p>}
-                </div>
-              )}
-
-              {(d14dev > 0 || d14rem > 0) && (
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Day 14 Candle</p>
-                  <p className="text-sm text-gray-700">{d14dev} developing / {d14rem} removed</p>
-                  {f['Day 14 Notes'] && <p className="text-xs text-gray-500 mt-0.5">{safeStr(f['Day 14 Notes'])}</p>}
-                </div>
-              )}
-
-              {hatched > 0 && (
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Chicks Hatched</p>
-                  <p className="text-sm text-gray-700">
-                    {hatched} / {total} = {pct}%{' '}
-                    {bm && <span className={`font-medium ${bm.color}`}>{bm.label}</span>}
-                  </p>
-                </div>
-              )}
-
-              {f['Hatch Notes'] && (
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Notes</p>
-                  <p className="text-sm text-gray-600">{safeStr(f['Hatch Notes'])}</p>
-                </div>
-              )}
-
-              {canEdit && (
-                <div className="flex gap-3 pt-3 border-t border-gray-100">
-                  <button onClick={() => setEditing(true)}
-                    className="flex-1 flex items-center justify-center gap-2 border border-gray-200 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                    <Pencil size={14} /> Edit
-                  </button>
-                  {isAdmin && (!confirmDelete ? (
-                    <button onClick={() => setConfirmDelete(true)}
-                      className="flex-1 flex items-center justify-center gap-2 border border-red-200 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50">
-                      <Trash2 size={14} /> Delete Batch
-                    </button>
-                  ) : (
-                    <button onClick={handleDelete} disabled={deleting}
-                      className="flex-1 bg-red-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-60">
-                      {deleting ? 'Deleting...' : 'Confirm Delete'}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <form onSubmit={handleSaveEdit} className="px-5 py-4 space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Rooster</label>
-                <input value={editForm.rooster} onChange={e => setEF('rooster', e.target.value)} className={inp} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Set Date</label>
-                <input type="date" value={editForm.setDate} onChange={e => setEF('setDate', e.target.value)} className={inp} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-xs text-gray-500 mb-1">{'\uD83D\uDFE4'} Brown</label><input type="number" min={0} value={editForm.brown} onChange={e => setEF('brown', e.target.value)} className={inp} /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">{'\uD83D\uDFE2'} Blue/Green</label><input type="number" min={0} value={editForm.blue} onChange={e => setEF('blue', e.target.value)} className={inp} /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">{'\u2B1C'} White</label><input type="number" min={0} value={editForm.white} onChange={e => setEF('white', e.target.value)} className={inp} /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">{'\uD83E\uDE77'} Tan/Pink</label><input type="number" min={0} value={editForm.tan} onChange={e => setEF('tan', e.target.value)} className={inp} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-xs text-gray-500 mb-1">Day 7 Developing</label><input type="number" min={0} value={editForm.d7dev} onChange={e => setEF('d7dev', e.target.value)} className={inp} /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">Day 7 Notes</label><input value={editForm.d7notes} onChange={e => setEF('d7notes', e.target.value)} className={inp} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-xs text-gray-500 mb-1">Day 14 Developing</label><input type="number" min={0} value={editForm.d14dev} onChange={e => setEF('d14dev', e.target.value)} className={inp} /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">Day 14 Notes</label><input value={editForm.d14notes} onChange={e => setEF('d14notes', e.target.value)} className={inp} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-xs text-gray-500 mb-1">Chicks Hatched</label><input type="number" min={0} value={editForm.chicksHatched} onChange={e => setEF('chicksHatched', e.target.value)} className={inp} /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">Hatch Notes</label><input value={editForm.hatchNotes} onChange={e => setEF('hatchNotes', e.target.value)} className={inp} /></div>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setEditing(false)} className="flex-1 border border-gray-200 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={saving} className="flex-1 bg-amber-500 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-amber-600 disabled:opacity-60">{saving ? 'Saving...' : 'Save'}</button>
-              </div>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function ChickenIncubator() {
@@ -827,8 +632,9 @@ export default function ChickenIncubator() {
   const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [selectedBatch, setSelectedBatch] = useState(null)
 
-  // Sheet state: { type: 'candle7'|'candle14'|'lockdown'|'recordhatch'|'detail', batch }
+  // Sheet state: { type: 'candle7'|'candle14'|'lockdown'|'recordhatch', batch }
   const [sheet, setSheet] = useState(null)
 
   async function loadBatches() {
@@ -896,7 +702,7 @@ export default function ChickenIncubator() {
       {activeBatches.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {activeBatches.map(b => (
-            <ActiveBatchCard key={b.id} batch={b} onAction={action => handleAction(b, action)} />
+            <ActiveBatchCard key={b.id} batch={b} onAction={action => handleAction(b, action)} onClick={() => setSelectedBatch(b)} />
           ))}
         </div>
       )}
@@ -906,7 +712,7 @@ export default function ChickenIncubator() {
         <div className="space-y-2">
           <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Completed</h3>
           {completedBatches.map(b => (
-            <CompletedBatchCard key={b.id} batch={b} onClick={() => setSheet({ type: 'detail', batch: b })} />
+            <CompletedBatchCard key={b.id} batch={b} onClick={() => setSelectedBatch(b)} />
           ))}
         </div>
       )}
@@ -917,7 +723,20 @@ export default function ChickenIncubator() {
       {sheet?.type === 'candle14' && <CandleSheet batch={sheet.batch} candleDay={14} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
       {sheet?.type === 'lockdown' && <LockdownSheet onClose={() => setSheet(null)} />}
       {sheet?.type === 'recordhatch' && <HatchSheet batch={sheet.batch} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
-      {sheet?.type === 'detail' && <BatchDetail batch={sheet.batch} onClose={() => setSheet(null)} onSaved={handleSheetSaved} onDeleted={() => { setSheet(null); loadBatches() }} />}
+      {selectedBatch && (
+        <ChickenBatchDetail
+          batch={selectedBatch}
+          onClose={() => setSelectedBatch(null)}
+          onSaved={(updated) => {
+            setBatches(prev => prev.map(b => b.id === updated.id ? updated : b))
+            setSelectedBatch(updated)
+          }}
+          onDeleted={() => {
+            setBatches(prev => prev.filter(b => b.id !== selectedBatch.id))
+            setSelectedBatch(null)
+          }}
+        />
+      )}
     </>
   )
 }
