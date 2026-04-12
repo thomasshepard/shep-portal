@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Plus, X, Trash2, Pencil, Check } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, X, Trash2, Pencil, Check, BookOpen } from 'lucide-react'
 import { CHICKENS_BASE_ID } from '../lib/airtable'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -821,6 +822,7 @@ function BatchDetail({ batch, onClose, onSaved, onDeleted }) {
 
 export default function ChickenIncubator() {
   const { isAdmin, permissions } = useAuth()
+  const navigate = useNavigate()
   const canEdit = isAdmin || permissions?.chickens
   const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
@@ -862,7 +864,13 @@ export default function ChickenIncubator() {
     <>
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-800">Incubator</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-gray-800">Incubator</h2>
+          <button onClick={() => navigate('/chickens/incubator-guide')}
+            className="flex items-center gap-1 text-sm text-amber-600 hover:text-amber-800">
+            <BookOpen size={15} /> Guide
+          </button>
+        </div>
         {canEdit && (
           <button onClick={() => setShowNew(true)}
             className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">

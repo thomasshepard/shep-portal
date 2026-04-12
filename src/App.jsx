@@ -27,6 +27,7 @@ import DealsSearchCriteria from './pages/DealsSearchCriteria'
 import HappyCuts from './pages/HappyCuts'
 import HappyCutsClientDetail from './pages/HappyCutsClientDetail'
 import HappyCutsGuide from './pages/HappyCutsGuide'
+import ChickenIncubatorGuide from './pages/ChickenIncubatorGuide'
 
 export default function App() {
   return (
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="llcs/:id" element={<PermRoute permission="llcs"><LLCDetail /></PermRoute>} />
             <Route path="chickens" element={<PermRoute permission="chickens"><Chickens /></PermRoute>} />
             <Route path="chickens/:id" element={<PermRoute permission="chickens"><FlockDetail /></PermRoute>} />
+            <Route path="chickens/incubator-guide" element={<PermRoute permission="chickens"><ChickenIncubatorGuide /></PermRoute>} />
             <Route path="documents" element={<PermRoute permission="documents"><Documents /></PermRoute>} />
             <Route path="deals" element={<PermRoute permission="deals"><Deals /></PermRoute>} />
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
