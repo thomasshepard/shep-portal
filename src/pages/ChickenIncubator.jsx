@@ -802,6 +802,7 @@ export default function ChickenIncubator() {
       {sheet?.type === 'recordhatch' && <HatchSheet batch={sheet.batch} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
       {selectedBatch && (
         <ChickenBatchDetail
+          key={selectedBatch.id}
           batch={selectedBatch}
           roosters={roosters}
           onRoosterAdded={handleRoosterAdded}

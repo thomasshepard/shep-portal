@@ -1,0 +1,15 @@
+{
+  "name": "Shep Portal",
+  "short_name": "Shep Portal",
+  "icons": [
+    {
+      "src": "/shep-portal/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "theme_color": "#0f1f3d",
+  "background_color": "#0f1f3d",
+  "display": "standalone",
+  "start_url": "/shep-portal/"
+}

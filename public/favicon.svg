@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark navy background -->
+  <rect width="32" height="32" rx="6" fill="#0f1f3d"/>
+  <!-- Gold sun -->
+  <circle cx="16" cy="11" r="4" fill="#f59e0b"/>
+  <!-- Back ridge -->
+  <path d="M0 22 L4 16 L8 19 L12 13 L16 17 L20 12 L24 16 L28 14 L32 18 L32 32 L0 32Z" fill="#1e3a5f"/>
+  <!-- Mid ridge -->
+  <path d="M0 26 L5 20 L9 23 L14 18 L18 22 L23 17 L27 21 L32 19 L32 32 L0 32Z" fill="#162d4a"/>
+  <!-- Front ridge -->
+  <path d="M0 28 L6 24 L11 27 L16 22 L21 26 L26 23 L32 25 L32 32 L0 32Z" fill="#0f2238"/>
+</svg>
