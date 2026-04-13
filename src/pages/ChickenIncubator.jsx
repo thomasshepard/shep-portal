@@ -196,14 +196,18 @@ async function deleteBatch(recordId) {
 
 async function uploadPhoto(file) {
   try {
-    const path = `incubator/${Date.now()}_${file.name}`
-    const { data, error } = await supabase.storage.from('chicken-photos').upload(path, file, { upsert: false })
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `incubator/${Date.now()}_${safeName}`
+    const { data, error } = await supabase.storage.from('chicken-photos').upload(path, file, {
+      upsert: false,
+      contentType: file.type,
+    })
     if (error) throw error
     const { data: urlData } = supabase.storage.from('chicken-photos').getPublicUrl(data.path)
     return urlData.publicUrl
   } catch (e) {
     console.error('Photo upload failed:', e)
-    toast.error('Photo upload failed — saving batch without photo')
+    toast.error('Photo upload failed: ' + (e?.message || JSON.stringify(e)))
     return null
   }
 }
