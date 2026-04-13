@@ -13,6 +13,16 @@ import toast from 'react-hot-toast'
 const PAT = import.meta.env.VITE_AIRTABLE_PAT
 const BASE_URL = `https://api.airtable.com/v0/${CHICKENS_BASE_ID}`
 const BATCHES_TABLE = 'tblKomWeHkj9aGFDC'
+const ROOSTERS_TABLE = 'tblhZ5Mzr2aNh02Fm'
+
+const EGG_COLORS = [
+  { key: 'brownEggs',     field: 'Brown Eggs',      label: 'Brown',      emoji: '🟤' },
+  { key: 'darkBrownEggs', field: 'Dark Brown Eggs',  label: 'Dark Brown', emoji: '🟫' },
+  { key: 'blueEggs',      field: 'Blue Eggs',        label: 'Blue',       emoji: '🔵' },
+  { key: 'greenEggs',     field: 'Green Eggs',       label: 'Green',      emoji: '🟢' },
+  { key: 'whiteEggs',     field: 'White Eggs',       label: 'White',      emoji: '⬜' },
+  { key: 'tanPinkEggs',   field: 'Tan/Pink Eggs',    label: 'Tan/Pink',   emoji: '🩷' },
+]
 
 const headers = () => ({
   Authorization: `Bearer ${PAT}`,
@@ -51,7 +61,7 @@ function todayStr() {
 }
 
 function totalEggs(f) {
-  return safeNum(f['Brown Eggs']) + safeNum(f['Blue/Green Eggs']) + safeNum(f['White Eggs']) + safeNum(f['Tan/Pink Eggs'])
+  return EGG_COLORS.reduce((sum, { field }) => sum + safeNum(f[field]), 0)
 }
 
 function expectedHatchDate(setDate) {
@@ -114,22 +124,11 @@ function ProgressBar({ day }) {
 // ── Egg Count Display ────────────────────────────────────────────────────────
 
 function EggCounts({ fields, className = '' }) {
-  const brown = safeNum(fields['Brown Eggs'])
-  const blue = safeNum(fields['Blue/Green Eggs'])
-  const white = safeNum(fields['White Eggs'])
-  const tan = safeNum(fields['Tan/Pink Eggs'])
-  const total = brown + blue + white + tan
-  const items = [
-    brown > 0 && { emoji: '\uD83D\uDFE4', count: brown },
-    blue > 0 && { emoji: '\uD83D\uDFE2', count: blue },
-    white > 0 && { emoji: '\u2B1C', count: white },
-    tan > 0 && { emoji: '\uD83E\uDE77', count: tan },
-  ].filter(Boolean)
-
+  const total = EGG_COLORS.reduce((sum, { field }) => sum + safeNum(fields[field]), 0)
   return (
     <div className={`flex items-center gap-2 text-sm ${className}`}>
-      {items.map((it, i) => (
-        <span key={i}>{it.emoji}{it.count}</span>
+      {EGG_COLORS.filter(({ field }) => safeNum(fields[field]) > 0).map(({ field, emoji }) => (
+        <span key={field}>{emoji}{safeNum(fields[field])}</span>
       ))}
       <span className="text-gray-400 ml-1">{total} eggs</span>
     </div>
@@ -310,22 +309,52 @@ function CompletedBatchCard({ batch, onClick }) {
 
 const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400'
 
-function NewBatchSheet({ onClose, onSaved }) {
+function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
   const [photo, setPhoto] = useState(null)
   const [preview, setPreview] = useState(null)
-  const [rooster, setRooster] = useState('')
+  const [selectedRoosterId, setSelectedRoosterId] = useState('')
+  const [showAddRooster, setShowAddRooster] = useState(false)
+  const [newRoosterName, setNewRoosterName] = useState('')
+  const [newRoosterBreed, setNewRoosterBreed] = useState('')
+  const [newRoosterDesc, setNewRoosterDesc] = useState('')
+  const [newRoosterNotes, setNewRoosterNotes] = useState('')
   const [setDate, setSetDate] = useState(todayStr())
-  const [brown, setBrown] = useState('')
-  const [blue, setBlue] = useState('')
+  const [eggs, setEggs] = useState({ brownEggs: '', darkBrownEggs: '', blueEggs: '', greenEggs: '', whiteEggs: '', tanPinkEggs: '' })
   const [saving, setSaving] = useState(false)
 
-  const total = (Number(brown) || 0) + (Number(blue) || 0)
+  const total = EGG_COLORS.reduce((sum, { key }) => sum + (Number(eggs[key]) || 0), 0)
+
+  function setEgg(key, val) { setEggs(prev => ({ ...prev, [key]: val })) }
 
   function onFileChange(e) {
     const f = e.target.files?.[0]
     if (!f) return
     setPhoto(f)
     setPreview(URL.createObjectURL(f))
+  }
+
+  async function handleSaveNewRooster() {
+    if (!newRoosterName.trim()) return toast.error('Name is required')
+    const fields = { 'Name': newRoosterName.trim(), 'Active': true }
+    if (newRoosterBreed.trim()) fields['Breed'] = newRoosterBreed.trim()
+    if (newRoosterDesc.trim()) fields['Color/Description'] = newRoosterDesc.trim()
+    if (newRoosterNotes.trim()) fields['Notes'] = newRoosterNotes.trim()
+    try {
+      const res = await fetch(`${BASE_URL}/${ROOSTERS_TABLE}`, {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ records: [{ fields }], typecast: true }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error?.message || `HTTP ${res.status}`)
+      const newRooster = json.records[0]
+      onRoosterAdded(newRooster)
+      setSelectedRoosterId(newRooster.id)
+      setShowAddRooster(false)
+      setNewRoosterName(''); setNewRoosterBreed(''); setNewRoosterDesc(''); setNewRoosterNotes('')
+      toast.success(`${safeStr(newRooster.fields['Name'])} added`)
+    } catch (e) {
+      toast.error('Failed to save rooster: ' + e.message)
+    }
   }
 
   async function handleSubmit(e) {
@@ -342,9 +371,15 @@ function NewBatchSheet({ onClose, onSaved }) {
       'Set Date': setDate,
       'Status': 'Active',
     }
-    if (rooster.trim()) fields['Rooster'] = rooster.trim()
-    if (Number(brown) > 0) fields['Brown Eggs'] = Number(brown)
-    if (Number(blue) > 0) fields['Blue/Green Eggs'] = Number(blue)
+    const selectedRooster = roosters.find(r => r.id === selectedRoosterId)
+    if (selectedRooster) {
+      fields['Rooster'] = safeStr(selectedRooster.fields['Name'])
+      fields['Rooster ID'] = selectedRoosterId
+    }
+    EGG_COLORS.forEach(({ key, field }) => {
+      const n = Number(eggs[key]) || 0
+      if (n > 0) fields[field] = n
+    })
     if (photoUrl) fields['Batch Photo URL'] = photoUrl
 
     const { error } = await createBatch(fields)
@@ -382,7 +417,38 @@ function NewBatchSheet({ onClose, onSaved }) {
           {/* Rooster */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Rooster</label>
-            <input value={rooster} onChange={e => setRooster(e.target.value)} className={inp} placeholder="e.g. Big Red" />
+            <select value={selectedRoosterId} onChange={e => {
+              if (e.target.value === '__add__') { setShowAddRooster(true); setSelectedRoosterId('') }
+              else { setSelectedRoosterId(e.target.value); setShowAddRooster(false) }
+            }} className={inp + ' bg-white'}>
+              <option value="">Select a rooster...</option>
+              {roosters.filter(r => r.fields['Active'] !== false).map(r => (
+                <option key={r.id} value={r.id}>
+                  {safeStr(r.fields['Name'])}{r.fields['Breed'] ? ` — ${safeStr(r.fields['Breed'])}` : ''}
+                </option>
+              ))}
+              <option value="__add__">+ Add new rooster</option>
+            </select>
+            {selectedRoosterId && (() => {
+              const r = roosters.find(r => r.id === selectedRoosterId)
+              const desc = safeStr(r?.fields['Color/Description'])
+              return desc ? <p className="text-xs text-gray-500 mt-1">{desc}</p> : null
+            })()}
+            {showAddRooster && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                <p className="text-sm font-medium text-amber-800">New Rooster</p>
+                <input placeholder="Name (required)" value={newRoosterName} onChange={e => setNewRoosterName(e.target.value)} className={inp} />
+                <input placeholder="Breed (optional)" value={newRoosterBreed} onChange={e => setNewRoosterBreed(e.target.value)} className={inp} />
+                <input placeholder="Color / description (optional)" value={newRoosterDesc} onChange={e => setNewRoosterDesc(e.target.value)} className={inp} />
+                <textarea placeholder="Notes (optional)" value={newRoosterNotes} onChange={e => setNewRoosterNotes(e.target.value)} rows={2} className={inp + ' resize-none'} />
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => { setShowAddRooster(false); setNewRoosterName('') }}
+                    className="flex-1 border border-gray-200 py-2 rounded-lg text-sm text-gray-600 hover:bg-white">Cancel</button>
+                  <button type="button" onClick={handleSaveNewRooster}
+                    className="flex-1 bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600">Save Rooster</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Set Date */}
@@ -395,16 +461,13 @@ function NewBatchSheet({ onClose, onSaved }) {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Egg Counts</label>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">{'\uD83D\uDFE4'} Brown</label>
-                <input type="number" min={0} value={brown} onChange={e => setBrown(e.target.value)}
-                  className={inp + ' text-center text-lg font-semibold'} placeholder="0" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">{'\uD83D\uDFE2'} Blue/Green</label>
-                <input type="number" min={0} value={blue} onChange={e => setBlue(e.target.value)}
-                  className={inp + ' text-center text-lg font-semibold'} placeholder="0" />
-              </div>
+              {EGG_COLORS.map(({ key, label, emoji }) => (
+                <div key={key}>
+                  <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">{emoji} {label}</label>
+                  <input type="number" min={0} value={eggs[key]} onChange={e => setEgg(key, e.target.value)}
+                    className={inp + ' text-center text-lg font-semibold'} placeholder="0" />
+                </div>
+              ))}
             </div>
             <p className={`text-sm mt-2 ${total > 0 ? 'text-gray-600' : 'text-gray-400'}`}>
               {total} egg{total !== 1 ? 's' : ''}
@@ -628,6 +691,7 @@ export default function ChickenIncubator() {
   const navigate = useNavigate()
   const canEdit = isAdmin || permissions?.chickens
   const [batches, setBatches] = useState([])
+  const [roosters, setRoosters] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [selectedBatch, setSelectedBatch] = useState(null)
@@ -643,8 +707,23 @@ export default function ChickenIncubator() {
     setLoading(false)
   }
 
+  async function loadRoosters() {
+    try {
+      const res = await fetch(`${BASE_URL}/${ROOSTERS_TABLE}?sort[0][field]=Name&sort[0][direction]=asc`, { headers: headers() })
+      const json = await res.json()
+      setRoosters(json.records || [])
+    } catch { /* non-critical */ }
+  }
+
+  function handleRoosterAdded(rooster) {
+    setRoosters(prev => [...prev, rooster].sort((a, b) =>
+      safeStr(a.fields['Name']).localeCompare(safeStr(b.fields['Name']))
+    ))
+  }
+
   useEffect(() => {
     loadBatches()
+    loadRoosters()
   }, [])
 
   function handleAction(batch, action) {
@@ -716,7 +795,7 @@ export default function ChickenIncubator() {
       )}
 
       {/* Sheets */}
-      {showNew && <NewBatchSheet onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); loadBatches() }} />}
+      {showNew && <NewBatchSheet onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); loadBatches() }} roosters={roosters} onRoosterAdded={handleRoosterAdded} />}
       {sheet?.type === 'candle7' && <CandleSheet batch={sheet.batch} candleDay={7} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
       {sheet?.type === 'candle14' && <CandleSheet batch={sheet.batch} candleDay={14} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
       {sheet?.type === 'lockdown' && <LockdownSheet onClose={() => setSheet(null)} />}
@@ -724,6 +803,8 @@ export default function ChickenIncubator() {
       {selectedBatch && (
         <ChickenBatchDetail
           batch={selectedBatch}
+          roosters={roosters}
+          onRoosterAdded={handleRoosterAdded}
           onClose={() => setSelectedBatch(null)}
           onSaved={(updated) => {
             setBatches(prev => prev.map(b => b.id === updated.id ? updated : b))

@@ -9,7 +9,17 @@ import toast from 'react-hot-toast'
 
 const PAT = import.meta.env.VITE_AIRTABLE_PAT
 const BATCHES_TABLE = 'tblKomWeHkj9aGFDC'
+const ROOSTERS_TABLE = 'tblhZ5Mzr2aNh02Fm'
 const BASE_URL = `https://api.airtable.com/v0/${CHICKENS_BASE_ID}`
+
+const EGG_COLORS = [
+  { key: 'brownEggs',     field: 'Brown Eggs',      label: 'Brown',      emoji: '🟤', formKey: 'brown'     },
+  { key: 'darkBrownEggs', field: 'Dark Brown Eggs',  label: 'Dark Brown', emoji: '🟫', formKey: 'darkBrown' },
+  { key: 'blueEggs',      field: 'Blue Eggs',        label: 'Blue',       emoji: '🔵', formKey: 'blue'      },
+  { key: 'greenEggs',     field: 'Green Eggs',       label: 'Green',      emoji: '🟢', formKey: 'green'     },
+  { key: 'whiteEggs',     field: 'White Eggs',       label: 'White',      emoji: '⬜', formKey: 'white'     },
+  { key: 'tanPinkEggs',   field: 'Tan/Pink Eggs',    label: 'Tan/Pink',   emoji: '🩷', formKey: 'tan'       },
+]
 
 const hdrs = () => ({
   Authorization: `Bearer ${PAT}`,
@@ -58,7 +68,7 @@ function addDays(setDate, n) {
 }
 
 function totalEggs(f) {
-  return safeNum(f['Brown Eggs']) + safeNum(f['Blue/Green Eggs']) + safeNum(f['White Eggs']) + safeNum(f['Tan/Pink Eggs'])
+  return EGG_COLORS.reduce((sum, { field }) => sum + safeNum(f[field]), 0)
 }
 
 function getBatchDay(setDate) {
@@ -323,7 +333,7 @@ function InlineCandleForm({ total, setDate, candleDay, devVal, setDev, notesVal,
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted }) {
+export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdded, onClose, onSaved, onDeleted }) {
   const { isAdmin, permissions } = useAuth()
   const canEdit = isAdmin || permissions?.chickens
   const f = batch.fields
@@ -354,13 +364,25 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
   const [newPreviews, setNewPreviews] = useState([])
   const fileInputRef = useRef(null)
 
+  // Rooster selector state
+  const matchByName = roosters.find(r => safeStr(r.fields['Name']) === safeStr(f['Rooster']))
+  const [selectedRoosterId, setSelectedRoosterId] = useState(
+    safeStr(f['Rooster ID']) || matchByName?.id || ''
+  )
+  const [showAddRooster, setShowAddRooster] = useState(false)
+  const [newRoosterName, setNewRoosterName] = useState('')
+  const [newRoosterBreed, setNewRoosterBreed] = useState('')
+  const [newRoosterDesc, setNewRoosterDesc] = useState('')
+  const [newRoosterNotes, setNewRoosterNotes] = useState('')
+
   // Edit form state
   const [editForm, setEditForm] = useState({
-    rooster: safeStr(f['Rooster']),
     setDate: safeStr(f['Set Date']),
     status: safeStr(f['Status'], 'Active'),
     brown: String(safeNum(f['Brown Eggs']) || ''),
-    blue: String(safeNum(f['Blue/Green Eggs']) || ''),
+    darkBrown: String(safeNum(f['Dark Brown Eggs']) || ''),
+    blue: String(safeNum(f['Blue Eggs']) || ''),
+    green: String(safeNum(f['Green Eggs']) || ''),
     white: String(safeNum(f['White Eggs']) || ''),
     tan: String(safeNum(f['Tan/Pink Eggs']) || ''),
     d7dev: String(safeNum(f['Day 7 Developing']) || ''),
@@ -400,7 +422,7 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
   const hatchBm = hatched > 0 ? hatchBenchmark(hatchPct) : null
 
   // Edit mode computed values
-  const editTotal = (Number(editForm.brown)||0) + (Number(editForm.blue)||0) + (Number(editForm.white)||0) + (Number(editForm.tan)||0)
+  const editTotal = EGG_COLORS.reduce((sum, { formKey }) => sum + (Number(editForm[formKey]) || 0), 0)
   const editHatchNum = Number(editForm.chicksHatched) || 0
   const editPct = editTotal > 0 && editForm.chicksHatched !== '' ? Math.round((editHatchNum / editTotal) * 100) : 0
   const editBm = editForm.chicksHatched !== '' ? hatchBenchmark(editPct) : null
@@ -424,6 +446,32 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
     setNewPreviews(prev => prev.filter((_, i) => i !== idx))
   }
 
+  // ── Rooster save ────────────────────────────────────────────────────────────
+
+  async function handleSaveNewRooster() {
+    if (!newRoosterName.trim()) return toast.error('Name is required')
+    const fields = { 'Name': newRoosterName.trim(), 'Active': true }
+    if (newRoosterBreed.trim()) fields['Breed'] = newRoosterBreed.trim()
+    if (newRoosterDesc.trim()) fields['Color/Description'] = newRoosterDesc.trim()
+    if (newRoosterNotes.trim()) fields['Notes'] = newRoosterNotes.trim()
+    try {
+      const res = await fetch(`${BASE_URL}/${ROOSTERS_TABLE}`, {
+        method: 'POST', headers: hdrs(),
+        body: JSON.stringify({ records: [{ fields }], typecast: true }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error?.message || `HTTP ${res.status}`)
+      const newRooster = json.records[0]
+      if (onRoosterAdded) onRoosterAdded(newRooster)
+      setSelectedRoosterId(newRooster.id)
+      setShowAddRooster(false)
+      setNewRoosterName(''); setNewRoosterBreed(''); setNewRoosterDesc(''); setNewRoosterNotes('')
+      toast.success(`${safeStr(newRooster.fields['Name'])} added`)
+    } catch (e) {
+      toast.error('Failed to save rooster: ' + e.message)
+    }
+  }
+
   // ── Save ────────────────────────────────────────────────────────────────────
 
   async function handleSave() {
@@ -437,20 +485,22 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
     }
     const finalPhotoUrls = [...photoUrls, ...uploadedUrls]
 
+    const selectedRooster = roosters.find(r => r.id === selectedRoosterId)
     const fields = {
-      'Rooster': editForm.rooster.trim() || null,
+      'Rooster': selectedRooster ? safeStr(selectedRooster.fields['Name']) : null,
+      'Rooster ID': selectedRoosterId || null,
       'Set Date': editForm.setDate || null,
       'Status': editForm.status,
-      'Brown Eggs': Number(editForm.brown) || 0,
-      'Blue/Green Eggs': Number(editForm.blue) || 0,
-      'White Eggs': Number(editForm.white) || 0,
-      'Tan/Pink Eggs': Number(editForm.tan) || 0,
       'Photo URLs': finalPhotoUrls.length > 0 ? JSON.stringify(finalPhotoUrls) : null,
       'Day 7 Notes': editForm.d7notes.trim() || null,
       'Day 14 Notes': editForm.d14notes.trim() || null,
       'Hatch Notes': editForm.hatchNotes.trim() || null,
       'Batch Notes': editForm.batchNotes.trim() || null,
     }
+
+    EGG_COLORS.forEach(({ field, formKey }) => {
+      fields[field] = Number(editForm[formKey]) || 0
+    })
 
     if (editForm.d7dev !== '') {
       fields['Day 7 Developing'] = Number(editForm.d7dev) || 0
@@ -726,7 +776,20 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
               {/* Batch info */}
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-0.5">
-                  {f['Rooster'] && <p className="text-sm text-gray-700">🐓 {safeStr(f['Rooster'])}</p>}
+                  {f['Rooster'] && (() => {
+                    const rooster = roosters.find(r => r.id === safeStr(f['Rooster ID']))
+                    return (
+                      <div>
+                        <p className="text-sm text-gray-700">
+                          🐓 {safeStr(f['Rooster'])}
+                          {rooster?.fields['Breed'] && <span className="text-gray-400"> · {safeStr(rooster.fields['Breed'])}</span>}
+                        </p>
+                        {rooster?.fields['Color/Description'] && (
+                          <p className="text-xs text-gray-400">{safeStr(rooster.fields['Color/Description'])}</p>
+                        )}
+                      </div>
+                    )
+                  })()}
                   <p className="text-sm text-gray-500">Set {fmtDate(setDate)} · Hatch {fmtDate(hatchDate)}</p>
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${statusBadgeClass(status)}`}>
@@ -738,18 +801,11 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Eggs Set</p>
                 <div className="flex flex-wrap items-center gap-2">
-                  {safeNum(f['Brown Eggs']) > 0 && (
-                    <span className="text-sm bg-amber-50 border border-amber-100 px-2.5 py-1 rounded-lg">🟤 {safeNum(f['Brown Eggs'])}</span>
-                  )}
-                  {safeNum(f['Blue/Green Eggs']) > 0 && (
-                    <span className="text-sm bg-green-50 border border-green-100 px-2.5 py-1 rounded-lg">🟢 {safeNum(f['Blue/Green Eggs'])}</span>
-                  )}
-                  {safeNum(f['White Eggs']) > 0 && (
-                    <span className="text-sm bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-lg">⬜ {safeNum(f['White Eggs'])}</span>
-                  )}
-                  {safeNum(f['Tan/Pink Eggs']) > 0 && (
-                    <span className="text-sm bg-pink-50 border border-pink-100 px-2.5 py-1 rounded-lg">🩷 {safeNum(f['Tan/Pink Eggs'])}</span>
-                  )}
+                  {EGG_COLORS.filter(({ field }) => safeNum(f[field]) > 0).map(({ field, label, emoji }) => (
+                    <span key={field} className="text-sm bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-lg">
+                      {emoji} {label}: {safeNum(f[field])}
+                    </span>
+                  ))}
                   <span className="text-sm font-medium text-gray-600">· {total} eggs</span>
                 </div>
               </div>
@@ -975,7 +1031,38 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
             {/* Rooster */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Rooster</label>
-              <input value={editForm.rooster} onChange={e => setEF('rooster', e.target.value)} className={inp} placeholder="e.g. Big Red" />
+              <select value={selectedRoosterId} onChange={e => {
+                if (e.target.value === '__add__') { setShowAddRooster(true); setSelectedRoosterId('') }
+                else { setSelectedRoosterId(e.target.value); setShowAddRooster(false) }
+              }} className={inp + ' bg-white'}>
+                <option value="">Select a rooster...</option>
+                {roosters.filter(r => r.fields['Active'] !== false).map(r => (
+                  <option key={r.id} value={r.id}>
+                    {safeStr(r.fields['Name'])}{r.fields['Breed'] ? ` — ${safeStr(r.fields['Breed'])}` : ''}
+                  </option>
+                ))}
+                <option value="__add__">+ Add new rooster</option>
+              </select>
+              {selectedRoosterId && (() => {
+                const r = roosters.find(r => r.id === selectedRoosterId)
+                const desc = safeStr(r?.fields['Color/Description'])
+                return desc ? <p className="text-xs text-gray-500 mt-1">{desc}</p> : null
+              })()}
+              {showAddRooster && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                  <p className="text-sm font-medium text-amber-800">New Rooster</p>
+                  <input placeholder="Name (required)" value={newRoosterName} onChange={e => setNewRoosterName(e.target.value)} className={inp} />
+                  <input placeholder="Breed (optional)" value={newRoosterBreed} onChange={e => setNewRoosterBreed(e.target.value)} className={inp} />
+                  <input placeholder="Color / description (optional)" value={newRoosterDesc} onChange={e => setNewRoosterDesc(e.target.value)} className={inp} />
+                  <textarea placeholder="Notes (optional)" value={newRoosterNotes} onChange={e => setNewRoosterNotes(e.target.value)} rows={2} className={inp + ' resize-none'} />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => { setShowAddRooster(false); setNewRoosterName('') }}
+                      className="flex-1 border border-gray-200 py-2 rounded-lg text-sm text-gray-600 hover:bg-white">Cancel</button>
+                    <button type="button" onClick={handleSaveNewRooster}
+                      className="flex-1 bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600">Save Rooster</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Set Date */}
@@ -1001,22 +1088,12 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-2">Egg Counts</label>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">🟤 Brown</label>
-                  <input type="number" min={0} value={editForm.brown} onChange={e => setEF('brown', e.target.value)} className={inp + ' text-center'} placeholder="0" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">🟢 Blue/Green</label>
-                  <input type="number" min={0} value={editForm.blue} onChange={e => setEF('blue', e.target.value)} className={inp + ' text-center'} placeholder="0" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">⬜ White</label>
-                  <input type="number" min={0} value={editForm.white} onChange={e => setEF('white', e.target.value)} className={inp + ' text-center'} placeholder="0" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 mb-1 block">🩷 Tan/Pink</label>
-                  <input type="number" min={0} value={editForm.tan} onChange={e => setEF('tan', e.target.value)} className={inp + ' text-center'} placeholder="0" />
-                </div>
+                {EGG_COLORS.map(({ key, label, emoji, formKey }) => (
+                  <div key={key}>
+                    <label className="text-xs text-gray-400 mb-1 block">{emoji} {label}</label>
+                    <input type="number" min={0} value={editForm[formKey]} onChange={e => setEF(formKey, e.target.value)} className={inp + ' text-center'} placeholder="0" />
+                  </div>
+                ))}
               </div>
               {editTotal > 0 && (
                 <p className="text-sm text-gray-600 mt-2 text-center">{editTotal} eggs total</p>
