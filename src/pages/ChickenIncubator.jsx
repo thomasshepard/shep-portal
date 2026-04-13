@@ -313,11 +313,9 @@ function NewBatchSheet({ onClose, onSaved }) {
   const [setDate, setSetDate] = useState(todayStr())
   const [brown, setBrown] = useState('')
   const [blue, setBlue] = useState('')
-  const [white, setWhite] = useState('')
-  const [tan, setTan] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const total = (Number(brown) || 0) + (Number(blue) || 0) + (Number(white) || 0) + (Number(tan) || 0)
+  const total = (Number(brown) || 0) + (Number(blue) || 0)
 
   function onFileChange(e) {
     const f = e.target.files?.[0]
@@ -343,8 +341,6 @@ function NewBatchSheet({ onClose, onSaved }) {
     if (rooster.trim()) fields['Rooster'] = rooster.trim()
     if (Number(brown) > 0) fields['Brown Eggs'] = Number(brown)
     if (Number(blue) > 0) fields['Blue/Green Eggs'] = Number(blue)
-    if (Number(white) > 0) fields['White Eggs'] = Number(white)
-    if (Number(tan) > 0) fields['Tan/Pink Eggs'] = Number(tan)
     if (photoUrl) fields['Batch Photo URL'] = photoUrl
 
     const { error } = await createBatch(fields)
@@ -403,16 +399,6 @@ function NewBatchSheet({ onClose, onSaved }) {
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">{'\uD83D\uDFE2'} Blue/Green</label>
                 <input type="number" min={0} value={blue} onChange={e => setBlue(e.target.value)}
-                  className={inp + ' text-center text-lg font-semibold'} placeholder="0" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">{'\u2B1C'} White</label>
-                <input type="number" min={0} value={white} onChange={e => setWhite(e.target.value)}
-                  className={inp + ' text-center text-lg font-semibold'} placeholder="0" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">{'\uD83E\uDE77'} Tan/Pink</label>
-                <input type="number" min={0} value={tan} onChange={e => setTan(e.target.value)}
                   className={inp + ' text-center text-lg font-semibold'} placeholder="0" />
               </div>
             </div>
