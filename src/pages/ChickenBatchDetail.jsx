@@ -85,6 +85,143 @@ function hatchBenchmark(pct) {
   return { color: 'text-red-600', label: 'Problem' }
 }
 
+// ── Log Helpers ───────────────────────────────────────────────────────────────
+
+function parseLog(batch) {
+  try { return JSON.parse(safeStr(batch.fields['Incubation Log'])) || [] } catch { return [] }
+}
+
+function fmtLogDate(isoString) {
+  const d = new Date(isoString)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    + ' · '
+    + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+
+function entrySubtitle(entry) {
+  const parts = []
+  if (entry.temp != null) parts.push(`${entry.temp}°F`)
+  if (entry.humidity != null) parts.push(`${entry.humidity}% RH`)
+  return parts.join('  ·  ')
+}
+
+function logEntryDay(setDateStr, entryTimestamp) {
+  const set = new Date(setDateStr + 'T12:00:00')
+  const entry = new Date(entryTimestamp)
+  return Math.floor((entry - set) / 86400000) + 1
+}
+
+const ENTRY_TYPES = [
+  { id: 'temp', icon: '🌡️', label: 'Temp' },
+  { id: 'humidity', icon: '💧', label: 'Humidity' },
+  { id: 'adjustment', icon: '🔧', label: 'Adjustment' },
+  { id: 'incident', icon: '⚠️', label: 'Incident' },
+  { id: 'observation', icon: '👁️', label: 'Observation' },
+]
+
+function entryIcon(type) {
+  return ENTRY_TYPES.find(t => t.id === type)?.icon || '📋'
+}
+
+function showTemp(type) { return type === 'temp' || type === 'adjustment' }
+function showHumidity(type) { return type === 'humidity' || type === 'adjustment' }
+
+// ── Add Entry Sheet ───────────────────────────────────────────────────────────
+
+function AddEntrySheet({ batchDay, onClose, onSave }) {
+  const [entryType, setEntryType] = useState('temp')
+  const [tempInput, setTempInput] = useState('')
+  const [humidityInput, setHumidityInput] = useState('')
+  const [noteInput, setNoteInput] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if ((entryType === 'incident') && !noteInput.trim()) {
+      return toast.error('Note is required for incidents')
+    }
+    setSaving(true)
+    const newEntry = {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      day: batchDay,
+      type: entryType,
+      temp: showTemp(entryType) && tempInput !== '' ? Number(tempInput) || null : null,
+      humidity: showHumidity(entryType) && humidityInput !== '' ? Number(humidityInput) || null : null,
+      note: noteInput.trim(),
+    }
+    await onSave(newEntry)
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-xl w-full max-w-md shadow-xl max-h-[90vh] flex flex-col"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
+          <h2 className="font-semibold text-gray-900">Add Log Entry</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          {/* Type selector */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-2">Entry Type</label>
+            <div className="flex flex-wrap gap-2">
+              {ENTRY_TYPES.map(t => (
+                <button key={t.id} type="button" onClick={() => setEntryType(t.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                    entryType === t.id
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-amber-300'
+                  }`}>
+                  <span>{t.icon}</span> {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Temp */}
+          {showTemp(entryType) && (
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Temperature (°F)</label>
+              <input type="number" step="0.1" value={tempInput} onChange={e => setTempInput(e.target.value)}
+                className={inp} placeholder="99.5" />
+            </div>
+          )}
+
+          {/* Humidity */}
+          {showHumidity(entryType) && (
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Humidity (% RH)</label>
+              <input type="number" step="1" value={humidityInput} onChange={e => setHumidityInput(e.target.value)}
+                className={inp} placeholder="50" />
+            </div>
+          )}
+
+          {/* Note */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Note {entryType === 'incident' ? '(required)' : '(optional)'}
+            </label>
+            <textarea rows={3} value={noteInput} onChange={e => setNoteInput(e.target.value)}
+              className={inp + ' resize-none'} placeholder="What happened or what you observed..." />
+          </div>
+
+          {/* Day indicator */}
+          <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2">
+            This will be logged as <strong>Day {batchDay}</strong> of your batch.
+          </p>
+
+          <button type="button" onClick={handleSave} disabled={saving}
+            className="w-full bg-amber-500 text-white py-3 rounded-lg font-medium hover:bg-amber-600 disabled:opacity-60 transition-colors">
+            {saving ? 'Saving...' : 'Save Entry'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function parsePhotoUrls(batch) {
   const jsonField = safeStr(batch.fields['Photo URLs'])
   if (jsonField) {
@@ -191,6 +328,13 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState('details') // 'details' | 'log'
+  const [logEntries, setLogEntries] = useState(() => parseLog(batch))
+  const [showAddEntry, setShowAddEntry] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null)
+  const [deletingLogId, setDeletingLogId] = useState(null)
 
   // Inline candle form state (view mode)
   const [inlineCandle, setInlineCandle] = useState(null) // 7 | 14 | null
@@ -379,6 +523,49 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
     }
   }
 
+  // ── Log entry save ──────────────────────────────────────────────────────────
+
+  async function handleAddEntry(newEntry) {
+    const updatedLog = [newEntry, ...logEntries]
+    try {
+      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
+        method: 'PATCH',
+        headers: hdrs(),
+        body: JSON.stringify({ fields: { 'Incubation Log': JSON.stringify(updatedLog) }, typecast: true }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error?.message || `HTTP ${res.status}`)
+      setLogEntries(updatedLog)
+      setShowAddEntry(false)
+      toast.success('Logged ✓')
+      const updatedBatch = { ...batch, fields: { ...batch.fields, 'Incubation Log': JSON.stringify(updatedLog) } }
+      onSaved(updatedBatch)
+    } catch (e) {
+      toast.error('Failed to save: ' + e.message)
+    }
+  }
+
+  async function handleDeleteEntry(entryId) {
+    setDeletingLogId(entryId)
+    const updatedLog = logEntries.filter(e => e.id !== entryId)
+    try {
+      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
+        method: 'PATCH',
+        headers: hdrs(),
+        body: JSON.stringify({ fields: { 'Incubation Log': JSON.stringify(updatedLog) }, typecast: true }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error?.message || `HTTP ${res.status}`)
+      setLogEntries(updatedLog)
+      setDeleteConfirmId(null)
+      const updatedBatch = { ...batch, fields: { ...batch.fields, 'Incubation Log': JSON.stringify(updatedLog) } }
+      onSaved(updatedBatch)
+    } catch (e) {
+      toast.error('Failed to delete: ' + e.message)
+    }
+    setDeletingLogId(null)
+  }
+
   // ── Delete ──────────────────────────────────────────────────────────────────
 
   async function handleDelete() {
@@ -430,12 +617,91 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
         </div>
       </div>
 
+      {/* Tab bar (view mode only) */}
+      {!editing && (
+        <div className="flex border-b border-gray-200 bg-white flex-shrink-0">
+          {['details', 'log'].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-2.5 text-sm font-medium capitalize transition-colors ${
+                activeTab === tab
+                  ? 'border-b-2 border-amber-500 text-amber-700'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}>
+              {tab === 'log' ? `Log${logEntries.length > 0 ? ` (${logEntries.length})` : ''}` : 'Details'}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
 
         {!editing ? (
           /* ══════════ VIEW MODE ══════════ */
-          <div className="max-w-lg mx-auto pb-12">
+          activeTab === 'log' ? (
+
+            /* ─── LOG TAB ─── */
+            <div className="max-w-lg mx-auto px-5 py-4 pb-12">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm font-medium text-gray-700">Incubation Log</p>
+                {canEdit && (
+                  <button onClick={() => setShowAddEntry(true)}
+                    className="flex items-center gap-1.5 text-sm font-medium text-amber-600 hover:text-amber-800">
+                    <Plus size={15} /> Add Entry
+                  </button>
+                )}
+              </div>
+
+              {logEntries.length === 0 ? (
+                <div className="text-center py-16">
+                  <p className="text-3xl mb-3">📋</p>
+                  <p className="text-gray-500 text-sm">No log entries yet.</p>
+                  {canEdit && (
+                    <p className="text-gray-400 text-sm mt-1">Tap + Add Entry to start tracking.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {logEntries.map(entry => {
+                    const subtitle = entrySubtitle(entry)
+                    const isConfirming = deleteConfirmId === entry.id
+                    return (
+                      <div key={entry.id} className="bg-white border border-gray-200 rounded-xl p-3.5 space-y-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium text-gray-800">
+                            {entryIcon(entry.type)} Day {entry.day} · {fmtLogDate(entry.timestamp)}
+                          </p>
+                          {canEdit && !isConfirming && (
+                            <button onClick={() => setDeleteConfirmId(entry.id)}
+                              className="text-gray-300 hover:text-red-400 flex-shrink-0 mt-0.5">
+                              <X size={16} />
+                            </button>
+                          )}
+                        </div>
+                        {subtitle && <p className="text-sm text-gray-600">{subtitle}</p>}
+                        {entry.note && <p className="text-sm text-gray-500">{entry.note}</p>}
+                        {isConfirming && (
+                          <div className="flex items-center gap-2 pt-1 border-t border-gray-100 mt-2">
+                            <p className="text-xs text-gray-500 flex-1">Remove this entry?</p>
+                            <button onClick={() => setDeleteConfirmId(null)}
+                              className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">Cancel</button>
+                            <button onClick={() => handleDeleteEntry(entry.id)} disabled={deletingLogId === entry.id}
+                              className="text-xs text-red-600 hover:text-red-800 font-medium px-2 py-1 disabled:opacity-50">
+                              {deletingLogId === entry.id ? '...' : 'Remove'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+          ) : (
+
+            /* ─── DETAILS TAB ─── */
+            <div className="max-w-lg mx-auto pb-12">
 
             {/* Photos */}
             {viewPhotos.length > 0 ? (
@@ -628,8 +894,42 @@ export default function ChickenBatchDetail({ batch, onClose, onSaved, onDeleted 
                 </div>
               )}
 
+              {/* Recent Log preview */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-gray-400 uppercase tracking-wider">Recent Log</p>
+                  {logEntries.length > 0 && (
+                    <button onClick={() => setActiveTab('log')}
+                      className="text-xs text-amber-600 hover:text-amber-800 font-medium">
+                      View All →
+                    </button>
+                  )}
+                </div>
+                {logEntries.length === 0 ? (
+                  <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3">
+                    💡 Track adjustments and readings in the Log tab.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {logEntries.slice(0, 3).map(entry => {
+                      const subtitle = entrySubtitle(entry)
+                      return (
+                        <div key={entry.id} className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-xs font-medium text-gray-700">
+                            {entryIcon(entry.type)} Day {entry.day} · {fmtLogDate(entry.timestamp)}
+                          </p>
+                          {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+                          {entry.note && <p className="text-xs text-gray-400 mt-0.5 truncate">{entry.note}</p>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
+          ) /* end details tab */
 
         ) : (
 

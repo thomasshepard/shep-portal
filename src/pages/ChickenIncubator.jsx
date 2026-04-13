@@ -260,6 +260,14 @@ function ActiveBatchCard({ batch, onAction, onClick }) {
         <p className="text-xs text-gray-500">
           Set {shortDate(f['Set Date'])} &middot; Expected hatch {shortDate(expectedHatchDate(f['Set Date']))}
         </p>
+        {(() => {
+          try {
+            const log = JSON.parse(safeStr(f['Incubation Log']))
+            return Array.isArray(log) && log.length > 0
+              ? <p className="text-xs text-gray-400">{'\uD83D\uDCCB'} {log.length} log {log.length === 1 ? 'entry' : 'entries'}</p>
+              : null
+          } catch { return null }
+        })()}
         {phase.nextAction && <NextActionCard phase={phase} onAction={onAction} />}
       </div>
     </div>

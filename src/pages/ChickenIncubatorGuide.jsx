@@ -368,7 +368,19 @@ export default function ChickenIncubatorGuide() {
         <h4 className="font-medium text-gray-800 mb-2">Making the most of your batch notes</h4>
         <p className="mb-3">Use the notes field to capture anything unusual — a power outage, a humidity spike, a heat wave, which specific hens the eggs came from. These details are invisible in the numbers but explain everything when you're trying to figure out why one batch did better than another.</p>
 
-        <h4 className="font-medium text-gray-800 mb-2">Sharing access</h4>
+        <h4 className="font-medium text-gray-800 mb-2">Keeping the Incubation Log</h4>
+        <p className="mb-2">The log is your running record of what actually happened during a batch — not just what was supposed to happen. Use it whenever something changes or you take a reading.</p>
+        <p className="text-sm font-medium text-gray-700 mb-1">When to log an entry:</p>
+        <ul className="list-disc list-inside space-y-1 text-sm mb-3">
+          <li>You take a temp or humidity reading and want a record of it</li>
+          <li>You adjust a setting (bumped humidity up, moved incubator away from a vent)</li>
+          <li>Something unexpected happens (power outage, temp spike, lid accidentally opened)</li>
+          <li>You notice something at candling (specific eggs looked questionable)</li>
+          <li>The incubator ran dry and you refilled</li>
+        </ul>
+        <Tip>You don't need to log every day — log when something changes or when you want a record. Over multiple batches, the logs become your diagnostic history. If one batch hatched at 90% and another at 55%, the logs often show exactly why.</Tip>
+
+        <h4 className="font-medium text-gray-800 mt-4 mb-2">Sharing access</h4>
         <p>The tracker is shared with Gabrielle — she can log candle results and hatch outcomes too. Whoever is at the incubator can update it directly.</p>
       </Section>
 
