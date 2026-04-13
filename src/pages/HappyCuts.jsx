@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
+import { notify, getAdminUserIds } from '../lib/notifications'
 import {
   Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
   CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen,
@@ -858,6 +859,19 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
 
       setLocalInvStatus('Paid')
       setShowInvoiceMenu(false)
+
+      // Notify admins of cash payment — fire and forget
+      getAdminUserIds().then(adminIds => {
+        notify({
+          userIds: adminIds,
+          title: `Cash payment received — ${mow.clientName}`,
+          body: `$${mow.amount}`,
+          module: 'happy_cuts',
+          severity: 'info',
+          actionUrl: '/#/happy-cuts',
+          sourceKey: `hc:payment_cash:${mow.id}`,
+        })
+      })
     } catch (err) {
       console.error('[MarkPaid] Error:', err)
       toast.error(`Could not mark as paid: ${err.message}`)

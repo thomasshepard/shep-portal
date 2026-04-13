@@ -28,6 +28,7 @@ import HappyCuts from './pages/HappyCuts'
 import HappyCutsClientDetail from './pages/HappyCutsClientDetail'
 import HappyCutsGuide from './pages/HappyCutsGuide'
 import ChickenIncubatorGuide from './pages/ChickenIncubatorGuide'
+import Notifications from './pages/Notifications'
 
 export default function App() {
   return (
@@ -62,6 +63,7 @@ export default function App() {
             <Route path="happy-cuts" element={<AdminRoute><HappyCuts /></AdminRoute>} />
             <Route path="happy-cuts/client/:id" element={<AdminRoute><HappyCutsClientDetail /></AdminRoute>} />
             <Route path="happy-cuts/guide" element={<AdminRoute><HappyCutsGuide /></AdminRoute>} />
+            <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route
               path="admin"
               element={

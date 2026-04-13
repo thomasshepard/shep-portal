@@ -1,0 +1,17 @@
+name: Daily Notification Check
+
+on:
+  schedule:
+    - cron: '0 12 * * *'   # 7:00 AM CT (UTC-5 standard / UTC-6 daylight)
+  workflow_dispatch:         # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  run-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger check-notifications Edge Function
+        run: |
+          curl -f -X POST \
+            "https://zhboqhhjijktsanxhwjv.supabase.co/functions/v1/check-notifications" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json"

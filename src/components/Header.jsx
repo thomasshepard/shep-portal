@@ -1,5 +1,6 @@
 import { Menu } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import NotificationBell from './NotificationBell'
 
 export default function Header({ onMenuToggle }) {
   const { session, profile } = useAuth()
@@ -17,6 +18,7 @@ export default function Header({ onMenuToggle }) {
       <div className="lg:flex-1" />
 
       <div className="flex items-center gap-3">
+        <NotificationBell />
         <div className="text-right">
           <p className="text-sm font-medium text-gray-800">{profile?.full_name || 'User'}</p>
           <p className="text-xs text-gray-500">{session?.user?.email}</p>

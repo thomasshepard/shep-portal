@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
+import { notify, getUserIdsWithPermission } from '../lib/notifications'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -382,12 +383,26 @@ function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
     })
     if (photoUrl) fields['Batch Photo URL'] = photoUrl
 
-    const { error } = await createBatch(fields)
+    const { data: newBatchData, error } = await createBatch(fields)
     if (error) { toast.error('Failed to create batch: ' + error); setSaving(false); return }
 
     toast.success('Batch added!')
     setSaving(false)
     onSaved()
+
+    // Notify users with chicken access — fire and forget
+    const newRecordId = newBatchData?.id
+    getUserIdsWithPermission('can_view_chickens').then(userIds => {
+      notify({
+        userIds,
+        title: 'New incubator batch started',
+        body: `${total} eggs set on ${setDate}`,
+        module: 'incubator',
+        severity: 'info',
+        actionUrl: '/#/chickens',
+        sourceKey: newRecordId ? `incubator:batch_created:${newRecordId}` : undefined,
+      })
+    })
   }
 
   return (
@@ -515,6 +530,19 @@ function CandleSheet({ batch, candleDay, onClose, onSaved }) {
     toast.success(`Day ${candleDay} candle logged`)
     setSaving(false)
     onSaved()
+
+    // Notify users with chicken access — fire and forget
+    getUserIdsWithPermission('can_view_chickens').then(userIds => {
+      notify({
+        userIds,
+        title: `Day ${candleDay} candling logged`,
+        body: `${devNum} eggs developing`,
+        module: 'incubator',
+        severity: 'info',
+        actionUrl: '/#/chickens',
+        sourceKey: `incubator:candle${candleDay}:${batch.id}`,
+      })
+    })
   }
 
   return (
@@ -640,6 +668,21 @@ function HatchSheet({ batch, onClose, onSaved }) {
     toast.success(status === 'Hatched' ? 'Hatch recorded!' : 'Batch marked as failed')
     setSaving(false)
     onSaved()
+
+    // Notify users with chicken access — fire and forget
+    if (status === 'Hatched') {
+      getUserIdsWithPermission('can_view_chickens').then(userIds => {
+        notify({
+          userIds,
+          title: 'Hatch complete!',
+          body: `${countNum} chick${countNum !== 1 ? 's' : ''} hatched`,
+          module: 'incubator',
+          severity: 'info',
+          actionUrl: '/#/chickens',
+          sourceKey: `incubator:hatched:${batch.id}`,
+        })
+      })
+    }
   }
 
   return (

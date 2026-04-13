@@ -215,3 +215,10 @@ create policy "Admins can delete pages"
 
 -- Add chickens permission (run this if profiles table already existed):
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS can_view_chickens boolean DEFAULT false;
+
+-- ============================================================
+-- notifications table (centralized notification system)
+-- Schema: id, user_id, title, body, module, severity,
+--         action_url, source_key, read, dismissed, expires_at, created_at
+-- See: supabase/migrations/create_notifications_table.sql
+-- ============================================================
