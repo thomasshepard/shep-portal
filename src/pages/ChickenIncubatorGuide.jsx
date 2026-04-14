@@ -136,12 +136,16 @@ export default function ChickenIncubatorGuide() {
         />
         <h4 className="font-medium text-gray-800 mt-4 mb-2">Quick Reference</h4>
         <div className="bg-gray-900 text-amber-400 font-mono rounded-xl p-4 text-xs leading-relaxed space-y-1">
-          <p>DAYS 1-18&nbsp;&nbsp;&nbsp;99-99.5°F &middot; 45-55% RH &middot; Auto-flip ON</p>
-          <p>DAY 7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Candle — remove clears and quitters</p>
-          <p>DAY 14&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Candle — remove late quitters</p>
-          <p>DAY 18&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;LOCKDOWN — flip OFF &middot; humidity → 65-70% &middot; lid CLOSED</p>
-          <p>DAYS 19-21&nbsp;Watch for pip — don't assist for 24 hrs after external pip</p>
-          <p>POST-HATCH&nbsp;Leave in incubator until fluffy &middot; move to 95°F brooder</p>
+          <p>DAYS 1-7&nbsp;&nbsp;&nbsp;&nbsp;100.0-100.5°F &middot; 50-60% RH &middot; Auto-flip ON</p>
+          <p>DAYS 8-14&nbsp;&nbsp;&nbsp;100.0-100.5°F &middot; 45-55% RH &middot; Auto-flip ON</p>
+          <p>DAYS 15-17&nbsp;&nbsp;100.0°F &middot; 45-55% RH &middot; Auto-flip ON</p>
+          <p>DAY 7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Candle — remove clears and quitters</p>
+          <p>DAY 10-11&nbsp;&nbsp;&nbsp;Remove non-developing eggs</p>
+          <p>DAY 17&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Final candle before lockdown</p>
+          <p>DAY 18&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;LOCKDOWN — flip OFF &middot; humidity → 65-75% &middot; lid CLOSED</p>
+          <p>DAYS 18-21&nbsp;&nbsp;99.5-100°F &middot; 65-75% RH &middot; Auto-flip OFF</p>
+          <p>DAYS 19-21&nbsp;&nbsp;Watch for pip — don't assist for 24 hrs after external pip</p>
+          <p>POST-HATCH&nbsp;&nbsp;Leave in incubator until fluffy &middot; move to 95°F brooder</p>
         </div>
       </Section>
 
@@ -151,8 +155,8 @@ export default function ChickenIncubatorGuide() {
           <StepItem num={1} title="Prep the incubator">
             <ul className="list-disc list-inside space-y-1">
               <li>Run the incubator empty for 24 hours before adding eggs</li>
-              <li>Confirm temp holds at 99-99.5°F — verify with a second thermometer if unsure (budget units often read 1-2° off)</li>
-              <li>Confirm humidity holds at 45-55% RH</li>
+              <li>Confirm temp holds at 100.0-100.5°F — verify with a second thermometer if unsure (budget units often read 1-2° off)</li>
+              <li>Confirm humidity holds at 50-60% RH (Days 1-7), then 45-55% RH (Days 8-17)</li>
               <li>Fill the water reservoir before powering on</li>
               <li>Verify the auto-flip is rotating (watch the tray after powering on)</li>
               <li>Place on a stable, level surface away from drafts and direct sunlight</li>
@@ -235,7 +239,7 @@ export default function ChickenIncubatorGuide() {
             <ul className="list-disc list-inside space-y-1">
               <li>Move eggs from turning tray to flat hatch tray (lay on side)</li>
               <li>Turn off auto-flip or remove eggs from turner</li>
-              <li>Bump humidity to <strong>65-70% RH</strong></li>
+              <li>Bump humidity to <strong>65-75% RH</strong></li>
               <li>Fill water reservoir fully</li>
               <li><strong>Do not open the lid again until hatch is complete</strong></li>
             </ul>
@@ -306,7 +310,7 @@ export default function ChickenIncubatorGuide() {
       <Section id="troubleshoot" title="7 · Troubleshooting" toggle={toggle} isOpen={isOpen}>
         <div className="space-y-2 mt-3">
           <TroubleshootCard problem="Low hatch rate overall" cause="Temp too high or too low" fix="Calibrate with a second thermometer" />
-          <TroubleshootCard problem="Chicks die in shell (pipped but can't hatch)" cause="Humidity too low at lockdown" fix="Bump to 65-70% on Day 18" />
+          <TroubleshootCard problem="Chicks die in shell (pipped but can't hatch)" cause="Humidity too low at lockdown" fix="Bump to 65-75% on Day 18" />
           <TroubleshootCard problem="Eggs don't develop at all" cause="Infertile eggs or dead embryo from bad storage" fix="Check rooster coverage; use fresh eggs under 7 days old" />
           <TroubleshootCard problem="Humidity won't hold" cause="Low water level or atomizer issue" fix="Fill reservoir daily; check atomizer is misting" />
           <TroubleshootCard problem="Temp spikes" cause="Draft or direct sunlight" fix="Move incubator away from windows and vents" />
@@ -333,7 +337,7 @@ export default function ChickenIncubatorGuide() {
           </li>
           <li>
             <p className="font-medium">💧 Humidity is harder to nail than temp</p>
-            <p className="text-gray-600 mt-0.5">Most first-time hatchers run too high. Aim for the lower end of 45-55% in incubation. Your Day 14 air cell size is your humidity report card — look it up when candling.</p>
+            <p className="text-gray-600 mt-0.5">Most first-time hatchers run too high. Target 50-60% for Days 1-7, then drop to 45-55% for Days 8-17. Your Day 14 air cell size is your humidity report card — look it up when candling.</p>
           </li>
           <li>
             <p className="font-medium">🔄 Don't open the lid</p>

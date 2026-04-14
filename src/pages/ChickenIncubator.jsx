@@ -74,6 +74,12 @@ function expectedHatchDate(setDate) {
 
 // ── Phase Engine ─────────────────────────────────────────────────────────────
 
+// Candling schedule:
+//   Day 4–5:  Optional early candle (look for veins)
+//   Day 7:    First real candle — remove clears and quitters
+//   Day 10–11: Remove non-developing eggs
+//   Day 17:   Final candle before lockdown
+//   Day 18:   LOCKDOWN — stop turning, bump humidity to 65–75%
 function getBatchPhase(batch) {
   const setDate = new Date(safeStr(batch.fields['Set Date']) + 'T12:00:00')
   const today = new Date()

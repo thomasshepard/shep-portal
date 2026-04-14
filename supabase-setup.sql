@@ -222,3 +222,11 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS can_view_chickens boolean D
 --         action_url, source_key, read, dismissed, expires_at, created_at
 -- See: supabase/migrations/create_notifications_table.sql
 -- ============================================================
+
+-- ============================================================
+-- incubator_logs table (daily readings per incubator batch)
+-- Schema: id, batch_id (Airtable rec ID), log_date, day_number,
+--         temp_f, humidity_pct, eggs_turned, notes, created_by, created_at
+-- UNIQUE constraint on (batch_id, log_date) — one reading per day per batch
+-- See: supabase/migrations/create_incubator_logs_table.sql
+-- ============================================================

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { ChevronLeft, X, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -93,6 +93,13 @@ function hatchBenchmark(pct) {
   if (pct >= 70) return { color: 'text-blue-600', label: 'Good' }
   if (pct >= 50) return { color: 'text-yellow-600', label: 'Investigate' }
   return { color: 'text-red-600', label: 'Problem' }
+}
+
+function getTargetsForDay(day) {
+  if (day <= 7)  return { temp: '100.0–100.5°F', humidity: '50–60%', turn: true }
+  if (day <= 14) return { temp: '100.0–100.5°F', humidity: '45–55%', turn: true }
+  if (day <= 17) return { temp: '100.0°F',        humidity: '45–55%', turn: true }
+  return           { temp: '99.5–100°F',          humidity: '65–75%', turn: false }
 }
 
 // ── Log Helpers ───────────────────────────────────────────────────────────────
@@ -334,7 +341,7 @@ function InlineCandleForm({ total, setDate, candleDay, devVal, setDev, notesVal,
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdded, onClose, onSaved, onDeleted }) {
-  const { isAdmin, permissions } = useAuth()
+  const { isAdmin, permissions, session } = useAuth()
   const canEdit = isAdmin || permissions?.chickens
   const f = batch.fields
 
@@ -375,6 +382,20 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
   const [newRoosterDesc, setNewRoosterDesc] = useState('')
   const [newRoosterNotes, setNewRoosterNotes] = useState('')
 
+  // Readings (daily log via Supabase incubator_logs)
+  const [readings, setReadings] = useState([])
+  const [readingsLoading, setReadingsLoading] = useState(true)
+  const [showAllReadings, setShowAllReadings] = useState(false)
+  const [showReadingForm, setShowReadingForm] = useState(false)
+  const [readingForm, setReadingForm] = useState({
+    log_date: new Date().toISOString().split('T')[0],
+    temp_f: '',
+    humidity_pct: '',
+    eggs_turned: getBatchDay(safeStr(batch.fields['Set Date'])) < 18,
+    notes: '',
+  })
+  const [readingSaving, setReadingSaving] = useState(false)
+
   // Edit form state
   const [editForm, setEditForm] = useState({
     setDate: safeStr(f['Set Date']),
@@ -397,6 +418,50 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
   })
 
   function setEF(key, val) { setEditForm(prev => ({ ...prev, [key]: val })) }
+
+  // ── Readings (Supabase incubator_logs) ──────────────────────────────────────
+
+  async function fetchReadings() {
+    setReadingsLoading(true)
+    const { data } = await supabase
+      .from('incubator_logs')
+      .select('*')
+      .eq('batch_id', batch.id)
+      .order('log_date', { ascending: false })
+      .limit(30)
+    setReadings(data || [])
+    setReadingsLoading(false)
+  }
+
+  useEffect(() => { fetchReadings() }, [batch.id])
+
+  async function saveReading() {
+    setReadingSaving(true)
+    const { error } = await supabase.from('incubator_logs').upsert({
+      batch_id: batch.id,
+      log_date: readingForm.log_date,
+      day_number: readingForm.log_date === new Date().toISOString().split('T')[0]
+        ? day
+        : null,
+      temp_f: readingForm.temp_f !== '' ? Number(readingForm.temp_f) : null,
+      humidity_pct: readingForm.humidity_pct !== '' ? Number(readingForm.humidity_pct) : null,
+      eggs_turned: readingForm.eggs_turned,
+      notes: readingForm.notes.trim() || null,
+      created_by: session?.user?.id ?? null,
+    }, { onConflict: 'batch_id,log_date' })
+    if (error) { toast.error('Save failed: ' + error.message); setReadingSaving(false); return }
+    toast.success('Reading saved ✓')
+    setReadingSaving(false)
+    setShowReadingForm(false)
+    setReadingForm({
+      log_date: new Date().toISOString().split('T')[0],
+      temp_f: '',
+      humidity_pct: '',
+      eggs_turned: day < 18,
+      notes: '',
+    })
+    fetchReadings()
+  }
 
   // View mode computed values
   const setDate = safeStr(f['Set Date'])
@@ -829,24 +894,156 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
               {isActive && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                   <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">MeeF Settings</p>
-                  <div className="space-y-2.5">
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-base leading-none mt-0.5">🌡️</span>
-                      <div>
-                        <p className="text-sm font-medium text-gray-800">Days 1–18</p>
-                        <p className="text-sm text-gray-600">99–99.5°F · 45–55% RH · Flip ON</p>
+                  <div className="space-y-2">
+                    {[
+                      { label: 'Days 1–7',   detail: '100.0–100.5°F · 50–60% RH · Flip ON',  active: day <= 7 },
+                      { label: 'Days 8–14',  detail: '100.0–100.5°F · 45–55% RH · Flip ON',  active: day >= 8 && day <= 14 },
+                      { label: 'Days 15–17', detail: '100.0°F · 45–55% RH · Flip ON',         active: day >= 15 && day <= 17 },
+                      { label: 'Day 18+ (Lockdown)', detail: '99.5–100°F · 65–75% RH · STOP turning', active: day >= 18 },
+                    ].map(({ label, detail, active }) => (
+                      <div key={label} className={`flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors ${active ? 'bg-amber-100/70' : ''}`}>
+                        <span className="text-base leading-none mt-0.5">{label.startsWith('Day 18') ? '🔒' : '🌡️'}</span>
+                        <div>
+                          <p className={`text-sm font-medium ${active ? 'text-amber-900' : 'text-gray-700'}`}>
+                            {label}{active ? ' ← today' : ''}
+                          </p>
+                          <p className={`text-sm ${active ? 'text-amber-800' : 'text-gray-500'}`}>{detail}</p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-base leading-none mt-0.5">🔒</span>
-                      <div>
-                        <p className="text-sm font-medium text-gray-800">Day 18+ (Lockdown)</p>
-                        <p className="text-sm text-gray-600">98.5–99°F · 65–70% RH · Flip OFF</p>
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </div>
               )}
+
+              {/* Readings (daily log) */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-gray-400 uppercase tracking-wider">Readings</p>
+                  {canEdit && !showReadingForm && (
+                    <button
+                      onClick={() => setShowReadingForm(true)}
+                      className="text-xs text-amber-600 hover:text-amber-800 font-medium"
+                    >
+                      + Add Reading
+                    </button>
+                  )}
+                </div>
+
+                {/* Today's targets (passive reference, active batches only) */}
+                {isActive && (
+                  <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-2">
+                    {(() => {
+                      const t = getTargetsForDay(day)
+                      return (
+                        <>
+                          <span className="font-medium text-gray-600">Day {day} targets: </span>
+                          {t.temp} &middot; {t.humidity} &middot; {t.turn ? 'Turn ✓' : 'STOP turning'}
+                        </>
+                      )
+                    })()}
+                  </div>
+                )}
+
+                {/* Inline form */}
+                {showReadingForm && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-3 space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs text-gray-500 mb-1 block">Date</label>
+                        <input
+                          type="date"
+                          value={readingForm.log_date}
+                          onChange={e => setReadingForm(p => ({ ...p, log_date: e.target.value }))}
+                          className={inp}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 mb-1 block">Temp (°F)</label>
+                        <input
+                          type="number" step="0.1"
+                          value={readingForm.temp_f}
+                          onChange={e => setReadingForm(p => ({ ...p, temp_f: e.target.value }))}
+                          className={inp} placeholder="100.4"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs text-gray-500 mb-1 block">Humidity (%)</label>
+                        <input
+                          type="number"
+                          value={readingForm.humidity_pct}
+                          onChange={e => setReadingForm(p => ({ ...p, humidity_pct: e.target.value }))}
+                          className={inp} placeholder="55"
+                        />
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={readingForm.eggs_turned}
+                            onChange={e => setReadingForm(p => ({ ...p, eggs_turned: e.target.checked }))}
+                            className="rounded border-gray-300 text-amber-500 focus:ring-amber-400"
+                          />
+                          Eggs turned
+                        </label>
+                      </div>
+                    </div>
+                    <input
+                      value={readingForm.notes}
+                      onChange={e => setReadingForm(p => ({ ...p, notes: e.target.value }))}
+                      className={inp} placeholder="Notes (optional)"
+                    />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setShowReadingForm(false)}
+                        className="flex-1 border border-gray-200 py-1.5 rounded-lg text-xs text-gray-600 hover:bg-white">
+                        Cancel
+                      </button>
+                      <button type="button" onClick={saveReading} disabled={readingSaving}
+                        className="flex-1 bg-amber-500 text-white py-1.5 rounded-lg text-xs font-medium hover:bg-amber-600 disabled:opacity-60">
+                        {readingSaving ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* History table */}
+                {readingsLoading ? (
+                  <p className="text-xs text-gray-400 py-1">Loading...</p>
+                ) : readings.length > 0 ? (
+                  <div>
+                    <div className="overflow-x-auto rounded-xl border border-gray-100">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50">
+                            {['Date', 'Day', 'Temp', 'Humidity', 'Turned', 'Notes'].map(h => (
+                              <th key={h} className="text-left px-2.5 py-2 text-gray-400 font-medium border-b border-gray-100">{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(showAllReadings ? readings : readings.slice(0, 14)).map((r, i) => (
+                            <tr key={r.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                              <td className="px-2.5 py-1.5 text-gray-600 border-b border-gray-50">{shortDate(r.log_date)}</td>
+                              <td className="px-2.5 py-1.5 text-gray-500 border-b border-gray-50">{r.day_number ?? '—'}</td>
+                              <td className="px-2.5 py-1.5 text-gray-600 border-b border-gray-50">{r.temp_f != null ? `${r.temp_f}°F` : '—'}</td>
+                              <td className="px-2.5 py-1.5 text-gray-600 border-b border-gray-50">{r.humidity_pct != null ? `${r.humidity_pct}%` : '—'}</td>
+                              <td className="px-2.5 py-1.5 text-gray-500 border-b border-gray-50">{r.eggs_turned ? '✓' : '—'}</td>
+                              <td className="px-2.5 py-1.5 text-gray-400 border-b border-gray-50 max-w-[90px] truncate">{r.notes || ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {readings.length > 14 && !showAllReadings && (
+                      <button onClick={() => setShowAllReadings(true)}
+                        className="text-xs text-amber-600 hover:text-amber-800 mt-2 font-medium">
+                        Load more ({readings.length - 14} more)
+                      </button>
+                    )}
+                  </div>
+                ) : null}
+              </div>
 
               {/* Candling — Day 7 */}
               <div>
