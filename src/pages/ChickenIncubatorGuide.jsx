@@ -102,7 +102,7 @@ export default function ChickenIncubatorGuide() {
           <ChevronLeft size={16} /> Back to Chickens
         </button>
         <h1 className="text-2xl font-bold text-gray-900">Incubator Guide</h1>
-        <p className="text-sm text-gray-500 mt-1">MeeF 28-Egg Incubator &middot; Chicken Hatch Cycle</p>
+        <p className="text-sm text-gray-500 mt-1">28-Egg Incubator &middot; Chicken Hatch Cycle</p>
       </div>
 
       {/* Section 1 — Why Use This Tracker (always visible) */}
@@ -123,7 +123,7 @@ export default function ChickenIncubatorGuide() {
 
       {/* Section 2 — Your Incubator at a Glance */}
       <Section id="specs" title="2 · Your Incubator at a Glance" toggle={toggle} isOpen={isOpen}>
-        <h4 className="font-medium text-gray-800 mt-3 mb-2">MeeF 28-Egg Incubator</h4>
+        <h4 className="font-medium text-gray-800 mt-3 mb-2">28-Egg Incubator</h4>
         <GuideTable
           headers={['Feature', 'Detail']}
           rows={[
@@ -382,14 +382,4 @@ export default function ChickenIncubatorGuide() {
           <li>You notice something at candling (specific eggs looked questionable)</li>
           <li>The incubator ran dry and you refilled</li>
         </ul>
-        <Tip>You don't need to log every day — log when something changes or when you want a record. Over multiple batches, the logs become your diagnostic history. If one batch hatched at 90% and another at 55%, the logs often show exactly why.</Tip>
-
-        <h4 className="font-medium text-gray-800 mt-4 mb-2">Sharing access</h4>
-        <p>The tracker is shared with Gabrielle — she can log candle results and hatch outcomes too. Whoever is at the incubator can update it directly.</p>
-      </Section>
-
-      {/* Footer spacer */}
-      <div className="h-8" />
-    </div>
-  )
-}
+        <Tip>You don't need to log every day — log when something changes or when you want a record. Over multiple batches, the logs beco

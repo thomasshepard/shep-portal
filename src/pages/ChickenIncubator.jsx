@@ -494,7 +494,7 @@ function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
               {total} egg{total !== 1 ? 's' : ''}
             </p>
             {total > 28 && (
-              <p className="text-xs text-amber-600 mt-1">Over MeeF capacity (28 max)</p>
+              <p className="text-xs text-amber-600 mt-1">Over capacity (28 max)</p>
             )}
           </div>
 
@@ -857,15 +857,4 @@ export default function ChickenIncubator() {
           onRoosterAdded={handleRoosterAdded}
           onClose={() => setSelectedBatch(null)}
           onSaved={(updated) => {
-            setBatches(prev => prev.map(b => b.id === updated.id ? updated : b))
-            setSelectedBatch(updated)
-          }}
-          onDeleted={() => {
-            setBatches(prev => prev.filter(b => b.id !== selectedBatch.id))
-            setSelectedBatch(null)
-          }}
-        />
-      )}
-    </>
-  )
-}
+            setBatch
