@@ -59,10 +59,13 @@ export default function NotificationBell() {
   function handleBellClick() {
     if (!open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect()
-      setDropdownPos({
-        top: rect.bottom + 8,
-        right: Math.max(8, window.innerWidth - rect.right),
-      })
+      const isMobile = window.innerWidth < 640
+      if (isMobile) {
+        // Full-width panel on mobile, 8px margin each side
+        setDropdownPos({ top: rect.bottom + 8, left: 8, right: 8, fullWidth: true })
+      } else {
+        setDropdownPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right), fullWidth: false })
+      }
     }
     setOpen(prev => !prev)
   }
@@ -116,12 +119,17 @@ export default function NotificationBell() {
       {open && (
         <div
           ref={dropdownRef}
-          style={{
+          style={dropdownPos.fullWidth ? {
+            position: 'fixed',
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            right: dropdownPos.right,
+            zIndex: 9999,
+          } : {
             position: 'fixed',
             top: dropdownPos.top,
             right: dropdownPos.right,
             width: '320px',
-            maxWidth: 'calc(100vw - 16px)',
             zIndex: 9999,
           }}
           className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden"
