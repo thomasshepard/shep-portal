@@ -57,15 +57,19 @@ export default function NotificationBell() {
   }, [open])
 
   function handleBellClick() {
+    // On mobile, go straight to the notifications page — no dropdown
+    if (window.innerWidth < 640) {
+      window.location.hash = '/notifications'
+      return
+    }
+    // Desktop: show dropdown positioned below the bell
     if (!open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect()
-      const isMobile = window.innerWidth < 640
-      if (isMobile) {
-        // Full-width panel on mobile, 8px margin each side
-        setDropdownPos({ top: rect.bottom + 8, left: 8, right: 8, fullWidth: true })
-      } else {
-        setDropdownPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right), fullWidth: false })
-      }
+      setDropdownPos({
+        top: rect.bottom + 8,
+        right: Math.max(8, window.innerWidth - rect.right),
+        fullWidth: false,
+      })
     }
     setOpen(prev => !prev)
   }
@@ -119,13 +123,7 @@ export default function NotificationBell() {
       {open && (
         <div
           ref={dropdownRef}
-          style={dropdownPos.fullWidth ? {
-            position: 'fixed',
-            top: dropdownPos.top,
-            left: dropdownPos.left,
-            right: dropdownPos.right,
-            zIndex: 9999,
-          } : {
+          style={{
             position: 'fixed',
             top: dropdownPos.top,
             right: dropdownPos.right,
