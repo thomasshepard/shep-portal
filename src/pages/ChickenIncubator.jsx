@@ -857,4 +857,11 @@ export default function ChickenIncubator() {
           onRoosterAdded={handleRoosterAdded}
           onClose={() => setSelectedBatch(null)}
           onSaved={(updated) => {
-            setBatch
+            setSelectedBatch(updated)
+            setBatches(prev => prev.map(b => b.id === updated.id ? updated : b))
+          }}
+        />
+      )}
+    </>
+  )
+}

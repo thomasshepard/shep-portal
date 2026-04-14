@@ -1222,4 +1222,177 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
                 className="flex items-center gap-2 text-sm text-amber-600 hover:text-amber-800 border border-dashed border-amber-300 rounded-lg px-3 py-2.5 w-full justify-center">
                 <Plus size={15} /> Add Photos
               </button>
-              <input ref={fileInputRef} type="file" accep
+              <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileChange} />
+            </div>
+
+            {/* Set Date & Status */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">Set Date</label>
+                <input type="date" value={editForm.setDate} onChange={e => setEF('setDate', e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">Status</label>
+                <select value={editForm.status} onChange={e => setEF('status', e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white">
+                  <option value="Active">Active</option>
+                  <option value="Hatched">Hatched</option>
+                  <option value="Failed">Failed</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Rooster */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">Rooster</label>
+              <select value={selectedRoosterId} onChange={e => setSelectedRoosterId(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white">
+                <option value="">— None —</option>
+                {roosters.map(r => (
+                  <option key={r.id} value={r.id}>{safeStr(r.fields['Name'])}</option>
+                ))}
+              </select>
+              <button type="button" onClick={() => setShowAddRooster(v => !v)}
+                className="text-xs text-amber-600 hover:text-amber-800 mt-1.5">
+                + Add new rooster
+              </button>
+              {showAddRooster && (
+                <div className="mt-2 space-y-2 border border-gray-200 rounded-lg p-3">
+                  <input placeholder="Name *" value={newRoosterName} onChange={e => setNewRoosterName(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                  <input placeholder="Breed" value={newRoosterBreed} onChange={e => setNewRoosterBreed(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                  <input placeholder="Color/Description" value={newRoosterDesc} onChange={e => setNewRoosterDesc(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                  <input placeholder="Notes" value={newRoosterNotes} onChange={e => setNewRoosterNotes(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                  <button type="button" onClick={handleSaveNewRooster}
+                    className="text-sm font-medium text-amber-600 hover:text-amber-800">Save Rooster</button>
+                </div>
+              )}
+            </div>
+
+            {/* Egg Counts */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-2">Egg Counts</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { key: 'brown',     label: 'Brown',      emoji: '🟤' },
+                  { key: 'darkBrown', label: 'Dark Brown', emoji: '🟫' },
+                  { key: 'blue',      label: 'Blue',       emoji: '🔵' },
+                  { key: 'green',     label: 'Green',      emoji: '🟢' },
+                  { key: 'white',     label: 'White',      emoji: '⬜' },
+                  { key: 'tan',       label: 'Tan/Pink',   emoji: '🩷' },
+                ].map(({ key, label, emoji }) => (
+                  <div key={key}>
+                    <label className="text-xs text-gray-500 block mb-1">{emoji} {label}</label>
+                    <input type="number" min="0" value={editForm[key] ?? ''} onChange={e => setEF(key, e.target.value)}
+                      className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Day 7 Candle */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-2">Day 7 Candle</label>
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Developing</label>
+                  <input type="number" min="0" value={editForm.d7dev} onChange={e => setEF('d7dev', e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Removed</label>
+                  <input type="number" min="0" value={editForm.d7rem} onChange={e => setEF('d7rem', e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                </div>
+              </div>
+              <input placeholder="Day 7 notes" value={editForm.d7notes} onChange={e => setEF('d7notes', e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            </div>
+
+            {/* Day 14 Candle */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-2">Day 14 Candle</label>
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Developing</label>
+                  <input type="number" min="0" value={editForm.d14dev} onChange={e => setEF('d14dev', e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Removed</label>
+                  <input type="number" min="0" value={editForm.d14rem} onChange={e => setEF('d14rem', e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                </div>
+              </div>
+              <input placeholder="Day 14 notes" value={editForm.d14notes} onChange={e => setEF('d14notes', e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            </div>
+
+            {/* Hatch Results */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-2">Hatch Results</label>
+              <div className="mb-2">
+                <label className="text-xs text-gray-500 block mb-1">Chicks Hatched</label>
+                <input type="number" min="0" value={editForm.chicksHatched} onChange={e => setEF('chicksHatched', e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+              </div>
+              <input placeholder="Hatch notes" value={editForm.hatchNotes} onChange={e => setEF('hatchNotes', e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
+            </div>
+
+            {/* Batch Notes */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">Batch Notes</label>
+              <textarea rows={3} placeholder="Notes about this batch…" value={editForm.batchNotes}
+                onChange={e => setEF('batchNotes', e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none" />
+            </div>
+
+          </div>
+          /* end edit mode */
+
+        )}
+
+      </div>
+      {/* end scrollable body */}
+
+      {/* Delete — view mode only */}
+      {!editing && canEdit && (
+        <div className="flex-shrink-0 px-5 py-3 border-t border-gray-100">
+          {confirmDelete ? (
+            <div className="flex items-center gap-3 justify-center">
+              <p className="text-sm text-gray-600">Delete this batch?</p>
+              <button onClick={() => setConfirmDelete(false)} className="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+              <button onClick={handleDelete} disabled={deleting}
+                className="text-sm font-medium text-red-500 hover:text-red-700 disabled:opacity-50">
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)}
+              className="w-full text-sm text-red-400 hover:text-red-600 py-1">
+              Delete Batch
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* AddEntry sheet */}
+      {showAddEntry && (
+        <AddEntrySheet
+          batchDay={getBatchDay(safeStr(batch.fields['Set Date']))}
+          onClose={() => setShowAddEntry(false)}
+          onSave={(entry) => {
+            setLogEntries(prev => [entry, ...prev])
+            setShowAddEntry(false)
+          }}
+        />
+      )}
+
+    </div>
+  )
+}

@@ -382,4 +382,9 @@ export default function ChickenIncubatorGuide() {
           <li>You notice something at candling (specific eggs looked questionable)</li>
           <li>The incubator ran dry and you refilled</li>
         </ul>
-        <Tip>You don't need to log every day — log when something changes or when you want a record. Over multiple batches, the logs beco
+        <Tip>You don't need to log every day — log when something changes or when you want a record. Over multiple batches, the logs become your most valuable troubleshooting tool.</Tip>
+      </Section>
+
+    </div>
+  )
+}
