@@ -80,6 +80,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 | `/llcs/:id` | LLCDetail | PermRoute(llcs) | LLC detail with compliance log |
 | `/chickens` | Chickens | PermRoute(chickens) | Flock dashboard |
 | `/chickens/:id` | FlockDetail | PermRoute(chickens) | Flock detail with schedule, mortality, expenses |
+| `/chickens/incubator-guide` | ChickenIncubatorGuide | PermRoute(chickens) | Incubator phase targets and candling schedule |
 | `/documents` | Documents | PermRoute(documents) | Scanned document browser with AI summaries |
 | `/deals` | Deals | PermRoute(deals) | FB Marketplace deal listings |
 | `/deals/search-criteria` | DealsSearchCriteria | PermRoute(deals) | Manage search items for FB Marketplace monitor |
@@ -89,6 +90,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 | `/tools` | Tools | ProtectedRoute | Custom HTML tools |
 | `/tools/:slug` | ToolView | ProtectedRoute | Sandboxed iframe tool |
 | `/files` | Files | ProtectedRoute | Supabase Storage file browser |
+| `/notifications` | Notifications | ProtectedRoute | In-app notification inbox |
 | `/admin/*` | AdminUsers/Logs/Content | AdminRoute | User mgmt, access logs, content |
 | `/maintenance-request` | MaintenanceSubmit | **None (public)** | Tenant-facing maintenance request form |
 
@@ -129,15 +131,20 @@ Documents have an additional visibility layer: non-admin users only see docs who
 
 - `src/lib/supabase.js` — Supabase client initialization
 - `src/lib/airtable.js` — Airtable wrapper (fetchAllRecords, createRecord, updateRecord, deleteRecord) + formatters (`fmtCurrency`, `fmtPercent`, `fmtDate`, `fmtField`) + base ID exports (`PM_BASE_ID`, `CHICKENS_BASE_ID`, `DOCS_BASE_ID`, `FBM_BASE_ID`)
+- `src/lib/notifications.js` — `notify()` helper (inserts to Supabase `notifications` table with dedup via `sourceKey`), `getAdminUserIds()`, `getUserIdsWithPermission(flag)`. Call these from feature code to push in-app alerts.
 - `src/hooks/useAuth.jsx` — Auth context: session, profile, role, isAdmin, isVA, permissions
 - `src/hooks/useAccessLog.js` — Audit log hook
 - `src/hooks/useAlerts.js` — Alert system hook (computed from PM base data + Airtable "Alerts" table)
+- `src/hooks/useNotifications.jsx` — Fetches `notifications` table for the current user; subscribes via Supabase Realtime for live inserts; exposes `markRead`, `markAllRead`, `dismiss`, `dismissAll`
 - `src/components/Layout.jsx` — Shell with sidebar + header + route-change logging
 - `src/components/Sidebar.jsx` — Navigation sidebar (permission-gated items)
 - `src/components/DocumentActionCenter.jsx` — AI-classified document action items
 - `src/App.jsx` — Router and all route definitions
 - `supabase-setup.sql` — Full database schema, RLS policies, triggers
+- `supabase/migrations/create_notifications_table.sql` — Run once in Supabase SQL editor to create the `notifications` table (required for the notification bell / `/notifications` page)
 - `.github/workflows/deploy.yml` — GitHub Actions: build + deploy to `gh-pages` branch
+
+> `ChickenIncubator.jsx` is **not a standalone route** — it is rendered as an inline view inside the Chickens page (or similar parent) for egg-batch incubation tracking.
 
 ## Environment Variables
 

@@ -1,0 +1,2 @@
+-- Superseded by 20260414225512_create_notification_email_trigger.sql
+-- This file is intentionally a no-op (supabase_functions schema not available on this project).
