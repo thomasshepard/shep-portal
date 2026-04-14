@@ -37,17 +37,35 @@ export default function NotificationBell() {
   const userId = session?.user?.id
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications(userId)
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 16 })
+  const buttonRef = useRef(null)
+  const dropdownRef = useRef(null)
 
   // Close on outside click
   useEffect(() => {
     if (!open) return
     function onClickOutside(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+      if (
+        buttonRef.current && !buttonRef.current.contains(e.target) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target)
+      ) {
+        setOpen(false)
+      }
     }
     document.addEventListener('mousedown', onClickOutside)
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [open])
+
+  function handleBellClick() {
+    if (!open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPos({
+        top: rect.bottom + 8,
+        right: Math.max(8, window.innerWidth - rect.right),
+      })
+    }
+    setOpen(prev => !prev)
+  }
 
   function handleNotificationClick(n) {
     if (!n.read) markRead(n.id)
@@ -59,25 +77,55 @@ export default function NotificationBell() {
   const badge = MODULE_BADGES
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       {/* Bell button */}
       <button
-        onClick={() => setOpen(prev => !prev)}
+        ref={buttonRef}
+        onClick={handleBellClick}
         className="relative p-2 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
         aria-label="Notifications"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
-          <span className="absolute top-1 right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
+          <span
+            style={{
+              position: 'absolute',
+              top: '2px',
+              right: '2px',
+              minWidth: '18px',
+              height: '18px',
+              background: '#ef4444',
+              color: '#fff',
+              fontSize: '11px',
+              fontWeight: 700,
+              borderRadius: '9999px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 3px',
+              lineHeight: 1,
+              pointerEvents: 'none',
+            }}
+          >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown — rendered fixed so overflow:hidden parents don't clip it */}
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-lg border border-gray-200 z-50 overflow-hidden">
-
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed',
+            top: dropdownPos.top,
+            right: dropdownPos.right,
+            width: '320px',
+            maxWidth: 'calc(100vw - 16px)',
+            zIndex: 9999,
+          }}
+          className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden"
+        >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <p className="text-sm font-semibold text-gray-800">Notifications</p>
@@ -90,7 +138,7 @@ export default function NotificationBell() {
           </div>
 
           {/* List */}
-          <div className="max-h-[360px] overflow-y-auto divide-y divide-gray-50">
+          <div className="overflow-y-auto divide-y divide-gray-50" style={{ maxHeight: '360px' }}>
             {recent.length === 0 ? (
               <p className="text-sm text-gray-400 text-center py-8">No notifications</p>
             ) : (
@@ -101,16 +149,16 @@ export default function NotificationBell() {
                   <button
                     key={n.id}
                     onClick={() => handleNotificationClick(n)}
-                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-start gap-3 ${!n.read ? 'bg-amber-50/40' : ''}`}
+                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-start gap-3 ${!n.read ? 'bg-amber-50' : ''}`}
                   >
                     {/* Severity dot */}
                     <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${mod.cls}`}>
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${mod.cls}`}>
                           {mod.label}
                         </span>
-                        <span className="text-[10px] text-gray-400 ml-auto flex-shrink-0">
+                        <span className="text-xs text-gray-400 ml-auto flex-shrink-0">
                           {relativeTime(n.created_at)}
                         </span>
                       </div>
@@ -139,6 +187,6 @@ export default function NotificationBell() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
