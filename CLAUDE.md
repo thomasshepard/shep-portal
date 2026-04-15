@@ -128,6 +128,25 @@ Documents have an additional visibility layer: non-admin users only see docs who
 - Quarts Per Day = `(oz_per_bird × bird_count) ÷ 12` (dry feed volume, not liquid)
 - Cornish Cross defaults: 8-week growing period, oz/bird/day per week: `[0.66, 0.97, 1.48, 2.07, 2.79, 3.11, 2.73, 2.30]`
 
+### Incubator Phase Targets (MeeF 28-Egg Incubator)
+
+Do NOT revert to the old 99–99.5°F single-range values.
+
+| Phase | Days | Temp (°F) | Humidity | Turning |
+|-------|------|-----------|----------|---------|
+| Early Development | 1–7   | 100.0–100.5°F | 50–60% | ON |
+| Growth Phase      | 8–14  | 100.0–100.5°F | 45–55% | ON |
+| Final Growth      | 15–17 | 100.0°F       | 45–55% | ON |
+| Lockdown & Hatch  | 18–21 | 99.5–100°F    | 65–75% | OFF (stop at Day 18) |
+
+Candling schedule: Day 4–5 (optional), Day 7 (first real — remove clears/quitters), Day 10–11 (remove non-developing), Day 17 (final before lockdown).
+
+### Notifications
+
+`notify()` in `src/lib/notifications.js` inserts to the Supabase `notifications` table and deduplicates via `sourceKey`. Valid `module` values: `'happy_cuts' | 'properties' | 'incubator' | 'chickens' | 'documents' | 'llcs' | 'alerts' | 'system'`. Valid `severity` values: `'critical' | 'action_needed' | 'info'` (default `'info'`).
+
+A `pg_net` trigger fires the `send-notification-email` Supabase edge function on every `notifications` insert. To disable email for a specific notification, there is no flag — the edge function handles filtering.
+
 ## Key Files
 
 - `src/lib/supabase.js` — Supabase client initialization
@@ -143,10 +162,12 @@ Documents have an additional visibility layer: non-admin users only see docs who
 - `src/components/DocumentActionCenter.jsx` — AI-classified document action items
 - `src/App.jsx` — Router and all route definitions
 - `supabase-setup.sql` — Full database schema, RLS policies, triggers
-- `supabase/migrations/create_notifications_table.sql` — Run once in Supabase SQL editor to create the `notifications` table (required for the notification bell / `/notifications` page)
+- `supabase/migrations/create_notifications_table.sql` — Run once in Supabase SQL editor to create the `notifications` table
+- `supabase/migrations/create_incubator_logs_table.sql` — Run once to create the `incubator_logs` table (stores daily temp/humidity readings per batch, one row per date)
+- `supabase/migrations/20260414*.sql` — Four migrations that set up the `send-notification-email` edge function and `pg_net` trigger; run them in order in the Supabase SQL editor. Requires `pg_net` extension enabled in Supabase.
 - `.github/workflows/deploy.yml` — GitHub Actions: build + deploy to `gh-pages` branch
 
-> `ChickenIncubator.jsx` is **not a standalone route** — it is rendered as an inline view inside the Chickens page (or similar parent) for egg-batch incubation tracking.
+> `ChickenIncubator.jsx` is **not a standalone route** — it is a panel rendered inside the Chickens page for managing egg batches. `ChickenBatchDetail.jsx` is a sub-view rendered inside `ChickenIncubator.jsx` for a single batch (candling log, daily readings, hatch results).
 
 ## Environment Variables
 

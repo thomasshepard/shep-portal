@@ -5,6 +5,8 @@ const CHICKENS_BASE = 'apppIiT84EaowkQVR'
 const PM_BASE       = 'appeuX9BHNgVXxdYZ'
 const HC_BASE       = 'appZOi48qf8SzyOml'
 const LLC_BASE      = 'appvX3Tu1OGxOZB8k'
+const TASKS_BASE    = 'appYVLCn1NVLevdry'
+const TASKS_TABLE   = 'tbl3Di18kSLwEj1vN'
 
 // Airtable table names
 const BATCHES_TABLE       = 'tblKomWeHkj9aGFDC'
@@ -50,6 +52,7 @@ async function fetchAirtable(baseId: string, tableIdOrName: string, params: Reco
   return records
 }
 
+/** Dedup by source_key only — skips if ANY record with this key exists (regardless of dismissed). */
 async function insertIfNew(sb: any, record: object): Promise<boolean> {
   const r = record as any
   if (r.source_key) {
@@ -65,10 +68,60 @@ async function insertIfNew(sb: any, record: object): Promise<boolean> {
   return !error
 }
 
+/** Dedup for task reminders — skips only if a non-dismissed record exists for this key + user. */
+async function insertTaskReminderIfNew(sb: any, record: object): Promise<boolean> {
+  const r = record as any
+  if (r.source_key && r.user_id) {
+    const { data: existing } = await sb
+      .from('notifications')
+      .select('id')
+      .eq('source_key', r.source_key)
+      .eq('user_id', r.user_id)
+      .eq('dismissed', false)
+      .limit(1)
+    if (existing && existing.length > 0) return false
+  }
+  const { error } = await sb.from('notifications').insert(record)
+  if (error) console.error('[check-notifications] Insert error:', error, record)
+  return !error
+}
+
+async function airtableCreateTask(fields: Record<string, unknown>, pat: string) {
+  const res = await fetch(
+    `https://api.airtable.com/v0/${TASKS_BASE}/${TASKS_TABLE}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ records: [{ fields }], typecast: true }),
+    }
+  )
+  if (!res.ok) {
+    const err = await res.text()
+    console.error('[check-notifications] Airtable task create failed:', err)
+  }
+}
+
+async function airtableTaskExists(sourceKey: string, pat: string): Promise<boolean> {
+  const formula = encodeURIComponent(`{Source Key}='${sourceKey}'`)
+  const res = await fetch(
+    `https://api.airtable.com/v0/${TASKS_BASE}/${TASKS_TABLE}?filterByFormula=${formula}&maxRecords=1`,
+    { headers: { Authorization: `Bearer ${pat}` } }
+  )
+  const data = await res.json()
+  return (data.records?.length ?? 0) > 0
+}
+
 function addDays(date: Date, n: number): Date {
   const d = new Date(date)
   d.setDate(d.getDate() + n)
   return d
+}
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10)
 }
 
 // ── Main Handler ─────────────────────────────────────────────────────────────
@@ -88,6 +141,7 @@ Deno.serve(async (req) => {
     // Fetch admin user IDs
     const { data: adminProfiles } = await sb.from('profiles').select('id').eq('role', 'admin')
     const adminIds: string[] = (adminProfiles || []).map((r: any) => r.id)
+    const adminIdSet = new Set(adminIds)
 
     // Fetch users with can_view_chickens
     const { data: chickenProfiles } = await sb.from('profiles').select('id').eq('can_view_chickens', true)
@@ -107,7 +161,8 @@ Deno.serve(async (req) => {
     today.setHours(12, 0, 0, 0)
 
     let totalInserted = 0
-    let batchCount = 0, mowCount = 0, leaseCount = 0, llcCount = 0
+    let totalTasksCreated = 0
+    let batchCount = 0, mowCount = 0, leaseCount = 0, llcCount = 0, taskReminderCount = 0
 
     const results = await Promise.allSettled([
 
@@ -196,6 +251,7 @@ Deno.serve(async (req) => {
           const daysAgo = Math.floor((today.getTime() - mowDate.getTime()) / 86400000)
 
           for (const uid of adminIds) {
+            const srcKey = `hc:invoice_overdue:${mow.id}:${uid}`
             const inserted = await insertIfNew(sb, {
               user_id:    uid,
               title:      `Invoice overdue — ${clientName}`,
@@ -203,10 +259,25 @@ Deno.serve(async (req) => {
               module:     'happy_cuts',
               severity:   'action_needed',
               action_url: '/#/happy-cuts',
-              source_key: `hc:invoice_overdue:${mow.id}:${uid}`,
+              source_key: srcKey,
               expires_at: null,
             })
-            if (inserted) totalInserted++
+            if (inserted) {
+              totalInserted++
+              if (!await airtableTaskExists(srcKey, airtablePat)) {
+                await airtableCreateTask({
+                  'Title':      `Follow up on overdue invoice — ${clientName}`,
+                  'Status':     'To Do',
+                  'Module':     'Happy Cuts',
+                  'Body':       `$${amount} sent ${daysAgo} days ago`,
+                  'Source Key': srcKey,
+                  'Action URL': '/#/happy-cuts',
+                  'User ID':    uid,
+                  'Due Date':   isoDate(today),
+                }, airtablePat)
+                totalTasksCreated++
+              }
+            }
           }
         }
       })(),
@@ -234,7 +305,6 @@ Deno.serve(async (req) => {
           const f = lease.fields
           const status = (f['Status'] || '').toLowerCase()
           if (!activeStatuses.some(s => s.toLowerCase() === status) && status !== '') {
-            // Skip obviously inactive leases — but if Status is empty, check dates anyway
             if (status && !['active', 'month-to-month'].includes(status)) continue
           }
 
@@ -260,8 +330,10 @@ Deno.serve(async (req) => {
 
           const severity  = daysLeft <= 7 ? 'critical' : 'action_needed'
           const sourceTag = daysLeft <= 7 ? 'lease_expiring_7' : 'lease_expiring_30'
+          const taskDueDate = sourceTag === 'lease_expiring_7' ? isoDate(today) : isoDate(addDays(today, 7))
 
           for (const uid of propUserIds) {
+            const srcKey = `prop:${sourceTag}:${lease.id}:${uid}`
             const inserted = await insertIfNew(sb, {
               user_id:    uid,
               title:      `Lease expiring in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
@@ -269,10 +341,28 @@ Deno.serve(async (req) => {
               module:     'properties',
               severity,
               action_url: '/#/properties',
-              source_key: `prop:${sourceTag}:${lease.id}:${uid}`,
+              source_key: srcKey,
               expires_at: endDate.toISOString(),
             })
-            if (inserted) totalInserted++
+            if (inserted) {
+              totalInserted++
+              // Only create tasks for admin users
+              if (adminIdSet.has(uid)) {
+                if (!await airtableTaskExists(srcKey, airtablePat)) {
+                  await airtableCreateTask({
+                    'Title':      `Renew lease — ${tenantName} at ${propName}`,
+                    'Status':     'To Do',
+                    'Module':     'Properties',
+                    'Body':       `Lease expires in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+                    'Source Key': srcKey,
+                    'Action URL': '/#/properties',
+                    'User ID':    uid,
+                    'Due Date':   taskDueDate,
+                  }, airtablePat)
+                  totalTasksCreated++
+                }
+              }
+            }
           }
         }
       })(),
@@ -295,6 +385,7 @@ Deno.serve(async (req) => {
           const entityName = f['Name'] || 'LLC'
 
           for (const uid of adminIds) {
+            const srcKey = `llc:compliance_due:${llc.id}:${uid}`
             const inserted = await insertIfNew(sb, {
               user_id:    uid,
               title:      `LLC compliance due — ${entityName}`,
@@ -302,11 +393,92 @@ Deno.serve(async (req) => {
               module:     'llcs',
               severity:   'action_needed',
               action_url: '/#/llcs',
-              source_key: `llc:compliance_due:${llc.id}:${uid}`,
+              source_key: srcKey,
               expires_at: dueDate.toISOString(),
             })
-            if (inserted) totalInserted++
+            if (inserted) {
+              totalInserted++
+              if (!await airtableTaskExists(srcKey, airtablePat)) {
+                await airtableCreateTask({
+                  'Title':      `File annual report — ${entityName}`,
+                  'Status':     'To Do',
+                  'Module':     'LLC',
+                  'Body':       `Due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+                  'Source Key': srcKey,
+                  'Action URL': '/#/llcs',
+                  'User ID':    uid,
+                  'Due Date':   isoDate(addDays(today, 14)),
+                }, airtablePat)
+                totalTasksCreated++
+              }
+            }
           }
+        }
+      })(),
+
+      // ── Task Reminders ────────────────────────────────────────────────────────
+      (async () => {
+        const tasks = await fetchAirtable(
+          TASKS_BASE, TASKS_TABLE,
+          { filterByFormula: "AND(OR({Status}='To Do',{Status}='In Progress'),{Due Date}!='')" },
+          airtablePat
+        )
+        taskReminderCount = tasks.length
+
+        for (const task of tasks) {
+          const f = task.fields
+          const title  = f['Title']  || 'Task'
+          const status = f['Status'] || ''
+          const module = f['Module'] || 'Manual'
+          const userId = f['User ID']
+          const dueDateStr = f['Due Date']
+
+          if (!userId || !dueDateStr) continue
+
+          const dueDate = new Date(dueDateStr + 'T12:00:00')
+          const diff = Math.ceil((dueDate.getTime() - today.getTime()) / 86400000)
+
+          let notif: { key: string; severity: string; title: string } | null = null
+
+          if (diff <= -3) {
+            notif = {
+              key:      `task:overdue_3d:${task.id}`,
+              severity: 'critical',
+              title:    `⚠ Task overdue: ${title}`,
+            }
+          } else if (diff === -2 || diff === -1) {
+            notif = {
+              key:      `task:overdue_1d:${task.id}`,
+              severity: 'action_needed',
+              title:    `Task overdue: ${title}`,
+            }
+          } else if (diff === 0) {
+            notif = {
+              key:      `task:due_today:${task.id}`,
+              severity: 'action_needed',
+              title:    `Due today: ${title}`,
+            }
+          } else if (diff === 1) {
+            notif = {
+              key:      `task:due_tomorrow:${task.id}`,
+              severity: 'action_needed',
+              title:    `Due tomorrow: ${title}`,
+            }
+          }
+
+          if (!notif) continue
+
+          const inserted = await insertTaskReminderIfNew(sb, {
+            user_id:    userId,
+            title:      notif.title,
+            body:       `Module: ${module} · Status: ${status}`,
+            module:     'system',
+            severity:   notif.severity,
+            action_url: '/#/tasks',
+            source_key: notif.key,
+            expires_at: addDays(dueDate, 3).toISOString(),
+          })
+          if (inserted) totalInserted++
         }
       })(),
     ])
@@ -320,8 +492,15 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       ok: true,
-      checked: { incubator: batchCount, happy_cuts: mowCount, properties: leaseCount, llcs: llcCount },
+      checked: {
+        incubator:      batchCount,
+        happy_cuts:     mowCount,
+        properties:     leaseCount,
+        llcs:           llcCount,
+        task_reminders: taskReminderCount,
+      },
       notifications_created: totalInserted,
+      tasks_created:         totalTasksCreated,
       ran_at: new Date().toISOString(),
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
