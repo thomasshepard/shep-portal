@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, Landmark, Wrench, FolderOpen,
-  Users, ScrollText, FileCode, X, LogOut, Egg, FileText, Tag, Leaf,
+  Users, ScrollText, FileCode, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -35,6 +35,7 @@ export default function Sidebar({ open, onClose }) {
 
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/tasks', icon: ListTodo, label: 'Tasks' },
     permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },
     permissions.deals && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
     permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },

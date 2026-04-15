@@ -91,6 +91,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 | `/tools/:slug` | ToolView | ProtectedRoute | Sandboxed iframe tool |
 | `/files` | Files | ProtectedRoute | Supabase Storage file browser |
 | `/notifications` | Notifications | ProtectedRoute | In-app notification inbox |
+| `/tasks` | Tasks | ProtectedRoute | Personal task manager (all authenticated users) |
 | `/admin/*` | AdminUsers/Logs/Content | AdminRoute | User mgmt, access logs, content |
 | `/maintenance-request` | MaintenanceSubmit | **None (public)** | Tenant-facing maintenance request form |
 
@@ -131,6 +132,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 
 - `src/lib/supabase.js` — Supabase client initialization
 - `src/lib/airtable.js` — Airtable wrapper (fetchAllRecords, createRecord, updateRecord, deleteRecord) + formatters (`fmtCurrency`, `fmtPercent`, `fmtDate`, `fmtField`) + base ID exports (`PM_BASE_ID`, `CHICKENS_BASE_ID`, `DOCS_BASE_ID`, `FBM_BASE_ID`)
+- `src/lib/tasks.js` — Tasks CRUD (fetchTasks, createTask, updateTask, deleteTask, taskExistsForSourceKey) + `FIELDS` constants for the Tasks Airtable base (`appYVLCn1NVLevdry`, table `tbl3Di18kSLwEj1vN`)
 - `src/lib/notifications.js` — `notify()` helper (inserts to Supabase `notifications` table with dedup via `sourceKey`), `getAdminUserIds()`, `getUserIdsWithPermission(flag)`. Call these from feature code to push in-app alerts.
 - `src/hooks/useAuth.jsx` — Auth context: session, profile, role, isAdmin, isVA, permissions
 - `src/hooks/useAccessLog.js` — Audit log hook
@@ -162,6 +164,7 @@ VITE_AIRTABLE_HAPPY_CUTS_BASE_ID     # Happy Cuts lawn care
 VITE_N8N_CHICKENS_WEBHOOK_URL        # n8n chicken feeding schedule webhook
 VITE_ANTHROPIC_API_KEY               # Claude API for AI summaries
 VITE_GOOGLE_CLIENT_ID                # Google OAuth (if applicable)
+VITE_TASKS_BASE_ID=appYVLCn1NVLevdry # Shep Portal – Tasks Airtable base
 ```
 
 > Note: `FBM_BASE_ID` (FB Marketplace Monitor) is hardcoded in `src/lib/airtable.js`, not in `.env`.
