@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Bell } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useNotifications } from '../hooks/useNotifications'
+import { usePushSubscription } from '../hooks/usePushSubscription'
 
 const MODULE_BADGES = {
   happy_cuts:  { label: 'Happy Cuts', cls: 'bg-green-100 text-green-700' },
@@ -36,6 +37,7 @@ export default function NotificationBell() {
   const { session } = useAuth()
   const userId = session?.user?.id
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications(userId)
+  const { supported: pushSupported, subscribed, permission, loading: pushLoading, subscribe, unsubscribe } = usePushSubscription()
   const [open, setOpen] = useState(false)
   const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 16 })
   const buttonRef = useRef(null)
@@ -182,14 +184,41 @@ export default function NotificationBell() {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50">
-            <span className="text-xs text-gray-400">{notifications.length} active</span>
-            <button
-              onClick={() => { window.location.hash = '/notifications'; setOpen(false) }}
-              className="text-xs text-amber-600 hover:text-amber-800 font-medium"
-            >
-              View all →
-            </button>
+          <div className="border-t border-gray-100 bg-gray-50">
+            {/* Push toggle */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Bell size={13} className="text-gray-400" />
+                <span className="text-xs text-gray-600 font-medium">Push alerts</span>
+              </div>
+              {!pushSupported ? (
+                <span className="text-[11px] text-gray-400">Not supported</span>
+              ) : permission === 'denied' ? (
+                <span className="text-[11px] text-red-400">Blocked in settings</span>
+              ) : (
+                <button
+                  onClick={() => subscribed ? unsubscribe() : subscribe()}
+                  disabled={pushLoading}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    subscribed ? 'bg-amber-500' : 'bg-gray-200'
+                  } ${pushLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  aria-label="Toggle push notifications"
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    subscribed ? 'translate-x-4' : 'translate-x-0'
+                  }`} />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-xs text-gray-400">{notifications.length} active</span>
+              <button
+                onClick={() => { window.location.hash = '/notifications'; setOpen(false) }}
+                className="text-xs text-amber-600 hover:text-amber-800 font-medium"
+              >
+                View all →
+              </button>
+            </div>
           </div>
         </div>
       )}

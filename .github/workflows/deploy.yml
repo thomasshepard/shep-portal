@@ -45,6 +45,7 @@ jobs:
           VITE_AIRTABLE_HAPPY_CUTS_BASE_ID: ${{ secrets.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID }}
           VITE_ANTHROPIC_API_KEY: ${{ secrets.VITE_ANTHROPIC_API_KEY }}
           VITE_TASKS_BASE_ID: ${{ secrets.VITE_TASKS_BASE_ID }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

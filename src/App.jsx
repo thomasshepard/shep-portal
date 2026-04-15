@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider } from './hooks/useAuth'
+import IOSInstallBanner from './components/IOSInstallBanner'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
 import PermRoute from './components/PermRoute'
@@ -36,6 +37,7 @@ export default function App() {
     <AuthProvider>
       <HashRouter>
         <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+        <IOSInstallBanner />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route

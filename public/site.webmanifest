@@ -1,15 +1,14 @@
 {
   "name": "Shep Portal",
-  "short_name": "Shep Portal",
-  "icons": [
-    {
-      "src": "/shep-portal/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
-  ],
-  "theme_color": "#0f1f3d",
-  "background_color": "#0f1f3d",
+  "short_name": "Shep",
+  "description": "East Meadow Properties & Happy Cuts management portal",
+  "start_url": "/shep-portal/",
   "display": "standalone",
-  "start_url": "/shep-portal/"
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/shep-portal/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/shep-portal/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/shep-portal/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
 }
