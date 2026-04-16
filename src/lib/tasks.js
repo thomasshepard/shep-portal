@@ -21,6 +21,8 @@ const TABLE_ID = 'tbl3Di18kSLwEj1vN'
 const PAT      = import.meta.env.VITE_AIRTABLE_PAT
 
 const BASE_URL = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`
+// Always request fields keyed by field ID so FIELDS constants work as object keys.
+const FIELD_ID_PARAM = 'returnFieldsByFieldId=true'
 
 // Set to true temporarily to fetch all records and filter client-side (useful for diagnosing
 // filterByFormula issues — check browser console for raw response).
@@ -45,8 +47,8 @@ async function apiRequest(method, url, body) {
 export async function fetchTasks(userId) {
   const formula = encodeURIComponent(`{User ID}='${userId}'`)
   const base = DEBUG_FETCH_ALL
-    ? `${BASE_URL}?sort[0][field]=${FIELDS.DUE_DATE}&sort[0][direction]=asc`
-    : `${BASE_URL}?filterByFormula=${formula}&sort[0][field]=${FIELDS.DUE_DATE}&sort[0][direction]=asc`
+    ? `${BASE_URL}?${FIELD_ID_PARAM}&sort[0][field]=${FIELDS.DUE_DATE}&sort[0][direction]=asc`
+    : `${BASE_URL}?${FIELD_ID_PARAM}&filterByFormula=${formula}&sort[0][field]=${FIELDS.DUE_DATE}&sort[0][direction]=asc`
 
   const records = []
   let offset
@@ -100,6 +102,6 @@ export async function deleteTask(recordId) {
 /** Check whether a task with a given sourceKey already exists (for dedup). */
 export async function taskExistsForSourceKey(sourceKey) {
   const formula = encodeURIComponent(`{${FIELDS.SOURCE_KEY}}='${sourceKey}'`)
-  const json = await apiRequest('GET', `${BASE_URL}?filterByFormula=${formula}&maxRecords=1`)
+  const json = await apiRequest('GET', `${BASE_URL}?${FIELD_ID_PARAM}&filterByFormula=${formula}&maxRecords=1`)
   return (json.records || []).length > 0
 }
