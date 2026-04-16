@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, ChevronLeft, Trash2, ExternalLink } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronDown, Trash2, ExternalLink, X } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { fetchTasks, createTask, updateTask, deleteTask, FIELDS } from '../lib/tasks'
 
@@ -16,6 +16,13 @@ const TABS = [
   { key: 'in_progress', label: 'In Progress',  status: 'In Progress' },
   { key: 'done',        label: 'Done',         status: 'Done'        },
 ]
+
+const STATUS_CONFIG = {
+  'To Do':       { pillCls: 'bg-slate-100 text-slate-600',  flashCls: 'bg-slate-500/80',  icon: '↩', label: 'To Do'       },
+  'In Progress': { pillCls: 'bg-blue-100 text-blue-700',    flashCls: 'bg-blue-500/80',   icon: '→', label: 'In Progress' },
+  'Done':        { pillCls: 'bg-green-100 text-green-700',  flashCls: 'bg-green-500/80',  icon: '✓', label: 'Done'        },
+}
+const ALL_STATUSES = ['To Do', 'In Progress', 'Done']
 
 const MODULE_ACCENT = {
   'Happy Cuts': 'bg-emerald-500',
@@ -136,10 +143,64 @@ function AddTaskDialog({ onClose, onAdd }) {
   )
 }
 
+// ── StatusPill ────────────────────────────────────────────────────────────────
+function StatusPill({ status, onSelect }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG['To Do']
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!open) return
+    function handler(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${cfg.pillCls}`}
+      >
+        {cfg.label}
+        <ChevronDown size={10} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-20 bg-white rounded-xl shadow-lg border border-slate-100 py-1 min-w-[120px]">
+          {ALL_STATUSES.map(s => {
+            const c = STATUS_CONFIG[s]
+            const active = s === status
+            return (
+              <button
+                key={s}
+                onClick={e => { e.stopPropagation(); setOpen(false); if (!active) onSelect(s) }}
+                className={`w-full text-left px-3 py-1.5 text-[12px] font-medium flex items-center gap-2 hover:bg-slate-50 ${
+                  active ? 'text-slate-900' : 'text-slate-600'
+                }`}
+              >
+                <span className={`inline-block w-2 h-2 rounded-full ${
+                  s === 'To Do' ? 'bg-slate-400' : s === 'In Progress' ? 'bg-blue-500' : 'bg-green-500'
+                }`} />
+                {c.label}
+                {active && <span className="ml-auto text-slate-400">✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── TaskCard ──────────────────────────────────────────────────────────────────
-function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
-  const [expanded, setExpanded]   = useState(false)
-  const [flashing, setFlashing]   = useState(false)
+function TaskCard({ task, onStatusChange, onDelete, onNotesChange }) {
+  const [expanded, setExpanded]     = useState(false)
+  const [flashStatus, setFlashStatus] = useState(null)   // status string while flashing
   const [localNotes, setLocalNotes] = useState(safeStr(task.fields[FIELDS.NOTES]))
   const [savingNotes, setSavingNotes] = useState(false)
 
@@ -155,10 +216,12 @@ function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
   const pillCls = MODULE_PILL_BG[module] || MODULE_PILL_BG['Manual']
   const isDone  = status === 'Done'
 
-  async function handleDone() {
-    setFlashing(true)
-    setTimeout(() => setFlashing(false), 600)
-    await onDone(task)
+  const flashCfg = flashStatus ? STATUS_CONFIG[flashStatus] : null
+
+  function handleStatusSelect(newStatus) {
+    setFlashStatus(newStatus)
+    setTimeout(() => setFlashStatus(null), 600)
+    onStatusChange(task, newStatus)
   }
 
   async function saveNotes() {
@@ -171,9 +234,11 @@ function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
   return (
     <div className="relative bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-2">
       {/* Flash overlay */}
-      {flashing && (
-        <div className="absolute inset-0 z-10 bg-green-500/80 flex items-center justify-center rounded-xl">
-          <span className="text-white text-2xl font-bold">✓</span>
+      {flashCfg && (
+        <div
+          className={`absolute inset-0 z-10 ${flashCfg.flashCls} flex items-center justify-center rounded-xl transition-opacity duration-300`}
+        >
+          <span className="text-white text-2xl font-bold">{flashCfg.icon}</span>
         </div>
       )}
 
@@ -209,24 +274,9 @@ function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
           )}
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-2 mt-2">
-          {status === 'To Do' && (
-            <button
-              onClick={() => onStart(task)}
-              className="text-[12px] font-medium bg-slate-800 text-white px-3 py-1 rounded-lg"
-            >
-              Start
-            </button>
-          )}
-          {status === 'In Progress' && (
-            <button
-              onClick={handleDone}
-              className="text-[12px] font-medium bg-green-600 text-white px-3 py-1 rounded-lg"
-            >
-              Done ✓
-            </button>
-          )}
+        {/* Status pill */}
+        <div className="mt-2">
+          <StatusPill status={status} onSelect={handleStatusSelect} />
         </div>
       </div>
 
@@ -343,25 +393,20 @@ export default function Tasks() {
 
   function showToast(msg) { setToast(msg) }
 
-  async function handleStart(task) {
-    const updated = { ...task, fields: { ...task.fields, [FIELDS.STATUS]: 'In Progress' } }
-    setAllTasks(prev => prev.map(t => t.id === task.id ? updated : t))
-    try {
-      await updateTask(task.id, { [FIELDS.STATUS]: 'In Progress' })
-    } catch {
-      setAllTasks(prev => prev.map(t => t.id === task.id ? task : t))
-      showToast('Failed to update task')
-    }
-  }
-
-  async function handleDone(task) {
+  async function handleStatusChange(task, newStatus) {
     const today   = new Date().toISOString().slice(0, 10)
-    const updated = { ...task, fields: { ...task.fields, [FIELDS.STATUS]: 'Done', [FIELDS.COMPLETED_AT]: today } }
+    const fields  = { [FIELDS.STATUS]: newStatus }
+    if (newStatus === 'Done')      fields[FIELDS.COMPLETED_AT] = today
+    if (newStatus !== 'Done')      fields[FIELDS.COMPLETED_AT] = null
+
+    const updated = { ...task, fields: { ...task.fields, ...fields } }
     setAllTasks(prev => prev.map(t => t.id === task.id ? updated : t))
-    setActiveCol('done')
-    showToast('✓ Marked complete')
+
+    const STATUS_TOASTS = { 'Done': '✓ Marked complete', 'In Progress': '→ In progress', 'To Do': '↩ Moved back to To Do' }
+    showToast(STATUS_TOASTS[newStatus] || 'Status updated')
+
     try {
-      await updateTask(task.id, { [FIELDS.STATUS]: 'Done', [FIELDS.COMPLETED_AT]: today })
+      await updateTask(task.id, fields)
     } catch {
       setAllTasks(prev => prev.map(t => t.id === task.id ? task : t))
       showToast('Failed to update task')
@@ -393,7 +438,7 @@ export default function Tasks() {
     showToast('Task added')
   }
 
-  const cardProps = { onStart: handleStart, onDone: handleDone, onDelete: handleDelete, onNotesChange: handleNotesChange }
+  const cardProps = { onStatusChange: handleStatusChange, onDelete: handleDelete, onNotesChange: handleNotesChange }
 
   // Desktop kanban column definitions
   const COLS_DATA = [
