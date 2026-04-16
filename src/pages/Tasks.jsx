@@ -9,30 +9,31 @@ const safeNum = (v) => (isNaN(Number(v)) ? 0 : Number(v))
 const arr     = (v) => (Array.isArray(v) ? v : [])
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const MODULES   = ['All', 'Happy Cuts', 'Properties', 'LLC', 'Manual']
-const TABS      = [
-  { key: 'todo',        label: 'To Do',       status: 'To Do' },
+const MODULES = ['All', 'Happy Cuts', 'Properties', 'LLC', 'Manual']
+
+const TABS = [
+  { key: 'todo',        label: 'To Do',       status: 'To Do'       },
   { key: 'in_progress', label: 'In Progress',  status: 'In Progress' },
-  { key: 'done',        label: 'Done',         status: 'Done' },
+  { key: 'done',        label: 'Done',         status: 'Done'        },
 ]
 
 const MODULE_ACCENT = {
-  'Happy Cuts':  'bg-emerald-500',
-  'Properties':  'bg-blue-500',
-  'LLC':         'bg-violet-500',
-  'Manual':      'bg-slate-400',
+  'Happy Cuts': 'bg-emerald-500',
+  'Properties': 'bg-blue-500',
+  'LLC':        'bg-violet-500',
+  'Manual':     'bg-slate-400',
 }
 const MODULE_TEXT = {
-  'Happy Cuts':  'text-emerald-600',
-  'Properties':  'text-blue-600',
-  'LLC':         'text-violet-600',
-  'Manual':      'text-slate-500',
+  'Happy Cuts': 'text-emerald-600',
+  'Properties': 'text-blue-600',
+  'LLC':        'text-violet-600',
+  'Manual':     'text-slate-500',
 }
 const MODULE_PILL_BG = {
-  'Happy Cuts':  'bg-emerald-100 text-emerald-700',
-  'Properties':  'bg-blue-100 text-blue-700',
-  'LLC':         'bg-violet-100 text-violet-700',
-  'Manual':      'bg-slate-100 text-slate-600',
+  'Happy Cuts': 'bg-emerald-100 text-emerald-700',
+  'Properties': 'bg-blue-100 text-blue-700',
+  'LLC':        'bg-violet-100 text-violet-700',
+  'Manual':     'bg-slate-100 text-slate-600',
 }
 
 // ── Due date chip ─────────────────────────────────────────────────────────────
@@ -42,9 +43,9 @@ function dueDateChip(dateStr) {
   const due   = new Date(dateStr + 'T00:00:00')
   const diff  = Math.round((due - today) / 86400000)
 
-  if (diff < 0) return { label: `Overdue ${Math.abs(diff)}d`, cls: 'text-red-600 bg-red-50' }
-  if (diff === 0) return { label: 'Due today', cls: 'text-amber-600 bg-amber-50' }
-  if (diff === 1) return { label: 'Tomorrow',  cls: 'text-amber-600 bg-amber-50' }
+  if (diff < 0)  return { label: `Overdue ${Math.abs(diff)}d`, cls: 'text-red-600 bg-red-50' }
+  if (diff === 0) return { label: 'Due today',  cls: 'text-amber-600 bg-amber-50' }
+  if (diff === 1) return { label: 'Tomorrow',   cls: 'text-amber-600 bg-amber-50' }
   if (diff <= 7)  return { label: `${diff}d left`, cls: 'text-amber-600 bg-amber-50' }
   const d = due.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
   return { label: d, cls: 'text-slate-500 bg-slate-100' }
@@ -69,8 +70,8 @@ function Toast({ message, onDone }) {
   )
 }
 
-// ── AddTaskSheet ──────────────────────────────────────────────────────────────
-function AddTaskSheet({ onClose, onAdd }) {
+// ── AddTaskDialog — bottom sheet on mobile, centered modal on desktop ──────────
+function AddTaskDialog({ onClose, onAdd }) {
   const [title, setTitle]     = useState('')
   const [dueDate, setDueDate] = useState('')
   const [saving, setSaving]   = useState(false)
@@ -88,11 +89,22 @@ function AddTaskSheet({ onClose, onAdd }) {
   }
 
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl shadow-2xl p-5 max-w-sm mx-auto">
-        <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-4" />
-        <h2 className="text-base font-semibold text-slate-800 mb-4">New Task</h2>
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center md:p-4"
+      onClick={onClose}
+    >
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+
+      {/* Sheet on mobile, modal on desktop */}
+      <div
+        className="relative bg-white w-full rounded-t-3xl px-5 pt-4 pb-10 md:rounded-2xl md:max-w-md md:pb-6 md:shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Drag handle — mobile only */}
+        <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-5 md:hidden" />
+
+        <h2 className="text-base font-bold text-slate-900 mb-4">New Task</h2>
         <form onSubmit={handleSubmit} className="space-y-3">
           <input
             ref={titleRef}
@@ -120,14 +132,14 @@ function AddTaskSheet({ onClose, onAdd }) {
           </button>
         </form>
       </div>
-    </>
+    </div>
   )
 }
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
 function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
-  const [expanded, setExpanded] = useState(false)
-  const [flashing, setFlashing] = useState(false)
+  const [expanded, setExpanded]   = useState(false)
+  const [flashing, setFlashing]   = useState(false)
   const [localNotes, setLocalNotes] = useState(safeStr(task.fields[FIELDS.NOTES]))
   const [savingNotes, setSavingNotes] = useState(false)
 
@@ -160,7 +172,7 @@ function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
     <div className="relative bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-2">
       {/* Flash overlay */}
       {flashing && (
-        <div className="absolute inset-0 z-10 bg-green-500/80 flex items-center justify-center rounded-xl transition-opacity">
+        <div className="absolute inset-0 z-10 bg-green-500/80 flex items-center justify-center rounded-xl">
           <span className="text-white text-2xl font-bold">✓</span>
         </div>
       )}
@@ -170,10 +182,7 @@ function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
 
       <div className="pl-3 pr-3 pt-3 pb-2">
         {/* Title row */}
-        <button
-          className="w-full text-left"
-          onClick={() => setExpanded(e => !e)}
-        >
+        <button className="w-full text-left" onClick={() => setExpanded(e => !e)}>
           <p className={`text-sm font-medium leading-snug ${isDone ? 'line-through text-slate-400' : 'text-slate-800'}`}>
             {title}
           </p>
@@ -259,35 +268,64 @@ function TaskCard({ task, onStart, onDone, onDelete, onNotesChange }) {
   )
 }
 
+// ── Empty state for kanban columns ────────────────────────────────────────────
+function ColEmpty({ colKey, onAdd }) {
+  if (colKey === 'todo') return (
+    <div className="text-center py-10 text-slate-400">
+      <p className="text-2xl mb-2">✨</p>
+      <p className="text-sm font-medium text-slate-500">You're all caught up</p>
+      <button
+        onClick={onAdd}
+        className="mt-3 text-xs text-slate-500 border border-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-100"
+      >
+        + Add a task
+      </button>
+    </div>
+  )
+  if (colKey === 'in_progress') return (
+    <div className="text-center py-10">
+      <p className="text-2xl mb-2">🚀</p>
+      <p className="text-sm font-medium text-slate-500">Nothing in flight</p>
+    </div>
+  )
+  return (
+    <div className="text-center py-10">
+      <p className="text-2xl mb-2">🎯</p>
+      <p className="text-sm font-medium text-slate-500">Nothing completed yet</p>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Tasks() {
   const { session } = useAuth()
 
-  const [allTasks, setAllTasks] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState(null)
+  const [allTasks, setAllTasks]   = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState(null)
   const [activeCol, setActiveCol] = useState('todo')
-  const [filter, setFilter]     = useState('All')
-  const [showAdd, setShowAdd]   = useState(false)
-  const [toast, setToast]       = useState(null)
+  const [filter, setFilter]       = useState('All')
+  const [showAdd, setShowAdd]     = useState(false)
+  const [toast, setToast]         = useState(null)
 
   const userId = session?.user?.id
 
-  async function load() {
+  async function loadTasks() {
     if (!userId) return
     setLoading(true)
     setError(null)
     try {
       const records = await fetchTasks(userId)
       setAllTasks(records)
-    } catch (e) {
-      setError(e.message)
+    } catch (err) {
+      console.error('[Tasks] loadTasks failed:', err)
+      setError(err.message || 'Failed to load tasks')
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadTasks() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function byStatus(status) {
     return allTasks
@@ -298,17 +336,13 @@ export default function Tasks() {
   const todoCnt       = byStatus('To Do').length
   const inProgressCnt = byStatus('In Progress').length
   const doneCnt       = byStatus('Done').length
-
-  const openCount  = todoCnt + inProgressCnt
-  const overdueCount = allTasks.filter(t =>
+  const openCount     = todoCnt + inProgressCnt
+  const overdueCount  = allTasks.filter(t =>
     safeStr(t.fields[FIELDS.STATUS]) !== 'Done' && isOverdue(safeStr(t.fields[FIELDS.DUE_DATE]))
   ).length
 
-  function showToast(msg) {
-    setToast(msg)
-  }
+  function showToast(msg) { setToast(msg) }
 
-  // Optimistic: update local state first, then call API
   async function handleStart(task) {
     const updated = { ...task, fields: { ...task.fields, [FIELDS.STATUS]: 'In Progress' } }
     setAllTasks(prev => prev.map(t => t.id === task.id ? updated : t))
@@ -353,19 +387,20 @@ export default function Tasks() {
   }
 
   async function handleAdd({ title, dueDate }) {
-    const record = await createTask({
-      title,
-      dueDate,
-      module: 'Manual',
-      userId,
-    })
+    const record = await createTask({ title, dueDate, module: 'Manual', userId })
     setAllTasks(prev => [...prev, record])
     setActiveCol('todo')
     showToast('Task added')
   }
 
-  const tabMap = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' }
-  const visibleTasks = byStatus(tabMap[activeCol])
+  const cardProps = { onStart: handleStart, onDone: handleDone, onDelete: handleDelete, onNotesChange: handleNotesChange }
+
+  // Desktop kanban column definitions
+  const COLS_DATA = [
+    { key: 'todo',        label: 'To Do',       status: 'To Do',       count: todoCnt,       headerCls: 'text-slate-700' },
+    { key: 'in_progress', label: 'In Progress',  status: 'In Progress', count: inProgressCnt, headerCls: 'text-blue-700'  },
+    { key: 'done',        label: 'Done',         status: 'Done',        count: doneCnt,       headerCls: 'text-green-700' },
+  ]
 
   if (loading) {
     return (
@@ -375,131 +410,131 @@ export default function Tasks() {
     )
   }
 
-  if (error) {
-    return (
-      <div className="max-w-sm mx-auto px-4 py-8 text-center">
-        <p className="text-red-500 text-sm mb-4">Failed to load tasks: {error}</p>
-        <button onClick={load} className="bg-slate-800 text-white text-sm px-4 py-2 rounded-lg">
-          Retry
-        </button>
-      </div>
-    )
-  }
-
   return (
-    <div className="max-w-sm mx-auto px-3 pb-24">
-      {/* Header */}
-      <div className="sticky top-0 bg-slate-50 z-10 pt-4 pb-2">
-        <div className="flex items-center justify-between mb-0.5">
-          <h1 className="text-xl font-bold text-slate-900">Tasks</h1>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="w-8 h-8 bg-slate-900 text-white rounded-full flex items-center justify-center shadow"
-          >
-            <Plus size={18} />
-          </button>
-        </div>
-        <p className="text-sm text-slate-500 mb-3">
-          {openCount} open
-          {overdueCount > 0 && (
-            <span className="text-red-500"> · {overdueCount} overdue</span>
-          )}
-        </p>
-
-        {/* Module filter chips */}
-        <div className="flex gap-1.5 overflow-x-auto pb-1 mb-3 scrollbar-hide">
-          {MODULES.map(m => (
+    <div>
+      {/* ── Sticky header ─────────────────────────────────────────────────── */}
+      <div className="sticky top-0 bg-slate-50 z-10">
+        <div className="px-4 sm:px-6 pt-4 pb-2">
+          {/* Title row */}
+          <div className="flex items-center justify-between mb-0.5">
+            <h1 className="text-xl font-bold text-slate-900">Tasks</h1>
             <button
-              key={m}
-              onClick={() => setFilter(m)}
-              className={`flex-none text-xs font-medium px-3 py-1 rounded-full border transition-colors ${
-                filter === m
-                  ? 'bg-slate-800 text-white border-slate-800'
-                  : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
-              }`}
+              onClick={() => setShowAdd(true)}
+              className="w-8 h-8 bg-slate-900 text-white rounded-full flex items-center justify-center shadow"
             >
-              {m}
+              <Plus size={18} />
             </button>
-          ))}
-        </div>
+          </div>
 
-        {/* Column tabs */}
-        <div className="flex border-b border-slate-200">
-          {TABS.map(tab => {
-            const cnt = tab.key === 'todo' ? todoCnt : tab.key === 'in_progress' ? inProgressCnt : doneCnt
-            return (
+          {/* Subtitle */}
+          <p className="text-sm text-slate-500 mb-3">
+            {openCount} open
+            {overdueCount > 0 && <span className="text-red-500"> · {overdueCount} overdue</span>}
+          </p>
+
+          {/* Module filter chips */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 mb-3 scrollbar-hide">
+            {MODULES.map(m => (
               <button
-                key={tab.key}
-                onClick={() => setActiveCol(tab.key)}
-                className={`flex-1 text-xs font-medium pb-2 text-center transition-colors flex items-center justify-center gap-1 ${
-                  activeCol === tab.key
-                    ? 'text-slate-900 border-b-2 border-slate-900 -mb-px'
-                    : 'text-slate-500 hover:text-slate-700'
+                key={m}
+                onClick={() => setFilter(m)}
+                className={`flex-none text-xs font-medium px-3 py-1 rounded-full border transition-colors ${
+                  filter === m
+                    ? 'bg-slate-800 text-white border-slate-800'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
                 }`}
               >
-                {tab.label}
-                {cnt > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
-                    activeCol === tab.key ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-600'
-                  }`}>
-                    {cnt}
-                  </span>
-                )}
+                {m}
               </button>
-            )
-          })}
+            ))}
+          </div>
+
+          {/* Mobile-only tab bar */}
+          <div className="flex border-b border-slate-200 md:hidden">
+            {TABS.map(tab => {
+              const cnt = tab.key === 'todo' ? todoCnt : tab.key === 'in_progress' ? inProgressCnt : doneCnt
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveCol(tab.key)}
+                  className={`flex-1 text-xs font-medium pb-2 text-center transition-colors flex items-center justify-center gap-1 ${
+                    activeCol === tab.key
+                      ? 'text-slate-900 border-b-2 border-slate-900 -mb-px'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  {tab.label}
+                  {cnt > 0 && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                      activeCol === tab.key ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-600'
+                    }`}>
+                      {cnt}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Task list */}
-      <div className="pt-3">
-        {visibleTasks.length === 0 ? (
-          <div className="text-center py-12 text-slate-400">
-            {activeCol === 'todo' && (
-              <>
-                <p className="text-2xl mb-2">✨</p>
-                <p className="text-sm font-medium text-slate-500">You're all caught up</p>
-                <button
-                  onClick={() => setShowAdd(true)}
-                  className="mt-3 text-xs text-slate-500 border border-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-100"
-                >
-                  + Add a task
-                </button>
-              </>
-            )}
-            {activeCol === 'in_progress' && (
-              <>
-                <p className="text-2xl mb-2">🚀</p>
-                <p className="text-sm font-medium text-slate-500">Nothing in flight</p>
-              </>
-            )}
-            {activeCol === 'done' && (
-              <>
-                <p className="text-2xl mb-2">🎯</p>
-                <p className="text-sm font-medium text-slate-500">Nothing completed yet</p>
-              </>
-            )}
-          </div>
-        ) : (
-          visibleTasks.map(task => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              onStart={handleStart}
-              onDone={handleDone}
-              onDelete={handleDelete}
-              onNotesChange={handleNotesChange}
-            />
-          ))
-        )}
-      </div>
-
-      {/* Add sheet */}
-      {showAdd && (
-        <AddTaskSheet onClose={() => setShowAdd(false)} onAdd={handleAdd} />
+      {/* ── Error state ───────────────────────────────────────────────────── */}
+      {error && (
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-center px-4">
+          <span className="text-3xl">⚠️</span>
+          <p className="text-sm font-semibold text-red-500">Could not load tasks</p>
+          <p className="text-xs text-slate-400 max-w-xs">{error}</p>
+          <button
+            onClick={loadTasks}
+            className="mt-2 text-xs font-bold px-4 py-2 rounded-full bg-slate-900 text-white"
+          >
+            Retry
+          </button>
+        </div>
       )}
 
-      {/* Toast */}
+      {/* ── Mobile: single-column tabbed view ─────────────────────────────── */}
+      {!error && (
+        <>
+          <div className="md:hidden px-3 pt-3 pb-24">
+            {(() => {
+              const tabMap  = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' }
+              const colKey  = activeCol
+              const tasks   = byStatus(tabMap[colKey])
+              return tasks.length === 0
+                ? <ColEmpty colKey={colKey} onAdd={() => setShowAdd(true)} />
+                : tasks.map(task => <TaskCard key={task.id} task={task} {...cardProps} />)
+            })()}
+          </div>
+
+          {/* ── Desktop: three-column kanban ─────────────────────────────── */}
+          <div className="hidden md:grid md:grid-cols-3 md:gap-5 px-6 py-5 max-w-6xl mx-auto">
+            {COLS_DATA.map(col => (
+              <div key={col.key} className="flex flex-col min-w-0">
+                {/* Column header */}
+                <div className="flex items-center gap-2 mb-3">
+                  <h2 className={`text-sm font-bold ${col.headerCls}`}>{col.label}</h2>
+                  {col.count > 0 && (
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                      {col.count}
+                    </span>
+                  )}
+                </div>
+                {/* Column tasks */}
+                {byStatus(col.status).length === 0
+                  ? <ColEmpty colKey={col.key} onAdd={() => setShowAdd(true)} />
+                  : byStatus(col.status).map(task => <TaskCard key={task.id} task={task} {...cardProps} />)
+                }
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── Add dialog ────────────────────────────────────────────────────── */}
+      {showAdd && <AddTaskDialog onClose={() => setShowAdd(false)} onAdd={handleAdd} />}
+
+      {/* ── Toast ─────────────────────────────────────────────────────────── */}
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   )

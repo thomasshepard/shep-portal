@@ -22,6 +22,10 @@ const PAT      = import.meta.env.VITE_AIRTABLE_PAT
 
 const BASE_URL = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`
 
+// Set to true temporarily to fetch all records and filter client-side (useful for diagnosing
+// filterByFormula issues — check browser console for raw response).
+const DEBUG_FETCH_ALL = false
+
 function headers() {
   return { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' }
 }
@@ -37,21 +41,32 @@ async function apiRequest(method, url, body) {
   return json
 }
 
-/** Fetch all tasks for a user, sorted by creation time (newest last). */
+/** Fetch all tasks for a user, sorted by due date asc. */
 export async function fetchTasks(userId) {
-  const formula = encodeURIComponent(`{${FIELDS.USER_ID}}='${userId}'`)
-  const url = `${BASE_URL}?filterByFormula=${formula}&sort[0][field]=${FIELDS.DUE_DATE}&sort[0][direction]=asc`
+  const formula = encodeURIComponent(`{User ID}='${userId}'`)
+  const base = DEBUG_FETCH_ALL
+    ? `${BASE_URL}?sort[0][field]=${FIELDS.DUE_DATE}&sort[0][direction]=asc`
+    : `${BASE_URL}?filterByFormula=${formula}&sort[0][field]=${FIELDS.DUE_DATE}&sort[0][direction]=asc`
+
   const records = []
   let offset
 
   do {
-    const pageUrl = offset ? `${url}&offset=${offset}` : url
-    const json = await apiRequest('GET', pageUrl)
+    const url = offset ? `${base}&offset=${offset}` : base
+    const res = await fetch(url, { headers: headers() })
+    if (!res.ok) {
+      const err = await res.text()
+      console.error('[fetchTasks] error:', res.status, err)
+      throw new Error(`Airtable fetch failed: ${res.status}`)
+    }
+    const json = await res.json()
     records.push(...(json.records || []))
     offset = json.offset
   } while (offset)
 
-  return records
+  // Always filter client-side as a safety net (handles encoding edge cases)
+  const safeStr = v => (v == null ? '' : String(v))
+  return records.filter(r => safeStr(r.fields[FIELDS.USER_ID]).trim() === userId.trim())
 }
 
 /** Create a new task record. */
