@@ -179,8 +179,16 @@ function TaskCard({ task, flashStatus, onStatusChange, onStarToggle, onDelete, o
     <div className="relative bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-2">
       {/* Flash overlay */}
       {flashCfg && (
-        <div className={`absolute inset-0 z-10 ${flashCfg.flashCls} flex items-center justify-center rounded-xl`}>
-          <span className="text-white text-2xl font-bold">{flashCfg.icon}</span>
+        <div
+          className={`absolute inset-0 z-10 ${flashCfg.flashCls} flex items-center justify-center rounded-xl`}
+          style={{ animation: 'taskFlash 0.68s ease-out forwards' }}
+        >
+          <span
+            className="text-white font-bold"
+            style={{ fontSize: '2rem', animation: 'taskFlashIcon 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards' }}
+          >
+            {flashCfg.icon}
+          </span>
         </div>
       )}
 
@@ -374,22 +382,23 @@ export default function Tasks() {
     if (newStatus === 'Done') fields[FIELDS.COMPLETED_AT] = today
     else                      fields[FIELDS.COMPLETED_AT] = null
 
-    // Flash overlay lives in parent so it survives the card moving columns
-    setFlashMap(prev => ({ ...prev, [task.id]: newStatus }))
-    setTimeout(() => setFlashMap(prev => { const n = { ...prev }; delete n[task.id]; return n }), 650)
-
     const updated = { ...task, fields: { ...task.fields, ...fields } }
-    setAllTasks(prev => prev.map(t => t.id === task.id ? updated : t))
 
+    // Show flash first, then move the card after the animation finishes
+    setFlashMap(prev => ({ ...prev, [task.id]: newStatus }))
     const STATUS_TOASTS = { 'Done': '✓ Marked complete', 'In Progress': '→ In progress', 'To Do': '↩ Moved back to To Do' }
     showToast(STATUS_TOASTS[newStatus] || 'Status updated')
 
-    try {
-      await updateTask(task.id, fields)
-    } catch {
-      setAllTasks(prev => prev.map(t => t.id === task.id ? task : t))
-      showToast('Failed to update task')
-    }
+    setTimeout(() => {
+      setFlashMap(prev => { const n = { ...prev }; delete n[task.id]; return n })
+      setAllTasks(prev => prev.map(t => t.id === task.id ? updated : t))
+    }, 680)
+
+    // Fire Airtable in background — revert if it fails
+    updateTask(task.id, fields).catch(() => {
+      showToast('Failed to update — reverting')
+      setTimeout(() => setAllTasks(prev => prev.map(t => t.id === task.id ? task : t)), 720)
+    })
   }
 
   async function handleStarToggle(task) {
@@ -455,6 +464,20 @@ export default function Tasks() {
 
   return (
     <div>
+      {/* ── Animation keyframes ───────────────────────────────────────────── */}
+      <style>{`
+        @keyframes taskFlash {
+          0%   { opacity: 1;   transform: scale(1);    }
+          40%  { opacity: 1;   transform: scale(1.03); }
+          100% { opacity: 0;   transform: scale(1);    }
+        }
+        @keyframes taskFlashIcon {
+          0%   { transform: scale(0.3) rotate(-15deg); opacity: 0; }
+          60%  { transform: scale(1.25) rotate(5deg);  opacity: 1; }
+          100% { transform: scale(1)   rotate(0deg);   opacity: 1; }
+        }
+      `}</style>
+
       {/* ── Sticky header ─────────────────────────────────────────────────── */}
       <div className="sticky top-0 bg-slate-50 z-10">
         <div className="px-4 sm:px-6 pt-4 pb-2">
