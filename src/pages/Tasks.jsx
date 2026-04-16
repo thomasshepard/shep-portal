@@ -144,9 +144,8 @@ function AddTaskDialog({ onClose, onAdd }) {
 }
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
-function TaskCard({ task, onStatusChange, onStarToggle, onDelete, onNotesChange }) {
+function TaskCard({ task, flashStatus, onStatusChange, onStarToggle, onDelete, onNotesChange }) {
   const [expanded, setExpanded]       = useState(false)
-  const [flashStatus, setFlashStatus] = useState(null)
   const [localNotes, setLocalNotes]   = useState(safeStr(task.fields[FIELDS.NOTES]))
   const [savingNotes, setSavingNotes] = useState(false)
 
@@ -166,8 +165,6 @@ function TaskCard({ task, onStatusChange, onStarToggle, onDelete, onNotesChange 
 
   function handleStatusSelect(newStatus) {
     if (newStatus === status) return
-    setFlashStatus(newStatus)
-    setTimeout(() => setFlashStatus(null), 600)
     onStatusChange(task, newStatus)
   }
 
@@ -327,6 +324,7 @@ export default function Tasks() {
   const [filter, setFilter]       = useState('All')
   const [showAdd, setShowAdd]     = useState(false)
   const [toast, setToast]         = useState(null)
+  const [flashMap, setFlashMap]   = useState({}) // { [taskId]: status } — drives flash overlay
 
   const userId = session?.user?.id
 
@@ -371,10 +369,14 @@ export default function Tasks() {
   function showToast(msg) { setToast(msg) }
 
   async function handleStatusChange(task, newStatus) {
-    const today   = new Date().toISOString().slice(0, 10)
-    const fields  = { [FIELDS.STATUS]: newStatus }
-    if (newStatus === 'Done')      fields[FIELDS.COMPLETED_AT] = today
-    if (newStatus !== 'Done')      fields[FIELDS.COMPLETED_AT] = null
+    const today  = new Date().toISOString().slice(0, 10)
+    const fields = { [FIELDS.STATUS]: newStatus }
+    if (newStatus === 'Done') fields[FIELDS.COMPLETED_AT] = today
+    else                      fields[FIELDS.COMPLETED_AT] = null
+
+    // Flash overlay lives in parent so it survives the card moving columns
+    setFlashMap(prev => ({ ...prev, [task.id]: newStatus }))
+    setTimeout(() => setFlashMap(prev => { const n = { ...prev }; delete n[task.id]; return n }), 650)
 
     const updated = { ...task, fields: { ...task.fields, ...fields } }
     setAllTasks(prev => prev.map(t => t.id === task.id ? updated : t))
@@ -427,7 +429,14 @@ export default function Tasks() {
     showToast('Task added')
   }
 
-  const cardProps = { onStatusChange: handleStatusChange, onStarToggle: handleStarToggle, onDelete: handleDelete, onNotesChange: handleNotesChange }
+  // flashStatus is passed per-card so the overlay survives the card moving columns
+  const cardProps = (task) => ({
+    flashStatus: flashMap[task.id] || null,
+    onStatusChange: handleStatusChange,
+    onStarToggle: handleStarToggle,
+    onDelete: handleDelete,
+    onNotesChange: handleNotesChange,
+  })
 
   // Desktop kanban column definitions
   const COLS_DATA = [
@@ -548,7 +557,7 @@ export default function Tasks() {
               const tasks   = byStatus(tabMap[colKey])
               return tasks.length === 0
                 ? <ColEmpty colKey={colKey} onAdd={() => setShowAdd(true)} />
-                : tasks.map(task => <TaskCard key={task.id} task={task} {...cardProps} />)
+                : tasks.map(task => <TaskCard key={task.id} task={task} {...cardProps(task)} />)
             })()}
           </div>
 
@@ -568,7 +577,7 @@ export default function Tasks() {
                 {/* Column tasks */}
                 {byStatus(col.status).length === 0
                   ? <ColEmpty colKey={col.key} onAdd={() => setShowAdd(true)} />
-                  : byStatus(col.status).map(task => <TaskCard key={task.id} task={task} {...cardProps} />)
+                  : byStatus(col.status).map(task => <TaskCard key={task.id} task={task} {...cardProps(task)} />)
                 }
               </div>
             ))}
