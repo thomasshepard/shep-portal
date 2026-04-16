@@ -12,6 +12,7 @@ const FIELDS = {
   ACTION_URL:   'fldNzqMx8txSraQCY',
   USER_ID:      'fldTjTxZgy6RZHyaf',
   COMPLETED_AT: 'fldK1GKFJSdceoVtT',
+  TODAY:        'fldXBwD9Pf7yDgkAR',
 }
 
 export { FIELDS }

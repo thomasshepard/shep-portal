@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, ChevronLeft, ChevronDown, Trash2, ExternalLink, X } from 'lucide-react'
+import { Plus, ChevronLeft, Star, Trash2, ExternalLink } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { fetchTasks, createTask, updateTask, deleteTask, FIELDS } from '../lib/tasks'
 
@@ -143,65 +143,11 @@ function AddTaskDialog({ onClose, onAdd }) {
   )
 }
 
-// ── StatusPill ────────────────────────────────────────────────────────────────
-function StatusPill({ status, onSelect }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG['To Do']
-
-  // Close picker on outside click
-  useEffect(() => {
-    if (!open) return
-    function handler(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
-        className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${cfg.pillCls}`}
-      >
-        {cfg.label}
-        <ChevronDown size={10} />
-      </button>
-
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-20 bg-white rounded-xl shadow-lg border border-slate-100 py-1 min-w-[120px]">
-          {ALL_STATUSES.map(s => {
-            const c = STATUS_CONFIG[s]
-            const active = s === status
-            return (
-              <button
-                key={s}
-                onClick={e => { e.stopPropagation(); setOpen(false); if (!active) onSelect(s) }}
-                className={`w-full text-left px-3 py-1.5 text-[12px] font-medium flex items-center gap-2 hover:bg-slate-50 ${
-                  active ? 'text-slate-900' : 'text-slate-600'
-                }`}
-              >
-                <span className={`inline-block w-2 h-2 rounded-full ${
-                  s === 'To Do' ? 'bg-slate-400' : s === 'In Progress' ? 'bg-blue-500' : 'bg-green-500'
-                }`} />
-                {c.label}
-                {active && <span className="ml-auto text-slate-400">✓</span>}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── TaskCard ──────────────────────────────────────────────────────────────────
-function TaskCard({ task, onStatusChange, onDelete, onNotesChange }) {
-  const [expanded, setExpanded]     = useState(false)
-  const [flashStatus, setFlashStatus] = useState(null)   // status string while flashing
-  const [localNotes, setLocalNotes] = useState(safeStr(task.fields[FIELDS.NOTES]))
+function TaskCard({ task, onStatusChange, onStarToggle, onDelete, onNotesChange }) {
+  const [expanded, setExpanded]       = useState(false)
+  const [flashStatus, setFlashStatus] = useState(null)
+  const [localNotes, setLocalNotes]   = useState(safeStr(task.fields[FIELDS.NOTES]))
   const [savingNotes, setSavingNotes] = useState(false)
 
   const status    = safeStr(task.fields[FIELDS.STATUS])
@@ -210,15 +156,16 @@ function TaskCard({ task, onStatusChange, onDelete, onNotesChange }) {
   const dueStr    = safeStr(task.fields[FIELDS.DUE_DATE])
   const body      = safeStr(task.fields[FIELDS.BODY])
   const actionUrl = safeStr(task.fields[FIELDS.ACTION_URL])
+  const isStarred = task.fields[FIELDS.TODAY] === true
 
-  const chip    = dueDateChip(dueStr)
-  const accent  = MODULE_ACCENT[module] || MODULE_ACCENT['Manual']
-  const pillCls = MODULE_PILL_BG[module] || MODULE_PILL_BG['Manual']
-  const isDone  = status === 'Done'
-
+  const chip     = dueDateChip(dueStr)
+  const accent   = MODULE_ACCENT[module] || MODULE_ACCENT['Manual']
+  const modulePillCls = MODULE_PILL_BG[module] || MODULE_PILL_BG['Manual']
+  const isDone   = status === 'Done'
   const flashCfg = flashStatus ? STATUS_CONFIG[flashStatus] : null
 
   function handleStatusSelect(newStatus) {
+    if (newStatus === status) return
     setFlashStatus(newStatus)
     setTimeout(() => setFlashStatus(null), 600)
     onStatusChange(task, newStatus)
@@ -235,18 +182,28 @@ function TaskCard({ task, onStatusChange, onDelete, onNotesChange }) {
     <div className="relative bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-2">
       {/* Flash overlay */}
       {flashCfg && (
-        <div
-          className={`absolute inset-0 z-10 ${flashCfg.flashCls} flex items-center justify-center rounded-xl transition-opacity duration-300`}
-        >
+        <div className={`absolute inset-0 z-10 ${flashCfg.flashCls} flex items-center justify-center rounded-xl`}>
           <span className="text-white text-2xl font-bold">{flashCfg.icon}</span>
         </div>
       )}
 
-      {/* Left accent */}
+      {/* Left accent bar */}
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent}`} />
 
-      <div className="pl-3 pr-3 pt-3 pb-2">
-        {/* Title row */}
+      {/* Star button — top-right corner */}
+      <button
+        onClick={e => { e.stopPropagation(); onStarToggle(task) }}
+        className="absolute top-2.5 right-2.5 z-10 p-0.5"
+        aria-label={isStarred ? 'Unstar task' : 'Star task'}
+      >
+        <Star
+          size={15}
+          className={isStarred ? 'fill-amber-400 text-amber-400' : 'text-slate-300 hover:text-amber-300'}
+        />
+      </button>
+
+      <div className="pl-3 pr-8 pt-3 pb-2">
+        {/* Title */}
         <button className="w-full text-left" onClick={() => setExpanded(e => !e)}>
           <p className={`text-sm font-medium leading-snug ${isDone ? 'line-through text-slate-400' : 'text-slate-800'}`}>
             {title}
@@ -254,10 +211,8 @@ function TaskCard({ task, onStatusChange, onDelete, onNotesChange }) {
         </button>
 
         {/* Meta row */}
-        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          {module && (
-            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${pillCls}`}>{module}</span>
-          )}
+        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${modulePillCls}`}>{module}</span>
           {chip && (
             <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${chip.cls}`}>{chip.label}</span>
           )}
@@ -274,18 +229,33 @@ function TaskCard({ task, onStatusChange, onDelete, onNotesChange }) {
           )}
         </div>
 
-        {/* Status pill */}
-        <div className="mt-2">
-          <StatusPill status={status} onSelect={handleStatusSelect} />
+        {/* Inline status pills */}
+        <div className="flex gap-1 mt-2 flex-wrap">
+          {ALL_STATUSES.map(s => {
+            const active = s === status
+            return (
+              <button
+                key={s}
+                onClick={e => { e.stopPropagation(); handleStatusSelect(s) }}
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border transition-colors ${
+                  active
+                    ? s === 'To Do'       ? 'bg-slate-800  text-white border-slate-800'
+                    : s === 'In Progress' ? 'bg-blue-600   text-white border-blue-600'
+                    :                       'bg-green-600  text-white border-green-600'
+                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-400 hover:text-slate-600'
+                }`}
+              >
+                {STATUS_CONFIG[s].label}
+              </button>
+            )
+          })}
         </div>
       </div>
 
       {/* Expanded section */}
       {expanded && (
         <div className="border-t border-slate-100 px-3 py-3 space-y-3">
-          {body && (
-            <p className="text-xs text-slate-600 leading-relaxed">{body}</p>
-          )}
+          {body && <p className="text-xs text-slate-600 leading-relaxed">{body}</p>}
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">Notes</label>
             <textarea
@@ -378,9 +348,16 @@ export default function Tasks() {
   useEffect(() => { loadTasks() }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function byStatus(status) {
-    return allTasks
-      .filter(t => safeStr(t.fields[FIELDS.STATUS]) === status)
-      .filter(t => filter === 'All' || safeStr(t.fields[FIELDS.MODULE]) === filter)
+    let tasks = allTasks.filter(t => safeStr(t.fields[FIELDS.STATUS]) === status)
+    if (filter === 'today') {
+      tasks = tasks.filter(t => t.fields[FIELDS.TODAY] === true)
+    } else if (filter !== 'All') {
+      tasks = tasks.filter(t => safeStr(t.fields[FIELDS.MODULE]) === filter)
+    }
+    // Starred tasks float to top within each column (stable sort preserves due-date order)
+    return tasks.sort((a, b) =>
+      (b.fields[FIELDS.TODAY] === true ? 1 : 0) - (a.fields[FIELDS.TODAY] === true ? 1 : 0)
+    )
   }
 
   const todoCnt       = byStatus('To Do').length
@@ -413,6 +390,18 @@ export default function Tasks() {
     }
   }
 
+  async function handleStarToggle(task) {
+    const newVal = !(task.fields[FIELDS.TODAY] === true)
+    const updated = { ...task, fields: { ...task.fields, [FIELDS.TODAY]: newVal } }
+    setAllTasks(prev => prev.map(t => t.id === task.id ? updated : t))
+    try {
+      await updateTask(task.id, { [FIELDS.TODAY]: newVal })
+    } catch {
+      setAllTasks(prev => prev.map(t => t.id === task.id ? task : t))
+      showToast('Failed to update task')
+    }
+  }
+
   async function handleDelete(task) {
     setAllTasks(prev => prev.filter(t => t.id !== task.id))
     showToast('Task deleted')
@@ -438,7 +427,7 @@ export default function Tasks() {
     showToast('Task added')
   }
 
-  const cardProps = { onStatusChange: handleStatusChange, onDelete: handleDelete, onNotesChange: handleNotesChange }
+  const cardProps = { onStatusChange: handleStatusChange, onStarToggle: handleStarToggle, onDelete: handleDelete, onNotesChange: handleNotesChange }
 
   // Desktop kanban column definitions
   const COLS_DATA = [
@@ -477,8 +466,19 @@ export default function Tasks() {
             {overdueCount > 0 && <span className="text-red-500"> · {overdueCount} overdue</span>}
           </p>
 
-          {/* Module filter chips */}
+          {/* Filter chips */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 mb-3 scrollbar-hide">
+            {/* Today (starred) chip */}
+            <button
+              onClick={() => setFilter(f => f === 'today' ? 'All' : 'today')}
+              className={`flex-none text-xs font-medium px-3 py-1 rounded-full border transition-colors ${
+                filter === 'today'
+                  ? 'bg-amber-400 text-white border-amber-400'
+                  : 'bg-white text-amber-600 border-amber-300 hover:border-amber-400'
+              }`}
+            >
+              ⭐ Today
+            </button>
             {MODULES.map(m => (
               <button
                 key={m}
