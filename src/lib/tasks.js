@@ -83,7 +83,8 @@ export async function createTask({ title, module, dueDate, body, notes, sourceKe
   if (sourceKey) fields[FIELDS.SOURCE_KEY] = sourceKey
   if (actionUrl) fields[FIELDS.ACTION_URL] = actionUrl
 
-  return apiRequest('POST', BASE_URL, { fields, typecast: true })
+  const json = await apiRequest('POST', BASE_URL, { records: [{ fields }], typecast: true })
+  return json.records[0]
 }
 
 /** Update a task — only pass fields to change. */
