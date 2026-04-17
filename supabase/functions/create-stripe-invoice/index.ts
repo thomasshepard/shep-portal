@@ -150,8 +150,7 @@ Deno.serve(async (req) => {
       ...(dueDate ? { due_date: dueDate } : { days_until_due: 0 }),
       pending_invoice_items_behavior: 'include',
       metadata: {
-        airtable_record_id: mowRecordId,
-        client_name: clientName,
+        airtable_mow_id: mowRecordId,
         source: 'happy_cuts_portal',
       },
     })
