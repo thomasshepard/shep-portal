@@ -39,7 +39,7 @@ const SF = {
   date: 'fldcu9rgNI8REbrE0', type: 'fldBt3Ewb6EGd3a4S',
   status: 'fldzyHzszEVZGhs6U', amount: 'fldJoKhtQX4MujAOi',
   payMethod: 'fldZx0GDaJkLML2ID', stripeId: 'fldC06DE4htmBScNM',
-  invStatus: 'fldhiIRXuRlvp3QXO', duration: 'fldsVZmdyFnXAIszv',
+  invStatus: 'fldhiIRXuRlvp3QXO', paidAt: 'fldjNgGcQZnIQJqxo', duration: 'fldsVZmdyFnXAIszv',
   notes: 'fldos2p3iwvUCKlH6', contacts: 'fldemlueed8aZMi7J',
   timePreference: 'fldAc9skq3oOTrjiE', // singleSelect: Specific Time/Morning/Afternoon/Anytime
   scheduledTime: 'fldtwRBQ5DcQ2UQCF',  // singleLineText: "8:00 AM", "Morning", etc.
@@ -2582,8 +2582,19 @@ function RevenueTab({ onOpenJob }) {
                     </span>
                   </div>
                 </div>
-                {mow.invStatus && mow.invStatus !== 'Not Sent' && (
-                  <p className="text-xs text-gray-400 mt-0.5 pl-20">{safeStr(mow.invStatus)}</p>
+                                {safeStr(mow.fields[SF.invStatus]) === 'Paid' ? (
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-0.5">
+                    <span>✓ Paid</span>
+                    {safeStr(mow.fields[SF.paidAt]) && (
+                      <span className="font-normal text-green-600">
+                        {fmtDate(mow.fields[SF.paidAt])}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  mow.invStatus && mow.invStatus !== 'Not Sent' && (
+                    <p className="text-xs text-gray-400 mt-0.5 pl-20">{safeStr(mow.invStatus)}</p>
+                  )
                 )}
               </div>
             )
