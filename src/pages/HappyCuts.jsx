@@ -1766,7 +1766,7 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
 // ─── AddContactModal ──────────────────────────────────────────────────────────
 function AddContactModal({ onClose, onSave }) {
   const [form, setForm] = useState({
-    name: '', phone: '', address: '', city: '', status: 'Lead',
+    name: '', phone: '', email: '', address: '', city: '', status: 'Lead',
     source: '', lotSize: '', rate: '', frequency: '', specInstr: '', notes: '',
   })
   const [loading, setLoading] = useState(false)
@@ -1782,6 +1782,7 @@ function AddContactModal({ onClose, onSave }) {
           fields: {
             [CF.name]: form.name,
             [CF.phone]: form.phone || undefined,
+            [CF.email]: form.email || undefined,
             [CF.address]: form.address || undefined,
             [CF.city]: form.city || undefined,
             [CF.status]: form.status,
@@ -1827,6 +1828,7 @@ function AddContactModal({ onClose, onSave }) {
         <div className="space-y-3">
           {inp('Name *', 'name')}
           {inp('Phone', 'phone', 'tel')}
+          {inp('Email', 'email', 'email')}
           {inp('Address', 'address')}
           {inp('City', 'city')}
           {inp('Status', 'status', 'text', ['Lead', 'Active', 'Scheduled', 'Cold', 'Lost'])}

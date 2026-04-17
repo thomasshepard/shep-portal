@@ -16,6 +16,7 @@ const FIELDS = {
   stripeInvoiceId:     'fldC06DE4htmBScNM',
   stripeCustomerId:    'fld01FQpuNajt1eB3',
   invoiceStatus:       'fldhiIRXuRlvp3QXO',
+  email:               'fldQyQqbLZFDYvNzL',
 }
 
 const corsHeaders = {
@@ -72,6 +73,7 @@ Deno.serve(async (req) => {
     // IGNORE portal-passed stripeCustomerId — it can be stale/wrong contact.
     // Always look up from Airtable using contactRecordId as source of truth.
     let customerId: string | null = null
+    let contactEmail = ''
 
     if (contactRecordId) {
       try {
@@ -82,6 +84,7 @@ Deno.serve(async (req) => {
         const contactData = await contactRes.json()
         console.log('[Invoice] Airtable contact fields:', JSON.stringify(contactData?.fields))
         const storedId = contactData?.fields?.[FIELDS.stripeCustomerId]
+        contactEmail = contactData?.fields?.[FIELDS.email] ?? ''
         if (storedId) {
           // Verify it's still valid in Stripe
           try {
@@ -89,6 +92,12 @@ Deno.serve(async (req) => {
             if (!(existing as any).deleted) {
               customerId = storedId
               console.log('[Invoice] Using stored Stripe customer from Airtable:', customerId, (existing as any).name)
+              // Patch email onto existing customer if it's missing
+              const existingEmail = (existing as any).email
+              if (!existingEmail && contactEmail) {
+                await stripe.customers.update(customerId!, { email: contactEmail })
+                console.log('[Invoice] Patched email onto existing Stripe customer:', customerId)
+              }
             } else {
               console.log('[Invoice] Stored customer was deleted in Stripe — creating new')
             }
@@ -107,7 +116,7 @@ Deno.serve(async (req) => {
       console.log('[Invoice] Creating new Stripe customer for:', clientName, '(contact:', contactRecordId, ')')
       const customer = await stripe.customers.create({
         name: clientName || 'Happy Cuts Client',
-        email: clientEmail || undefined,
+        email: contactEmail || undefined,
         metadata: {
           airtable_contact_id: contactRecordId || '',
           source: 'happy_cuts_portal',
