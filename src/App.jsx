@@ -41,6 +41,7 @@ export default function App() {
       <HashRouter>
         <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
         <IOSInstallBanner />
+        <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route
@@ -110,6 +111,7 @@ export default function App() {
           <Route path="maintenance-request" element={<MaintenanceSubmit />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </ErrorBoundary>
       </HashRouter>
     </AuthProvider>
   )
