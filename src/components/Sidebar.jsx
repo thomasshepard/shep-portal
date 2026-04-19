@@ -41,6 +41,7 @@ export default function Sidebar({ open, onClose }) {
     permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
     permissions.chickens && { to: '/chickens', icon: Egg, label: 'Chickens' },
     { to: '/recipes', icon: ChefHat, label: 'Recipes' },
+    isAdmin && { to: '/listings', icon: Building2, label: 'Listings' },
     isAdmin && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
     permissions.documents && { to: '/documents', icon: FileText, label: 'Documents' },
     { to: '/tools', icon: Wrench, label: 'Tools' },

@@ -32,6 +32,8 @@ import ChickenIncubatorGuide from './pages/ChickenIncubatorGuide'
 import Notifications from './pages/Notifications'
 import Tasks from './pages/Tasks'
 import Recipes from './pages/Recipes'
+import PropertyListings from './pages/PropertyListings.jsx'
+import CrossvilleDashboard from './pages/CrossvilleDashboard.jsx'
 
 export default function App() {
   return (
@@ -64,6 +66,8 @@ export default function App() {
             <Route path="documents" element={<PermRoute permission="documents"><Documents /></PermRoute>} />
             <Route path="deals" element={<PermRoute permission="deals"><Deals /></PermRoute>} />
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
+            <Route path="listings" element={<AdminRoute><PropertyListings /></AdminRoute>} />
+            <Route path="listings/benwick" element={<AdminRoute><CrossvilleDashboard /></AdminRoute>} />
             <Route path="happy-cuts" element={<AdminRoute><HappyCuts /></AdminRoute>} />
             <Route path="happy-cuts/client/:id" element={<AdminRoute><HappyCutsClientDetail /></AdminRoute>} />
             <Route path="happy-cuts/guide" element={<AdminRoute><HappyCutsGuide /></AdminRoute>} />
