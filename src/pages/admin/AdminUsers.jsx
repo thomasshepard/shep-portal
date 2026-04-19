@@ -23,6 +23,11 @@ const emptyForm = {
   can_view_chickens: false,
   can_view_documents: false,
   can_view_deals: false,
+  can_view_tasks: false,
+  can_view_recipes: false,
+  can_view_tools: false,
+  can_view_files: false,
+  can_view_listings: false,
   allowed_tags: '',
 }
 
@@ -96,6 +101,11 @@ export default function AdminUsers() {
           can_view_chickens: form.can_view_chickens,
           can_view_documents: form.can_view_documents,
           can_view_deals: form.can_view_deals,
+          can_view_tasks: form.can_view_tasks,
+          can_view_recipes: form.can_view_recipes,
+          can_view_tools: form.can_view_tools,
+          can_view_files: form.can_view_files,
+          can_view_listings: form.can_view_listings,
           allowed_tags: form.allowed_tags || null,
         })
         .eq('id', newUserId)
@@ -190,6 +200,11 @@ export default function AdminUsers() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Chickens</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Documents</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Deals</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Tasks</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Recipes</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Tools</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Files</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Listings</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -257,6 +272,41 @@ export default function AdminUsers() {
                         onChange={() => togglePerm(u, 'can_view_deals')}
                       />
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_tasks}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_tasks')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_recipes}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_recipes')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_tools}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_tools')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_files}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_files')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_listings}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_listings')}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -284,7 +334,7 @@ export default function AdminUsers() {
       </div>
 
       <div className="text-xs text-gray-400 space-y-0.5">
-        <p>• <strong>Properties</strong>, <strong>LLCs</strong>, <strong>Chickens</strong>, <strong>Documents</strong>, and <strong>Facebook Deals</strong> toggles control which sections each user can see.</p>
+        <p>• <strong>Properties</strong>, <strong>LLCs</strong>, <strong>Chickens</strong>, <strong>Documents</strong>, <strong>Facebook Deals</strong>, <strong>Tasks</strong>, <strong>Recipes</strong>, <strong>Tools</strong>, <strong>Files</strong>, and <strong>Listings</strong> toggles control which sections each user can see.</p>
         <p>• Admin users always have full access — their toggles are locked.</p>
         <p>• <strong>Active/Inactive</strong> is a soft flag. To fully block access, also disable the account in Supabase Auth dashboard.</p>
         <p>• <strong>Delete</strong> permanently removes the account. Requires the <code>delete-user</code> edge function to be deployed.</p>
@@ -414,6 +464,51 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Facebook Deals</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_tasks}
+                        onChange={e => setField('can_view_tasks', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Tasks</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_recipes}
+                        onChange={e => setField('can_view_recipes', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Recipes</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_tools}
+                        onChange={e => setField('can_view_tools', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Tools</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_files}
+                        onChange={e => setField('can_view_files', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Files</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_listings}
+                        onChange={e => setField('can_view_listings', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Listings</span>
                     </label>
                   </div>
                 </div>

@@ -35,17 +35,17 @@ export default function Sidebar({ open, onClose }) {
 
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/tasks', icon: ListTodo, label: 'Tasks' },
+    (isAdmin || permissions.can_view_tasks) && { to: '/tasks', icon: ListTodo, label: 'Tasks' },
     permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },
     permissions.deals && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
     permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
     permissions.chickens && { to: '/chickens', icon: Egg, label: 'Chickens' },
-    { to: '/recipes', icon: ChefHat, label: 'Recipes' },
-    isAdmin && { to: '/listings', icon: Building2, label: 'Listings' },
+    (isAdmin || permissions.can_view_recipes) && { to: '/recipes', icon: ChefHat, label: 'Recipes' },
+    (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
     isAdmin && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
     permissions.documents && { to: '/documents', icon: FileText, label: 'Documents' },
-    { to: '/tools', icon: Wrench, label: 'Tools' },
-    { to: '/files', icon: FolderOpen, label: 'Files' },
+    (isAdmin || permissions.can_view_tools) && { to: '/tools', icon: Wrench, label: 'Tools' },
+    (isAdmin || permissions.can_view_files) && { to: '/files', icon: FolderOpen, label: 'Files' },
   ].filter(Boolean)
 
   return (

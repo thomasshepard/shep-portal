@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, PM_BASE_ID, CHICKENS_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
+import {
+  Building2, FileText, Egg, Tag, ListTodo, ChefHat, Wrench, FolderOpen, MapPin,
+} from 'lucide-react'
 
 // ── Local helpers ─────────────────────────────────────────────────────────────
 const safeStr = (v, fb = '') => (v == null || v === '' ? fb : typeof v === 'object' ? fb : String(v))
@@ -103,7 +107,7 @@ function fmtDateShort(str) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { profile, isAdmin, isVA } = useAuth()
+  const { profile, isAdmin, isVA, permissions } = useAuth()
 
   const [propData, setPropData]           = useState(null)
   const [propLoading, setPropLoading]     = useState(true)
@@ -276,6 +280,10 @@ export default function Dashboard() {
       return !isNaN(dt) && dt >= today && dt <= in7
     })
     .sort((a, b) => safeStr(a.fields?.[SF.date]).localeCompare(safeStr(b.fields?.[SF.date])))
+
+  if (!isAdmin && !isVA) {
+    return <MemberDashboard profile={profile} permissions={permissions} />
+  }
 
   return (
     <div className="space-y-6">
@@ -469,6 +477,67 @@ export default function Dashboard() {
         )}
       </div>
 
+    </div>
+  )
+}
+
+// ── Member Dashboard ──────────────────────────────────────────────────────────
+
+const MEMBER_SECTIONS = [
+  { key: 'properties',  flag: 'properties',        icon: Building2,  label: 'Properties', desc: 'Rental properties, tenants, and maintenance',  route: '/properties' },
+  { key: 'documents',   flag: 'documents',          icon: FileText,   label: 'Documents',  desc: 'Scanned documents and records',                route: '/documents'  },
+  { key: 'chickens',    flag: 'chickens',           icon: Egg,        label: 'Chickens',   desc: 'Flock management and feeding schedules',       route: '/chickens'   },
+  { key: 'deals',       flag: 'deals',              icon: Tag,        label: 'Deals',      desc: 'Facebook Marketplace deal pipeline',           route: '/deals'      },
+  { key: 'tasks',       flag: 'can_view_tasks',     icon: ListTodo,   label: 'Tasks',      desc: 'Your task list',                               route: '/tasks'      },
+  { key: 'recipes',     flag: 'can_view_recipes',   icon: ChefHat,    label: 'Recipes',    desc: 'Recipe collection',                            route: '/recipes'    },
+  { key: 'tools',       flag: 'can_view_tools',     icon: Wrench,     label: 'Tools',      desc: 'Utility tools',                                route: '/tools'      },
+  { key: 'files',       flag: 'can_view_files',     icon: FolderOpen, label: 'Files',      desc: 'File storage',                                 route: '/files'      },
+  { key: 'listings',    flag: 'can_view_listings',  icon: MapPin,     label: 'Listings',   desc: 'Property listing dashboards',                  route: '/listings'   },
+]
+
+function MemberDashboard({ profile, permissions }) {
+  const navigate = useNavigate()
+  const visibleSections = MEMBER_SECTIONS.filter(s => !!permissions?.[s.flag])
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">
+          Welcome back, {profile?.full_name || 'there'}!
+        </h1>
+        <p className="text-gray-500 mt-1 text-sm">Here's your portal.</p>
+      </div>
+
+      {visibleSections.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <p className="text-gray-500 text-sm">Your access is being set up.</p>
+          <p className="text-gray-400 text-sm mt-1">Contact Thomas for more information.</p>
+        </div>
+      ) : (
+        <div>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">My Sections</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {visibleSections.map(s => {
+              const Icon = s.icon
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => navigate(s.route)}
+                  className="bg-white rounded-xl border border-gray-200 p-4 text-left hover:shadow-sm hover:border-blue-300 transition-all group"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="p-1.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
+                      <Icon size={16} className="text-blue-600" />
+                    </div>
+                    <span className="font-semibold text-gray-800 text-sm">{s.label}</span>
+                  </div>
+                  <p className="text-xs text-gray-400 leading-snug">{s.desc}</p>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

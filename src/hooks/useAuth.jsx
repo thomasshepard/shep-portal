@@ -50,6 +50,11 @@ export function AuthProvider({ children }) {
     logPayments: isAdmin || isVA,
     documents: isAdmin || !!profile?.can_view_documents,
     deals: isAdmin || isVA || !!profile?.can_view_deals,
+    can_view_tasks:    !!profile?.can_view_tasks,
+    can_view_recipes:  !!profile?.can_view_recipes,
+    can_view_tools:    !!profile?.can_view_tools,
+    can_view_files:    !!profile?.can_view_files,
+    can_view_listings: !!profile?.can_view_listings,
   }
 
   return (
