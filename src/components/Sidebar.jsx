@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, Landmark, Wrench, FolderOpen,
-  Users, ScrollText, FileCode, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo,
+  Users, ScrollText, FileCode, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -40,6 +40,7 @@ export default function Sidebar({ open, onClose }) {
     permissions.deals && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
     permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
     permissions.chickens && { to: '/chickens', icon: Egg, label: 'Chickens' },
+    { to: '/recipes', icon: ChefHat, label: 'Recipes' },
     isAdmin && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
     permissions.documents && { to: '/documents', icon: FileText, label: 'Documents' },
     { to: '/tools', icon: Wrench, label: 'Tools' },

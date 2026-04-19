@@ -31,6 +31,7 @@ import HappyCutsGuide from './pages/HappyCutsGuide'
 import ChickenIncubatorGuide from './pages/ChickenIncubatorGuide'
 import Notifications from './pages/Notifications'
 import Tasks from './pages/Tasks'
+import Recipes from './pages/Recipes'
 
 export default function App() {
   return (
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="happy-cuts/guide" element={<AdminRoute><HappyCutsGuide /></AdminRoute>} />
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+            <Route path="recipes" element={<ProtectedRoute><Recipes /></ProtectedRoute>} />
             <Route
               path="admin"
               element={

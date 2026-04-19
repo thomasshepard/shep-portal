@@ -105,7 +105,9 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from:    FROM_EMAIL,
         to:      toEmail,
-        subject: `[${severityLabel}] ${notification.title}`,
+        subject: notification.severity === 'critical'
+          ? `[Shep] 🚨 ${notification.title}`
+          : `[Shep] ⚡ ${notification.title}`,
         html,
       }),
     })
