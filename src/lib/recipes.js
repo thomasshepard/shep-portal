@@ -13,15 +13,17 @@ export const TABLES = {
 }
 
 export const RECIPE_FIELDS = {
-  NAME:          'fldK4smwr4v8CB6A3',
-  CATEGORY:      'fldxgSdjiBQsFD28i',
-  TAGS:          'fldhqrXWH0r3IGEWZ',
-  SERVINGS_BASE: 'fld2TswdlRXDM3bS0',
-  PREP_TIME:     'fldcp2o347nljS8Gq',
-  COOK_TIME:     'fldEGAbQimzx6dFJs',
-  NOTES:         'fldUFm3Izvw5scihV',
-  ADDED_BY:      'fldtlH1lCV7FT2u8Y',
-  PHOTO_URLS:    'fldFeHK6heiQO6E2t',
+  NAME:              'fldK4smwr4v8CB6A3',
+  CATEGORY:          'fldxgSdjiBQsFD28i',
+  TAGS:              'fldhqrXWH0r3IGEWZ',
+  SERVINGS_BASE:     'fld2TswdlRXDM3bS0',
+  PREP_TIME:         'fldcp2o347nljS8Gq',
+  COOK_TIME:         'fldEGAbQimzx6dFJs',
+  NOTES:             'fldUFm3Izvw5scihV',
+  ADDED_BY:          'fldtlH1lCV7FT2u8Y',
+  PHOTO_URLS:        'fldFeHK6heiQO6E2t',
+  INGREDIENTS_TEXT:  'fldLX9vLJgoGQK9RL',
+  INSTRUCTIONS_TEXT: 'fldAssIxhtJzLTwn7',
 }
 
 export const ING_FIELDS = {
@@ -75,7 +77,8 @@ export async function fetchSteps(recipeId) {
   return data.records || []
 }
 
-export async function createRecipe(recipeData, ingredients, steps) {
+// ingredientsText and instructionsText are pre-formatted plain text strings
+export async function createRecipe(recipeData, ingredientsText, instructionsText) {
   const recipeRes = await fetch(
     `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}`,
     {
@@ -84,15 +87,17 @@ export async function createRecipe(recipeData, ingredients, steps) {
       body: JSON.stringify({
         records: [{
           fields: {
-            [RECIPE_FIELDS.NAME]:          recipeData.name,
-            [RECIPE_FIELDS.CATEGORY]:      recipeData.category || null,
-            [RECIPE_FIELDS.TAGS]:          recipeData.tags || [],
-            [RECIPE_FIELDS.SERVINGS_BASE]: recipeData.servingsBase || 4,
-            [RECIPE_FIELDS.PREP_TIME]:     recipeData.prepTime || null,
-            [RECIPE_FIELDS.COOK_TIME]:     recipeData.cookTime || null,
-            [RECIPE_FIELDS.NOTES]:         recipeData.notes || '',
-            [RECIPE_FIELDS.ADDED_BY]:      recipeData.addedBy || null,
-            [RECIPE_FIELDS.PHOTO_URLS]:    JSON.stringify([]),
+            [RECIPE_FIELDS.NAME]:              recipeData.name,
+            [RECIPE_FIELDS.CATEGORY]:          recipeData.category || null,
+            [RECIPE_FIELDS.TAGS]:              recipeData.tags || [],
+            [RECIPE_FIELDS.SERVINGS_BASE]:     recipeData.servingsBase || 4,
+            [RECIPE_FIELDS.PREP_TIME]:         recipeData.prepTime || null,
+            [RECIPE_FIELDS.COOK_TIME]:         recipeData.cookTime || null,
+            [RECIPE_FIELDS.NOTES]:             recipeData.notes || '',
+            [RECIPE_FIELDS.ADDED_BY]:          recipeData.addedBy || null,
+            [RECIPE_FIELDS.PHOTO_URLS]:        JSON.stringify([]),
+            [RECIPE_FIELDS.INGREDIENTS_TEXT]:  ingredientsText || '',
+            [RECIPE_FIELDS.INSTRUCTIONS_TEXT]: instructionsText || '',
           }
         }],
         typecast: true,
@@ -101,61 +106,7 @@ export async function createRecipe(recipeData, ingredients, steps) {
   )
   if (!recipeRes.ok) throw new Error(`createRecipe failed: ${recipeRes.status}`)
   const recipeJson = await recipeRes.json()
-  const recipeId = recipeJson.records[0].id
-
-  if (ingredients && ingredients.length > 0) {
-    for (let i = 0; i < ingredients.length; i += 10) {
-      const chunk = ingredients.slice(i, i + 10)
-      await fetch(
-        `https://api.airtable.com/v0/${BASE_ID}/${TABLES.INGREDIENTS}`,
-        {
-          method: 'POST',
-          headers: headers(),
-          body: JSON.stringify({
-            records: chunk.map(ing => ({
-              fields: {
-                [ING_FIELDS.NAME]:          ing.name,
-                [ING_FIELDS.RECIPE]:        [recipeId],
-                [ING_FIELDS.QUANTITY]:      ing.quantity || null,
-                [ING_FIELDS.UNIT]:          ing.unit || null,
-                [ING_FIELDS.DISPLAY_ORDER]: ing.displayOrder || 0,
-                [ING_FIELDS.NOTES]:         ing.notes || '',
-              }
-            })),
-            typecast: true,
-          })
-        }
-      )
-    }
-  }
-
-  if (steps && steps.length > 0) {
-    for (let i = 0; i < steps.length; i += 10) {
-      const chunk = steps.slice(i, i + 10)
-      await fetch(
-        `https://api.airtable.com/v0/${BASE_ID}/${TABLES.STEPS}`,
-        {
-          method: 'POST',
-          headers: headers(),
-          body: JSON.stringify({
-            records: chunk.map(step => ({
-              fields: {
-                [STEP_FIELDS.INSTRUCTION]:   step.instruction,
-                [STEP_FIELDS.RECIPE]:        [recipeId],
-                [STEP_FIELDS.STEP_NUMBER]:   step.stepNumber,
-                [STEP_FIELDS.TIMER_MINUTES]: step.timerMinutes || null,
-                [STEP_FIELDS.TIMER_LABEL]:   step.timerLabel || '',
-                [STEP_FIELDS.KEY_VALUE]:     step.keyValue || '',
-              }
-            })),
-            typecast: true,
-          })
-        }
-      )
-    }
-  }
-
-  return recipeId
+  return recipeJson.records[0].id
 }
 
 export async function updateRecipe(recordId, fields) {

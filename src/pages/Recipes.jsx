@@ -2,12 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { ChefHat, ArrowLeft, Plus, Minus, Trash2, ChevronUp, ChevronDown, X } from 'lucide-react'
 import {
   fetchRecipes,
-  fetchIngredients,
-  fetchSteps,
   createRecipe,
   RECIPE_FIELDS,
-  ING_FIELDS,
-  STEP_FIELDS,
 } from '../lib/recipes'
 
 const safeStr = (v) => (v == null ? '' : String(v))
@@ -28,14 +24,6 @@ const TAGS = ['Quick', 'Slow Cook', "Gabrielle's", "Thomas's", 'Kid Friendly', '
 const FILTER_CHIPS = ['All', 'Dinner', 'Breakfast', 'Lunch', 'Snack', 'Dessert', 'Sides', 'Quick', 'Favorite', "Gabrielle's"]
 const UNITS = ['cup', 'tbsp', 'tsp', 'oz', 'lb', 'g', 'whole', 'pinch', 'to taste', 'slice']
 
-function scaleQty(base, servingsBase, servings) {
-  const sb = safeNum(servingsBase) || 4
-  const scaled = (safeNum(base) / sb) * safeNum(servings)
-  if (!scaled) return ''
-  const rounded = Math.round(scaled * 100) / 100
-  return String(rounded).replace(/\.?0+$/, '')
-}
-
 function fmtTime(min) {
   if (!min) return null
   if (min < 60) return `${min} min`
@@ -50,7 +38,64 @@ function fmtSeconds(s) {
   return `${m}:${String(sec).padStart(2, '0')}`
 }
 
-// ── Add sheet defaults ──────────────────────────────────────────────────────
+// ── Flat-text parsers ─────────────────────────────────────────────────────
+
+function extractKeyValue(text) {
+  const tempMatch = text.match(/\d+°F/)
+  if (tempMatch) return tempMatch[0]
+  const panMatch = text.match(/9x13"/)
+  if (panMatch) return panMatch[0]
+  return ''
+}
+
+function parseSteps(instructionsText) {
+  if (!instructionsText) return []
+  return instructionsText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => /^\d+\./.test(line))
+    .map((line, i) => ({
+      id: String(i),
+      stepNumber: i + 1,
+      instruction: line.replace(/^\d+\.\s*/, '').trim(),
+      timerMinutes: 0,
+      timerLabel: '',
+      keyValue: extractKeyValue(line),
+    }))
+}
+
+function parseIngredients(ingredientsText) {
+  if (!ingredientsText) return []
+  return ingredientsText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .map((line, i) => ({
+      id: String(i),
+      name: line,
+      isHeader: /^[A-Z][A-Z\s/]+$/.test(line) && line.length < 30,
+    }))
+}
+
+// ── Wizard formatters ─────────────────────────────────────────────────────
+
+function formatIngredientsText(ingRows) {
+  return ingRows
+    .map(ing => {
+      const qty = ing.quantity ? `${ing.quantity} ${ing.unit || ''}`.trim() : ''
+      return qty ? `${qty} ${ing.name}` : ing.name
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function formatInstructionsText(stepRows) {
+  return stepRows
+    .map((step, i) => `${i + 1}. ${step.instruction}`)
+    .join('\n')
+}
+
+// ── Add sheet defaults ────────────────────────────────────────────────────
 
 function defaultBasics() {
   return { name: '', category: '', addedBy: '', servingsBase: 4, prepTime: '', cookTime: '', tags: [], notes: '' }
@@ -62,7 +107,7 @@ function defaultStep() {
   return { instruction: '', timerMinutes: '', timerLabel: '', keyValue: '' }
 }
 
-// ── Main component ──────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────
 
 export default function Recipes() {
   // Browse state
@@ -74,9 +119,8 @@ export default function Recipes() {
 
   // Cook mode state
   const [cookingRecipe, setCookingRecipe] = useState(null)
-  const [ingredients, setIngredients] = useState([])
-  const [steps, setSteps] = useState([])
-  const [cookLoading, setCookLoading] = useState(false)
+  const [parsedSteps, setParsedSteps] = useState([])
+  const [parsedIngredients, setParsedIngredients] = useState([])
   const [currentStep, setCurrentStep] = useState(0)
   const [activeTab, setActiveTab] = useState('steps')
   const [servings, setServings] = useState(4)
@@ -102,15 +146,11 @@ export default function Recipes() {
     toastTimer.current = setTimeout(() => setToast(null), duration)
   }
 
-  // Timer intervals ref (survives re-renders)
   const timerRefs = useRef({})
 
   useEffect(() => {
     loadRecipes()
-    return () => {
-      // Cleanup all timers on unmount
-      Object.values(timerRefs.current).forEach(id => clearInterval(id))
-    }
+    return () => { Object.values(timerRefs.current).forEach(id => clearInterval(id)) }
   }, [])
 
   async function loadRecipes() {
@@ -128,25 +168,17 @@ export default function Recipes() {
 
   // ── Cook mode ─────────────────────────────────────────────────────────────
 
-  async function enterCookMode(recipe) {
+  function enterCookMode(recipe) {
+    const f = recipe.fields || {}
     setCookingRecipe(recipe)
     setCurrentStep(0)
     setActiveTab('steps')
     setCheckedIngs(new Set())
     stopAllTimers()
     setTimers({})
-    setServings(safeNum(recipe.fields?.[RECIPE_FIELDS.SERVINGS_BASE]) || 4)
-    setCookLoading(true)
-    try {
-      const [ings, stps] = await Promise.all([
-        fetchIngredients(recipe.id),
-        fetchSteps(recipe.id),
-      ])
-      setIngredients(ings)
-      setSteps(stps.sort((a, b) => safeNum(a.fields?.[STEP_FIELDS.STEP_NUMBER]) - safeNum(b.fields?.[STEP_FIELDS.STEP_NUMBER])))
-    } finally {
-      setCookLoading(false)
-    }
+    setServings(safeNum(f[RECIPE_FIELDS.SERVINGS_BASE]) || 4)
+    setParsedSteps(parseSteps(safeStr(f[RECIPE_FIELDS.INSTRUCTIONS_TEXT])))
+    setParsedIngredients(parseIngredients(safeStr(f[RECIPE_FIELDS.INGREDIENTS_TEXT])))
   }
 
   function exitCookMode() {
@@ -165,7 +197,6 @@ export default function Recipes() {
   }
 
   function startTimer(stepId, totalSeconds) {
-    // Stop any running timers first
     stopAllTimers()
     setTimers(prev => {
       const next = {}
@@ -195,13 +226,12 @@ export default function Recipes() {
     const category = safeStr(r.fields?.[RECIPE_FIELDS.CATEGORY])
     const tags = arr(r.fields?.[RECIPE_FIELDS.TAGS])
     const q = search.toLowerCase()
-
     const matchSearch = !q || name.includes(q) || notes.includes(q) || category.toLowerCase().includes(q)
     const matchChip = filterChip === 'All' || category === filterChip || tags.includes(filterChip)
     return matchSearch && matchChip
   })
 
-  // ── Add wizard ───────────────────────────────────────────────────────────
+  // ── Add wizard ────────────────────────────────────────────────────────────
 
   function resetAdd() {
     setAddWizardStep(1)
@@ -211,15 +241,8 @@ export default function Recipes() {
     setAddError('')
   }
 
-  function openAdd() {
-    resetAdd()
-    setShowAdd(true)
-  }
-
-  function closeAdd() {
-    setShowAdd(false)
-    resetAdd()
-  }
+  function openAdd() { resetAdd(); setShowAdd(true) }
+  function closeAdd() { setShowAdd(false); resetAdd() }
 
   function wizardNext() {
     if (addWizardStep === 1) {
@@ -227,34 +250,21 @@ export default function Recipes() {
       setAddError('')
       setAddWizardStep(2)
     } else if (addWizardStep === 2) {
-      if (ingRows.filter(r => r.name.trim()).length === 0) {
-        setAddError('Add at least one ingredient')
-        return
-      }
+      if (ingRows.filter(r => r.name.trim()).length === 0) { setAddError('Add at least one ingredient'); return }
       setAddError('')
       setAddWizardStep(3)
     }
   }
 
   async function saveRecipe() {
-    if (stepRows.filter(r => r.instruction.trim()).length === 0) {
-      setAddError('Add at least one step')
-      return
-    }
+    const validSteps = stepRows.filter(r => r.instruction.trim())
+    if (validSteps.length === 0) { setAddError('Add at least one step'); return }
     setAddError('')
     setSaving(true)
     try {
-      const filteredIngs = ingRows
-        .filter(r => r.name.trim())
-        .map((r, i) => ({ ...r, displayOrder: i + 1, quantity: r.quantity ? Number(r.quantity) : null }))
-      const filteredSteps = stepRows
-        .filter(r => r.instruction.trim())
-        .map((r, i) => ({
-          ...r,
-          stepNumber: i + 1,
-          timerMinutes: r.timerMinutes ? Number(r.timerMinutes) : null,
-        }))
-
+      const validIngs = ingRows.filter(r => r.name.trim())
+      const ingredientsText = formatIngredientsText(validIngs)
+      const instructionsText = formatInstructionsText(validSteps)
       await createRecipe(
         {
           ...basics,
@@ -262,8 +272,8 @@ export default function Recipes() {
           prepTime: basics.prepTime ? Number(basics.prepTime) : null,
           cookTime: basics.cookTime ? Number(basics.cookTime) : null,
         },
-        filteredIngs,
-        filteredSteps
+        ingredientsText,
+        instructionsText
       )
       closeAdd()
       showToast('Recipe saved!')
@@ -280,12 +290,10 @@ export default function Recipes() {
   if (cookingRecipe) {
     const recFields = cookingRecipe.fields || {}
     const recipeName = safeStr(recFields[RECIPE_FIELDS.NAME])
-    const servingsBase = safeNum(recFields[RECIPE_FIELDS.SERVINGS_BASE]) || 4
-    const totalSteps = steps.length
+    const totalSteps = parsedSteps.length
 
     return (
       <div className="flex flex-col h-full max-w-lg mx-auto bg-white relative">
-        {/* Sticky header */}
         <div className="sticky top-0 z-10 bg-white border-b border-gray-100">
           <div className="flex items-center px-4 py-3">
             <button onClick={exitCookMode} className="mr-3 p-1.5 rounded-lg hover:bg-gray-100 text-gray-600">
@@ -297,7 +305,6 @@ export default function Recipes() {
             )}
           </div>
 
-          {/* Progress bar */}
           {totalSteps > 0 && (
             <div className="h-1 bg-gray-100 mx-4 rounded-full overflow-hidden">
               <div
@@ -307,7 +314,6 @@ export default function Recipes() {
             </div>
           )}
 
-          {/* Servings scaler */}
           <div className="flex items-center gap-3 px-4 py-2.5">
             <span className="text-sm text-gray-600 font-medium">Servings</span>
             <div className="flex items-center gap-2">
@@ -325,10 +331,9 @@ export default function Recipes() {
                 <Plus size={14} />
               </button>
             </div>
-            <span className="text-xs text-gray-400">· amounts scale automatically</span>
+            <span className="text-xs text-gray-400">· scale amounts manually</span>
           </div>
 
-          {/* Tabs */}
           <div className="flex border-b border-gray-100 px-4">
             {['steps', 'ingredients'].map(tab => (
               <button
@@ -346,22 +351,17 @@ export default function Recipes() {
           </div>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto pb-24">
-          {cookLoading ? (
-            <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Loading…</div>
-          ) : activeTab === 'steps' ? (
+          {activeTab === 'steps' ? (
             <StepsTab
-              steps={steps}
+              steps={parsedSteps}
               currentStep={currentStep}
               timers={timers}
               onStartTimer={startTimer}
             />
           ) : (
             <IngredientsTab
-              ingredients={ingredients}
-              servings={servings}
-              servingsBase={servingsBase}
+              ingredients={parsedIngredients}
               checkedIngs={checkedIngs}
               onToggle={id => setCheckedIngs(prev => {
                 const next = new Set(prev)
@@ -373,7 +373,6 @@ export default function Recipes() {
           )}
         </div>
 
-        {/* Sticky bottom nav */}
         {activeTab === 'steps' && totalSteps > 0 && (
           <div className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-white border-t border-gray-100 px-4 py-3 flex gap-3">
             <button
@@ -414,7 +413,6 @@ export default function Recipes() {
 
   return (
     <div className="flex flex-col h-full max-w-lg mx-auto bg-white relative">
-      {/* Sticky header */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-100">
         <div className="flex items-center justify-between px-4 py-4">
           <h1 className="text-xl font-bold text-gray-900">Recipes</h1>
@@ -436,7 +434,6 @@ export default function Recipes() {
           />
         </div>
 
-        {/* Filter chips */}
         <div className="flex gap-2 px-4 pb-3 overflow-x-auto scrollbar-hide">
           {FILTER_CHIPS.map(chip => (
             <button
@@ -454,7 +451,6 @@ export default function Recipes() {
         </div>
       </div>
 
-      {/* Recipe list */}
       <div className="flex-1 overflow-y-auto">
         {loading && (
           <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Loading…</div>
@@ -469,10 +465,7 @@ export default function Recipes() {
               {search || filterChip !== 'All' ? 'No recipes match your filter.' : 'No recipes yet — add your first one!'}
             </p>
             {!search && filterChip === 'All' && (
-              <button
-                onClick={openAdd}
-                className="bg-gray-900 text-white text-sm font-medium px-5 py-3 rounded-full hover:bg-gray-800"
-              >
+              <button onClick={openAdd} className="bg-gray-900 text-white text-sm font-medium px-5 py-3 rounded-full hover:bg-gray-800">
                 + Add Recipe
               </button>
             )}
@@ -483,7 +476,6 @@ export default function Recipes() {
         ))}
       </div>
 
-      {/* Add sheet */}
       {showAdd && (
         <AddSheet
           step={addWizardStep}
@@ -541,8 +533,8 @@ function RecipeCard({ recipe, onTap }) {
         </div>
         <div className="text-xs text-gray-500 mt-0.5">
           {category && <span>{category}</span>}
-          <span className="text-gray-300"> · </span>
-          <span>{servings} servings</span>
+          {category && <span className="text-gray-300"> · </span>}
+          <span>~{servings} servings</span>
         </div>
         {tags.length > 0 && (
           <div className="flex gap-1 mt-1.5 flex-wrap">
@@ -557,28 +549,22 @@ function RecipeCard({ recipe, onTap }) {
 }
 
 function StepsTab({ steps, currentStep, timers, onStartTimer }) {
+  if (steps.length === 0) {
+    return <div className="px-4 py-12 text-center text-gray-400 text-sm">No steps found for this recipe.</div>
+  }
   return (
     <div className="px-4 py-4 space-y-3">
       {steps.map((step, idx) => {
-        const f = step.fields || {}
-        const instruction = safeStr(f[STEP_FIELDS.INSTRUCTION])
-        const timerMin = safeNum(f[STEP_FIELDS.TIMER_MINUTES])
-        const timerLabel = safeStr(f[STEP_FIELDS.TIMER_LABEL])
-        const keyValue = safeStr(f[STEP_FIELDS.KEY_VALUE])
-        const stepNum = safeNum(f[STEP_FIELDS.STEP_NUMBER])
-        const timer = timers[step.id]
-
         const isDone = idx < currentStep
         const isCurrent = idx === currentStep
-        const isUpcoming = idx > currentStep
+        const timer = timers[step.id]
 
-        // Highlight keyValue in instruction text
-        let instructionContent = instruction
-        if (isCurrent && keyValue && instruction.includes(keyValue)) {
-          const parts = instruction.split(keyValue)
+        let instructionContent = step.instruction
+        if (isCurrent && step.keyValue && step.instruction.includes(step.keyValue)) {
+          const parts = step.instruction.split(step.keyValue)
           instructionContent = parts.reduce((acc, part, i) => {
             if (i < parts.length - 1) {
-              return [...acc, part, <span key={i} className="text-amber-600 font-semibold">{keyValue}</span>]
+              return [...acc, part, <span key={i} className="text-amber-600 font-semibold">{step.keyValue}</span>]
             }
             return [...acc, part]
           }, [])
@@ -599,21 +585,21 @@ function StepsTab({ steps, currentStep, timers, onStartTimer }) {
               <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mt-0.5 ${
                 isDone ? 'bg-gray-200 text-gray-500' : isCurrent ? 'bg-amber-400 text-white' : 'bg-gray-100 text-gray-400'
               }`}>
-                {isDone ? '✓' : stepNum || idx + 1}
+                {isDone ? '✓' : step.stepNumber}
               </span>
               <p className={`flex-1 leading-relaxed ${isCurrent ? 'text-base text-gray-900' : 'text-sm text-gray-600'}`}>
                 {instructionContent}
               </p>
             </div>
 
-            {isCurrent && timerMin > 0 && !isDone && (
+            {isCurrent && step.timerMinutes > 0 && (
               <div className="mt-3 ml-9">
                 {!timer || (!timer.running && !timer.done) ? (
                   <button
-                    onClick={() => onStartTimer(step.id, timerMin * 60)}
+                    onClick={() => onStartTimer(step.id, step.timerMinutes * 60)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-lg hover:bg-amber-100"
                   >
-                    ⏱ Start {timerLabel || `${timerMin} min`} timer
+                    ⏱ Start {step.timerLabel || `${step.timerMinutes} min`} timer
                   </button>
                 ) : timer.running ? (
                   <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 text-xs font-medium rounded-lg">
@@ -633,31 +619,34 @@ function StepsTab({ steps, currentStep, timers, onStartTimer }) {
   )
 }
 
-function IngredientsTab({ ingredients, servings, servingsBase, checkedIngs, onToggle, onReset }) {
+function IngredientsTab({ ingredients, checkedIngs, onToggle, onReset }) {
+  const checkable = ingredients.filter(i => !i.isHeader)
+  if (ingredients.length === 0) {
+    return <div className="px-4 py-12 text-center text-gray-400 text-sm">No ingredients found for this recipe.</div>
+  }
   return (
     <div className="px-4 py-4">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-medium text-gray-700">{ingredients.length} ingredients</span>
+        <span className="text-sm font-medium text-gray-700">{checkable.length} ingredients</span>
         {checkedIngs.size > 0 && (
           <button onClick={onReset} className="text-xs text-amber-600 hover:underline">Reset</button>
         )}
       </div>
       <div className="space-y-1">
         {ingredients.map(ing => {
-          const f = ing.fields || {}
-          const name = safeStr(f[ING_FIELDS.NAME])
-          const qty = scaleQty(f[ING_FIELDS.QUANTITY], servingsBase, servings)
-          const unit = safeStr(f[ING_FIELDS.UNIT])
-          const notes = safeStr(f[ING_FIELDS.NOTES])
+          if (ing.isHeader) {
+            return (
+              <div key={ing.id} className="pt-3 pb-1 px-1">
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">{ing.name}</span>
+              </div>
+            )
+          }
           const checked = checkedIngs.has(ing.id)
-
           return (
             <button
               key={ing.id}
               onClick={() => onToggle(ing.id)}
-              className={`w-full text-left flex items-center gap-3 py-2.5 px-3 rounded-xl transition-colors hover:bg-gray-50 ${
-                checked ? 'opacity-40' : ''
-              }`}
+              className={`w-full text-left flex items-center gap-3 py-2.5 px-3 rounded-xl transition-colors hover:bg-gray-50 ${checked ? 'opacity-40' : ''}`}
             >
               <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
                 checked ? 'border-green-400 bg-green-400' : 'border-gray-300'
@@ -665,8 +654,7 @@ function IngredientsTab({ ingredients, servings, servingsBase, checkedIngs, onTo
                 {checked && <span className="text-white text-xs">✓</span>}
               </div>
               <span className={`flex-1 text-sm text-gray-800 ${checked ? 'line-through' : ''}`}>
-                {qty && unit ? `${qty} ${unit} ` : qty ? `${qty} ` : ''}{name}
-                {notes && <span className="text-gray-400 ml-1">({notes})</span>}
+                {ing.name}
               </span>
             </button>
           )
@@ -679,9 +667,7 @@ function IngredientsTab({ ingredients, servings, servingsBase, checkedIngs, onTo
 function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setStepRows, addError, saving, onNext, onBack, onSave, onClose }) {
   const titles = ['', 'Basics', 'Ingredients', 'Steps']
 
-  function updateBasics(key, val) {
-    setBasics(prev => ({ ...prev, [key]: val }))
-  }
+  function updateBasics(key, val) { setBasics(prev => ({ ...prev, [key]: val })) }
 
   function toggleTag(tag) {
     setBasics(prev => ({
@@ -690,22 +676,10 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
     }))
   }
 
-  function updateIng(i, key, val) {
-    setIngRows(prev => prev.map((r, idx) => idx === i ? { ...r, [key]: val } : r))
-  }
-
-  function removeIng(i) {
-    setIngRows(prev => prev.filter((_, idx) => idx !== i))
-  }
-
-  function updateStep(i, key, val) {
-    setStepRows(prev => prev.map((r, idx) => idx === i ? { ...r, [key]: val } : r))
-  }
-
-  function removeStep(i) {
-    setStepRows(prev => prev.filter((_, idx) => idx !== i))
-  }
-
+  function updateIng(i, key, val) { setIngRows(prev => prev.map((r, idx) => idx === i ? { ...r, [key]: val } : r)) }
+  function removeIng(i) { setIngRows(prev => prev.filter((_, idx) => idx !== i)) }
+  function updateStep(i, key, val) { setStepRows(prev => prev.map((r, idx) => idx === i ? { ...r, [key]: val } : r)) }
+  function removeStep(i) { setStepRows(prev => prev.filter((_, idx) => idx !== i)) }
   function moveStep(i, dir) {
     setStepRows(prev => {
       const next = [...prev]
@@ -718,12 +692,8 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/40 z-40 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Sheet */}
       <div className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto z-50 bg-white rounded-t-2xl shadow-xl max-h-[90vh] flex flex-col">
-        {/* Sheet header */}
         <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">Step {step} of 3</span>
@@ -734,7 +704,6 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
           </button>
         </div>
 
-        {/* Sheet body */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {step === 1 && (
             <>
@@ -752,22 +721,16 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Category</label>
-                  <select
-                    value={basics.category}
-                    onChange={e => updateBasics('category', e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-400 bg-white"
-                  >
+                  <select value={basics.category} onChange={e => updateBasics('category', e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-400 bg-white">
                     <option value="">Select…</option>
                     {CATEGORIES.slice(1).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Added By</label>
-                  <select
-                    value={basics.addedBy}
-                    onChange={e => updateBasics('addedBy', e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-400 bg-white"
-                  >
+                  <select value={basics.addedBy} onChange={e => updateBasics('addedBy', e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-400 bg-white">
                     <option value="">Select…</option>
                     <option>Thomas</option>
                     <option>Gabrielle</option>
@@ -795,16 +758,10 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
                 <label className="block text-xs font-medium text-gray-600 mb-2">Tags</label>
                 <div className="flex flex-wrap gap-2">
                   {TAGS.map(tag => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => toggleTag(tag)}
+                    <button key={tag} type="button" onClick={() => toggleTag(tag)}
                       className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                        basics.tags.includes(tag)
-                          ? 'bg-amber-400 text-white'
-                          : 'border border-gray-200 text-gray-500 hover:border-gray-400'
-                      }`}
-                    >
+                        basics.tags.includes(tag) ? 'bg-amber-400 text-white' : 'border border-gray-200 text-gray-500 hover:border-gray-400'
+                      }`}>
                       {tag}
                     </button>
                   ))}
@@ -812,13 +769,9 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-                <textarea
-                  value={basics.notes}
-                  onChange={e => updateBasics('notes', e.target.value)}
-                  rows={2}
+                <textarea value={basics.notes} onChange={e => updateBasics('notes', e.target.value)} rows={2}
                   placeholder="Optional notes…"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-400 resize-none"
-                />
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-400 resize-none" />
               </div>
             </>
           )}
@@ -828,13 +781,9 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
               {ingRows.map((row, i) => (
                 <div key={i} className="flex gap-2 items-start">
                   <div className="flex-1 space-y-2">
-                    <input
-                      type="text"
-                      value={row.name}
-                      onChange={e => updateIng(i, 'name', e.target.value)}
+                    <input type="text" value={row.name} onChange={e => updateIng(i, 'name', e.target.value)}
                       placeholder="Ingredient name"
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400"
-                    />
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400" />
                     <div className="flex gap-2">
                       <input type="number" min={0} value={row.quantity} onChange={e => updateIng(i, 'quantity', e.target.value)}
                         placeholder="Qty" className="w-20 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400" />
@@ -882,23 +831,15 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
                       )}
                     </div>
                   </div>
-                  <textarea
-                    value={row.instruction}
-                    onChange={e => updateStep(i, 'instruction', e.target.value)}
-                    rows={3}
+                  <textarea value={row.instruction} onChange={e => updateStep(i, 'instruction', e.target.value)} rows={3}
                     placeholder="Instruction (required)"
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400 resize-none"
-                  />
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400 resize-none" />
                   <div className="flex gap-2">
-                    <div className="flex-1">
-                      <input type="number" min={0} value={row.timerMinutes} onChange={e => updateStep(i, 'timerMinutes', e.target.value)}
-                        placeholder="Timer (min)" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400" />
-                    </div>
-                    <div className="flex-1">
-                      <input type="text" value={row.timerLabel} onChange={e => updateStep(i, 'timerLabel', e.target.value)}
-                        placeholder="Timer name e.g. 'Simmer'"
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400" />
-                    </div>
+                    <input type="number" min={0} value={row.timerMinutes} onChange={e => updateStep(i, 'timerMinutes', e.target.value)}
+                      placeholder="Timer (min)" className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400" />
+                    <input type="text" value={row.timerLabel} onChange={e => updateStep(i, 'timerLabel', e.target.value)}
+                      placeholder="Timer name e.g. 'Simmer'"
+                      className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-amber-400" />
                   </div>
                   <input type="text" value={row.keyValue} onChange={e => updateStep(i, 'keyValue', e.target.value)}
                     placeholder="Key value to highlight e.g. '400°F'"
@@ -912,32 +853,22 @@ function AddSheet({ step, basics, setBasics, ingRows, setIngRows, stepRows, setS
             </>
           )}
 
-          {addError && (
-            <p className="text-sm text-red-600">{addError}</p>
-          )}
+          {addError && <p className="text-sm text-red-600">{addError}</p>}
         </div>
 
-        {/* Sheet footer */}
         <div className="px-4 py-4 border-t border-gray-100 flex gap-3">
-          <button
-            onClick={onBack}
-            className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50"
-          >
+          <button onClick={onBack}
+            className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
             ← Back
           </button>
           {step < 3 ? (
-            <button
-              onClick={onNext}
-              className="flex-2 flex-grow-[2] py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800"
-            >
+            <button onClick={onNext}
+              className="flex-2 flex-grow-[2] py-3 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-800">
               Next: {step === 1 ? 'Ingredients' : 'Steps'} →
             </button>
           ) : (
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="flex-2 flex-grow-[2] py-3 rounded-xl bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 disabled:opacity-60"
-            >
+            <button onClick={onSave} disabled={saving}
+              className="flex-2 flex-grow-[2] py-3 rounded-xl bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 disabled:opacity-60">
               {saving ? 'Saving…' : 'Save Recipe'}
             </button>
           )}
