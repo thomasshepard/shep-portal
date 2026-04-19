@@ -20,7 +20,7 @@ export function usePushSubscription() {
 
   useEffect(() => {
     setSupported('serviceWorker' in navigator && 'PushManager' in window)
-    setPermission(Notification.permission)
+    setPermission(typeof Notification !== 'undefined' ? Notification.permission : 'denied')
   }, [])
 
   // Register service worker on mount
