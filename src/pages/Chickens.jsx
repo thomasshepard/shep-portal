@@ -120,9 +120,9 @@ function FlockCard({ flock, schedules, archived, onClick }) {
 
   return (
     <button
-      onClick={archived ? undefined : onClick}
-      className={`bg-white rounded-xl border border-gray-200 overflow-hidden text-left w-full transition-shadow ${
-        archived ? 'opacity-60' : 'hover:shadow-md cursor-pointer'
+      onClick={onClick}
+      className={`bg-white rounded-xl border border-gray-200 overflow-hidden text-left w-full transition-shadow hover:shadow-md cursor-pointer ${
+        archived ? 'opacity-60' : ''
       }`}
     >
       <div className="px-5 py-4 border-b border-gray-100">
@@ -489,7 +489,7 @@ function FlocksTab() {
             />
           ))}
           {showArchived && archivedFlocks.map(flock => (
-            <FlockCard key={flock.id} flock={flock} schedules={[]} archived={true} onClick={null} />
+            <FlockCard key={flock.id} flock={flock} schedules={[]} archived={true} onClick={() => navigate(`/chickens/${flock.id}`)} />
           ))}
         </div>
       )}
