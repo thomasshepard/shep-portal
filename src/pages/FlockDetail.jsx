@@ -242,15 +242,16 @@ function ExpenseInlineForm({ flockId, onSaved, onClose }) {
 // ── ProcessingModal ───────────────────────────────────────────────────────────
 
 function ProcessingModal({ flock, onClose, onProcessed }) {
-  const [weight, setWeight] = useState('')
-  const [totalYield, setTotalYield] = useState('')
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const [birdsProcessed, setBirdsProcessed] = useState('')
+  const [processingDate, setProcessingDate] = useState(todayStr)
   const [saving, setSaving] = useState(false)
 
   async function handleConfirm() {
     setSaving(true)
     const fields = { 'Status': 'Processed', 'Archived': true }
-    if (weight) fields['Weight at Processing (lbs)'] = Number(weight)
-    if (totalYield) fields['Total Yield (lbs)'] = Number(totalYield)
+    if (birdsProcessed) fields['Birds Processed'] = Number(birdsProcessed)
+    if (processingDate) fields['Processing Date'] = processingDate
     const { error } = await updateRecord('Flock', flock.id, fields, CHICKENS_BASE_ID)
     if (error) { toast.error('Failed: ' + error); setSaving(false); return }
     toast.success('Flock marked as processed')
@@ -266,11 +267,11 @@ function ProcessingModal({ flock, onClose, onProcessed }) {
         </div>
         <div className="p-6 space-y-4">
           <p className="text-sm text-gray-600">This will archive the flock and set status to Processed.</p>
-          <Field label="Weight at Processing (lbs)">
-            <input type="number" min={0} step="0.1" value={weight} onChange={e => setWeight(e.target.value)} className={inp} placeholder="e.g. 5.5" />
+          <Field label="Birds Processed">
+            <input type="number" min={0} step="1" value={birdsProcessed} onChange={e => setBirdsProcessed(e.target.value)} className={inp} placeholder="e.g. 25" />
           </Field>
-          <Field label="Total Yield (lbs)">
-            <input type="number" min={0} step="0.1" value={totalYield} onChange={e => setTotalYield(e.target.value)} className={inp} placeholder="e.g. 220" />
+          <Field label="Processing Date">
+            <input type="date" value={processingDate} onChange={e => setProcessingDate(e.target.value)} className={inp} />
           </Field>
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
