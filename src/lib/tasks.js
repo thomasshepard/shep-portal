@@ -25,6 +25,11 @@ const BASE_URL = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`
 // Always request fields keyed by field ID so FIELDS constants work as object keys.
 const FIELD_ID_PARAM = 'returnFieldsByFieldId=true'
 
+// Appends returnFieldsByFieldId with the correct separator.
+function withFieldIds(url) {
+  return url.includes('?') ? `${url}&${FIELD_ID_PARAM}` : `${url}?${FIELD_ID_PARAM}`
+}
+
 // Set to true temporarily to fetch all records and filter client-side (useful for diagnosing
 // filterByFormula issues — check browser console for raw response).
 const DEBUG_FETCH_ALL = false
@@ -86,13 +91,13 @@ export async function createTask({ title, module, dueDate, body, notes, sourceKe
   if (sourceKey) fields[FIELDS.SOURCE_KEY] = sourceKey
   if (actionUrl) fields[FIELDS.ACTION_URL] = actionUrl
 
-  const json = await apiRequest('POST', BASE_URL, { records: [{ fields }], typecast: true })
+  const json = await apiRequest('POST', withFieldIds(BASE_URL), { records: [{ fields }], typecast: true })
   return json.records[0]
 }
 
 /** Update a task — only pass fields to change. */
 export async function updateTask(recordId, fields) {
-  return apiRequest('PATCH', `${BASE_URL}/${recordId}`, { fields, typecast: true })
+  return apiRequest('PATCH', withFieldIds(`${BASE_URL}/${recordId}`), { fields, typecast: true })
 }
 
 /** Delete a task. */
