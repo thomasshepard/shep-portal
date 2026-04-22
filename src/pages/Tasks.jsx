@@ -210,9 +210,10 @@ function AddTaskDialog({ onClose, onAdd }) {
 }
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
-function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle, onDelete, onNotesChange, onToast }) {
+function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle, onDelete, onNotesChange, onDueDateChange, onToast }) {
   const [expanded,    setExpanded]    = useState(false)
   const [localNotes,  setLocalNotes]  = useState(safeStr(task.fields[FIELDS.NOTES]))
+  const [localDue,    setLocalDue]    = useState(safeStr(task.fields[FIELDS.DUE_DATE]))
   const [savingNotes, setSavingNotes] = useState(false)
   const [copied,      setCopied]      = useState(false)
   const [swipeDel,    setSwipeDel]    = useState(false)
@@ -248,6 +249,18 @@ function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle
     setSavingNotes(true)
     await onNotesChange(task.id, localNotes)
     setSavingNotes(false)
+  }
+
+  function setDuePreset(days) {
+    const d = new Date(); d.setDate(d.getDate() + days)
+    const val = d.toISOString().slice(0, 10)
+    setLocalDue(val)
+    onDueDateChange(task.id, val)
+  }
+
+  function handleDueChange(val) {
+    setLocalDue(val)
+    onDueDateChange(task.id, val || null)
   }
 
   // Swipe-to-act (mobile only)
@@ -371,6 +384,50 @@ function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle
       {expanded && (
         <div className="border-t border-slate-100 px-3 py-3 space-y-3">
           {body && <p className="text-xs text-slate-600 leading-relaxed">{body}</p>}
+
+          {/* Due date editor */}
+          {!isDone && (
+            <div>
+              <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">Due Date</label>
+              <div className="flex gap-1.5 mb-1.5">
+                {[['Today', 0], ['Tomorrow', 1], ['Next week', 7]].map(([label, days]) => {
+                  const val = (() => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0,10) })()
+                  return (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setDuePreset(days)}
+                      className={`flex-1 text-[11px] font-medium px-1.5 py-1 rounded-md border transition-colors ${
+                        localDue === val
+                          ? 'bg-slate-800 text-white border-slate-800'
+                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex gap-1.5 items-center">
+                <input
+                  type="date"
+                  value={localDue}
+                  onChange={e => handleDueChange(e.target.value)}
+                  className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                />
+                {localDue && (
+                  <button
+                    type="button"
+                    onClick={() => handleDueChange('')}
+                    className="text-[11px] text-slate-400 hover:text-red-500 px-1.5 py-1 rounded border border-slate-200 hover:border-red-300 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">Notes</label>
             <textarea
@@ -589,6 +646,13 @@ export default function Tasks() {
     await updateTask(recordId, { [FIELDS.NOTES]: notes })
   }
 
+  async function handleDueDateChange(recordId, dueDate) {
+    setAllTasks(prev => prev.map(t =>
+      t.id === recordId ? { ...t, fields: { ...t.fields, [FIELDS.DUE_DATE]: dueDate || null } } : t
+    ))
+    await updateTask(recordId, { [FIELDS.DUE_DATE]: dueDate || null })
+  }
+
   async function handleAdd({ title, dueDate }) {
     const record = await createTask({ title, dueDate, module: 'Manual', userId })
     setAllTasks(prev => [...prev, record])
@@ -631,8 +695,9 @@ export default function Tasks() {
       onStatusChange: handleStatusChange,
       onStarToggle:   handleStarToggle,
       onDelete:       handleDelete,
-      onNotesChange:  handleNotesChange,
-      onToast:        showToast,
+      onNotesChange:   handleNotesChange,
+      onDueDateChange: handleDueDateChange,
+      onToast:         showToast,
     }
   }
 
