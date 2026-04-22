@@ -52,7 +52,7 @@ function headers() {
 }
 
 export async function fetchRecipes() {
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}?sort[0][field]=${RECIPE_FIELDS.NAME}&sort[0][direction]=asc`
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}?sort[0][field]=${RECIPE_FIELDS.NAME}&sort[0][direction]=asc&returnFieldsByFieldId=true`
   const res = await fetch(url, { headers: headers() })
   if (!res.ok) throw new Error(`fetchRecipes failed: ${res.status}`)
   const data = await res.json()
@@ -60,8 +60,8 @@ export async function fetchRecipes() {
 }
 
 export async function fetchIngredients(recipeId) {
-  const formula = encodeURIComponent(`FIND("${recipeId}", ARRAYJOIN({Recipe}))`)
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.INGREDIENTS}?filterByFormula=${formula}&sort[0][field]=${ING_FIELDS.DISPLAY_ORDER}&sort[0][direction]=asc`
+  const formula = encodeURIComponent(`FIND("${recipeId}", ARRAYJOIN({${ING_FIELDS.RECIPE}}))`)
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.INGREDIENTS}?filterByFormula=${formula}&sort[0][field]=${ING_FIELDS.DISPLAY_ORDER}&sort[0][direction]=asc&returnFieldsByFieldId=true`
   const res = await fetch(url, { headers: headers() })
   if (!res.ok) throw new Error(`fetchIngredients failed: ${res.status}`)
   const data = await res.json()
@@ -69,8 +69,8 @@ export async function fetchIngredients(recipeId) {
 }
 
 export async function fetchSteps(recipeId) {
-  const formula = encodeURIComponent(`FIND("${recipeId}", ARRAYJOIN({Recipe}))`)
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.STEPS}?filterByFormula=${formula}&sort[0][field]=${STEP_FIELDS.STEP_NUMBER}&sort[0][direction]=asc`
+  const formula = encodeURIComponent(`FIND("${recipeId}", ARRAYJOIN({${STEP_FIELDS.RECIPE}}))`)
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.STEPS}?filterByFormula=${formula}&sort[0][field]=${STEP_FIELDS.STEP_NUMBER}&sort[0][direction]=asc&returnFieldsByFieldId=true`
   const res = await fetch(url, { headers: headers() })
   if (!res.ok) throw new Error(`fetchSteps failed: ${res.status}`)
   const data = await res.json()

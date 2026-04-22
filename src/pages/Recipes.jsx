@@ -1,21 +1,20 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Search, X } from 'lucide-react'
+import { RECIPE_FIELDS, fetchRecipes } from '../lib/recipes'
 
-// ─── Airtable field IDs ──────────────────────────────────────────────────────
+// ─── Field ID aliases ─────────────────────────────────────────────────────────
 const F = {
-  NAME:         'fldK4smwr4v8CB6A3',
-  CATEGORY:     'fldxgSdjiBQsFD28i',
-  TAGS:         'fldhqrXWH0r3IGEWZ',
-  SERVINGS:     'fld2TswdlRXDM3bS0',
-  PREP_TIME:    'fldcp2o347nljS8Gq',
-  COOK_TIME:    'fldEGAbQimzx6dFJs',
-  INGREDIENTS:  'fldLX9vLJgoGQK9RL',
-  INSTRUCTIONS: 'fldAssIxhtJzLTwn7',
-  NOTES:        'fldUFm3Izvw5scihV',
-  ADDED_BY:     'fldtlH1lCV7FT2u8Y',
+  NAME:         RECIPE_FIELDS.NAME,
+  CATEGORY:     RECIPE_FIELDS.CATEGORY,
+  TAGS:         RECIPE_FIELDS.TAGS,
+  SERVINGS:     RECIPE_FIELDS.SERVINGS_BASE,
+  PREP_TIME:    RECIPE_FIELDS.PREP_TIME,
+  COOK_TIME:    RECIPE_FIELDS.COOK_TIME,
+  INGREDIENTS:  RECIPE_FIELDS.INGREDIENTS_TEXT,
+  INSTRUCTIONS: RECIPE_FIELDS.INSTRUCTIONS_TEXT,
+  NOTES:        RECIPE_FIELDS.NOTES,
+  ADDED_BY:     RECIPE_FIELDS.ADDED_BY,
 }
-
-const BASE_URL = 'https://api.airtable.com/v0/appPKrIVr569rWySg/tblLhmJgQFRnUKi9n'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const s  = (v) => (v == null ? '' : String(v))
@@ -42,20 +41,13 @@ export default function Recipes() {
   const [chip,     setChip]     = useState('All')
   const [selected, setSelected] = useState(null)  // full record or null
 
-  const pat = import.meta.env.VITE_AIRTABLE_PAT
-
   // ── Fetch ──
   async function load() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(
-        `${BASE_URL}?sort[0][field]=${F.NAME}&sort[0][direction]=asc`,
-        { headers: { Authorization: `Bearer ${pat}` } }
-      )
-      if (!res.ok) throw new Error(`Airtable ${res.status}`)
-      const data = await res.json()
-      setRecipes(data.records || [])
+      const records = await fetchRecipes()
+      setRecipes(records)
     } catch (err) {
       setError(err.message)
     } finally {
