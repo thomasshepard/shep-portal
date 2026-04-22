@@ -111,7 +111,7 @@ export async function createRecipe(recipeData, ingredientsText, instructionsText
 
 export async function updateRecipe(recordId, fields) {
   const res = await fetch(
-    `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}/${recordId}`,
+    `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}/${recordId}?returnFieldsByFieldId=true`,
     {
       method: 'PATCH',
       headers: headers(),
