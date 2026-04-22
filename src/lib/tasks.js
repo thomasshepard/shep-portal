@@ -1,3 +1,5 @@
+import { supabase } from './supabase.js'
+
 // Tasks Airtable helper — all CRUD for the Tasks module.
 // Field IDs discovered by running scripts/setup-tasks-table.js against appYVLCn1NVLevdry.
 
@@ -103,6 +105,16 @@ export async function updateTask(recordId, fields) {
 /** Delete a task. */
 export async function deleteTask(recordId) {
   return apiRequest('DELETE', `${BASE_URL}/${recordId}`)
+}
+
+/** Dismiss any unread notification linked to this sourceKey (fire-and-forget). */
+export async function dismissLinkedNotification(sourceKey) {
+  if (!sourceKey) return
+  await supabase
+    .from('notifications')
+    .update({ dismissed: true })
+    .eq('source_key', sourceKey)
+    .eq('dismissed', false)
 }
 
 /** Check whether a task with a given sourceKey already exists (for dedup). */

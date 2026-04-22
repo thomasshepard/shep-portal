@@ -165,26 +165,31 @@ Deno.serve(async (req) => {
     })
     console.log('[Invoice] Created invoice:', invoice.id, 'amount_due:', invoice.amount_due)
 
-    // --- Step 4: Finalize invoice ---
-    const finalized = await stripe.invoices.finalizeInvoice(invoice.id)
+    // --- Step 4: Finalize invoice (does NOT send, does NOT require customer email) ---
+    const finalized = await stripe.invoices.finalizeInvoice(invoice.id, {
+      auto_advance: false,
+    })
 
-    // --- Step 5: Send invoice ---
-    const sent = await stripe.invoices.sendInvoice(finalized.id)
+    const hostedUrl = finalized.hosted_invoice_url ?? ''
+    const pdfUrl    = finalized.invoice_pdf ?? ''
+    const invoiceId = finalized.id
 
-    const invoiceUrl = sent.hosted_invoice_url ?? ''
-    const invoiceId = sent.id
-
-    // --- Step 6: Update Airtable schedule record ---
+    // --- Step 5: Update Airtable schedule record ---
     if (mowRecordId) {
       await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
-        [FIELDS.stripeInvoiceUrl]:  invoiceUrl,
+        [FIELDS.stripeInvoiceUrl]:  hostedUrl,
         [FIELDS.stripeInvoiceId]:   invoiceId,
-        [FIELDS.invoiceStatus]:     'Sent',
+        [FIELDS.invoiceStatus]:     'Finalized',
       })
     }
 
     return new Response(
-      JSON.stringify({ success: true, invoiceUrl, invoiceId }),
+      JSON.stringify({
+        invoiceId,
+        hostedUrl,
+        pdfUrl,
+        status: finalized.status,
+      }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Plus, ChevronLeft, ChevronDown, Star, Trash2, ExternalLink, Copy, Check, Search, X } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
-import { fetchTasks, createTask, updateTask, deleteTask, FIELDS } from '../lib/tasks'
+import { fetchTasks, createTask, updateTask, deleteTask, dismissLinkedNotification, FIELDS } from '../lib/tasks'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const safeStr = (v) => (v == null ? '' : String(v))
@@ -560,6 +560,11 @@ export default function Tasks() {
       showToast('Failed to update — reverting')
       setTimeout(() => setAllTasks(prev => prev.map(t => t.id === task.id ? task : t)), 720)
     })
+
+    if (newStatus === 'Done') {
+      const sourceKey = task.fields[FIELDS.SOURCE_KEY]
+      if (sourceKey) dismissLinkedNotification(sourceKey).catch(() => {})
+    }
   }
 
   async function handleStarToggle(task) {

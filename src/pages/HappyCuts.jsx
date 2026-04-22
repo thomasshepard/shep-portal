@@ -532,8 +532,8 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
         }),
       })
       const data = await res.json()
-      if (res.ok && data.success && data.invoiceUrl) {
-        setInvoiceUrl(data.invoiceUrl)
+      if (res.ok && data.hostedUrl) {
+        setInvoiceUrl(data.hostedUrl)
         setStep('success')
         // Save email back to contact if one was entered
         if (emailInput.trim() && mowContactId) {
@@ -607,7 +607,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
             </div>
             <div className="px-5 pb-5 flex gap-3">
               <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
-              <button onClick={sendInvoice} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-semibold text-sm">Send Invoice →</button>
+              <button onClick={sendInvoice} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-semibold text-sm">Create Invoice →</button>
             </div>
           </>
         )}
@@ -616,7 +616,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
         {step === 'loading' && (
           <div className="px-5 py-10 flex flex-col items-center gap-3">
             <Loader2 size={32} className="animate-spin text-green-600" />
-            <p className="text-gray-600 text-sm font-medium">Sending invoice…</p>
+            <p className="text-gray-600 text-sm font-medium">Creating invoice…</p>
           </div>
         )}
 
@@ -624,10 +624,8 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
         {step === 'success' && (
           <>
             <div className="px-5 pt-5 pb-3 border-b border-gray-100">
-              <h3 className="font-semibold text-gray-800 text-lg">
-                {emailInput.trim() ? '✅ Invoice Sent!' : '✅ Invoice Created'}
-              </h3>
-              {!emailInput.trim() && <p className="text-xs text-gray-400 mt-0.5">No email — send link below</p>}
+              <h3 className="font-semibold text-gray-800 text-lg">✅ Invoice Created</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Copy link below to send to client</p>
             </div>
             <div className="px-5 py-4 space-y-3 text-sm">
               <p className="text-gray-700 font-medium">{clientName} · {fmtCurrency(mow.amount)}</p>
