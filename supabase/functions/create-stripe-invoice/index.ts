@@ -10,7 +10,6 @@ const AIRTABLE_BASE = 'appZOi48qf8SzyOml'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
 const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
 
-// Airtable field IDs
 const FIELDS = {
   stripeInvoiceUrl:    'fldoHweTNKKE7hjyy',
   stripeInvoiceId:     'fldC06DE4htmBScNM',
@@ -24,6 +23,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Tags the error with errorType so the catch block can classify it.
 async function updateAirtable(table: string, recordId: string, fields: Record<string, string>) {
   const res = await fetch(
     `https://api.airtable.com/v0/${AIRTABLE_BASE}/${table}/${recordId}`,
@@ -37,14 +37,30 @@ async function updateAirtable(table: string, recordId: string, fields: Record<st
     }
   )
   if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Airtable update failed: ${err}`)
+    const body = await res.text()
+    const err = new Error(`Airtable update failed: ${body}`) as Error & { errorType: string }
+    err.errorType = res.status === 401 ? 'airtable_auth' : 'airtable_other'
+    throw err
   }
   return res.json()
 }
 
+function classifyError(err: unknown): { errorType: string; message: string } {
+  const anyErr = err as any
+  const message = anyErr instanceof Error ? anyErr.message : 'Unknown error'
+
+  // Already tagged by updateAirtable
+  if (anyErr?.errorType) return { errorType: anyErr.errorType, message }
+
+  // Stripe SDK errors carry a numeric statusCode
+  if (anyErr?.statusCode || anyErr?.type?.startsWith?.('Stripe')) {
+    return { errorType: 'stripe', message }
+  }
+
+  return { errorType: 'unknown', message }
+}
+
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -61,16 +77,14 @@ Deno.serve(async (req) => {
       description,
     } = body
 
-    // Validate required fields
     if (!mowRecordId || !amount || !description) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: mowRecordId, amount, description' }),
+        JSON.stringify({ error: 'Missing required fields: mowRecordId, amount, description', errorType: 'validation' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     // --- Step 1: Find or create Stripe customer ---
-    // IGNORE portal-passed stripeCustomerId — it can be stale/wrong contact.
     // Always look up from Airtable using contactRecordId as source of truth.
     let customerId: string | null = null
     let contactEmail = ''
@@ -81,18 +95,22 @@ Deno.serve(async (req) => {
           `https://api.airtable.com/v0/${AIRTABLE_BASE}/${CONTACTS_TABLE}/${contactRecordId}?returnFieldsByFieldId=true`,
           { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } }
         )
+        if (!contactRes.ok) {
+          const body = await contactRes.text()
+          const err = new Error(`Airtable contact fetch failed: ${body}`) as Error & { errorType: string }
+          err.errorType = contactRes.status === 401 ? 'airtable_auth' : 'airtable_other'
+          throw err
+        }
         const contactData = await contactRes.json()
         console.log('[Invoice] Airtable contact fields:', JSON.stringify(contactData?.fields))
         const storedId = contactData?.fields?.[FIELDS.stripeCustomerId]
         contactEmail = contactData?.fields?.[FIELDS.email] ?? ''
         if (storedId) {
-          // Verify it's still valid in Stripe
           try {
             const existing = await stripe.customers.retrieve(storedId)
             if (!(existing as any).deleted) {
               customerId = storedId
               console.log('[Invoice] Using stored Stripe customer from Airtable:', customerId, (existing as any).name)
-              // Patch email onto existing customer if it's missing
               const existingEmail = (existing as any).email
               if (!existingEmail && contactEmail) {
                 await stripe.customers.update(customerId!, { email: contactEmail })
@@ -108,6 +126,8 @@ Deno.serve(async (req) => {
           console.log('[Invoice] No Stripe customer ID on Airtable contact:', contactRecordId)
         }
       } catch (err) {
+        // Re-throw Airtable auth failures so the caller sees errorType: 'airtable_auth'
+        if ((err as any)?.errorType) throw err
         console.warn('[Invoice] Could not fetch contact from Airtable:', err)
       }
     }
@@ -143,8 +163,7 @@ Deno.serve(async (req) => {
     })
     console.log('[Invoice] Created invoice item:', invoiceItem.id, 'customer:', customerId, 'amount:', amountInCents)
 
-    // --- Step 3: Create invoice (explicitly include pending items) ---
-    // Use mow service date as due date if provided, otherwise due immediately
+    // --- Step 3: Create invoice ---
     let dueDate: number | undefined
     if (body.mowDate) {
       const d = new Date(body.mowDate + 'T23:59:59Z')
@@ -165,7 +184,16 @@ Deno.serve(async (req) => {
     })
     console.log('[Invoice] Created invoice:', invoice.id, 'amount_due:', invoice.amount_due)
 
-    // --- Step 4: Finalize invoice (does NOT send, does NOT require customer email) ---
+    // --- Step 4: Write invoice ID to Airtable BEFORE finalizing ---
+    // Validates Airtable auth early so a broken PAT never orphans a finalized Stripe invoice.
+    if (mowRecordId) {
+      await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
+        [FIELDS.stripeInvoiceId]:  invoice.id,
+        [FIELDS.invoiceStatus]:    'Processing',
+      })
+    }
+
+    // --- Step 5: Finalize invoice ---
     const finalized = await stripe.invoices.finalizeInvoice(invoice.id, {
       auto_advance: false,
     })
@@ -174,12 +202,11 @@ Deno.serve(async (req) => {
     const pdfUrl    = finalized.invoice_pdf ?? ''
     const invoiceId = finalized.id
 
-    // --- Step 5: Update Airtable schedule record ---
+    // --- Step 6: Update Airtable with hosted URL and final status ---
     if (mowRecordId) {
       await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
-        [FIELDS.stripeInvoiceUrl]:  hostedUrl,
-        [FIELDS.stripeInvoiceId]:   invoiceId,
-        [FIELDS.invoiceStatus]:     'Finalized',
+        [FIELDS.stripeInvoiceUrl]: hostedUrl,
+        [FIELDS.invoiceStatus]:    'Finalized',
       })
     }
 
@@ -195,8 +222,9 @@ Deno.serve(async (req) => {
 
   } catch (err) {
     console.error('Edge function error:', err)
+    const { errorType, message } = classifyError(err)
     return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : 'Unknown error' }),
+      JSON.stringify({ error: message, errorType }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

@@ -453,6 +453,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
   const [emailInput, setEmailInput] = useState(initialContact?.email || '')
   const [invoiceUrl, setInvoiceUrl] = useState('')
   const [copied, setCopied] = useState(false)
+  const [invoiceError, setInvoiceError] = useState(null)
 
   // Bug 3 fix: Use mow.contactIds (already parsed from mow.fields[SF.contacts])
   const mowContactId = mow.contactIds?.[0] || null
@@ -540,11 +541,13 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
           atPatch(CONTACTS_TABLE, mowContactId, { [CF.email]: emailInput.trim() }).catch(() => {})
         }
       } else {
-        console.error('Invoice error:', data.error || 'Unknown error')
+        console.error('Invoice error:', data.error || 'Unknown error', 'type:', data.errorType)
+        setInvoiceError({ type: data.errorType, message: data.error })
         setStep('error')
       }
     } catch (err) {
       console.error('Invoice fetch error:', err)
+      setInvoiceError({ type: 'unknown', message: err?.message })
       setStep('error')
     }
   }
@@ -661,7 +664,15 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
               <h3 className="font-semibold text-gray-800 text-lg">❌ Something went wrong</h3>
             </div>
             <div className="px-5 py-4">
-              <p className="text-gray-600 text-sm">Invoice not sent. Please try again or contact support.</p>
+              {invoiceError?.type === 'airtable_auth' ? (
+                <p className="text-gray-600 text-sm">Airtable authentication failed — the portal API token is invalid or expired. Contact support to refresh it.</p>
+              ) : invoiceError?.type === 'airtable_other' ? (
+                <p className="text-gray-600 text-sm">Failed to save invoice data to Airtable. The Stripe invoice was not created — safe to try again.</p>
+              ) : invoiceError?.type === 'stripe' ? (
+                <p className="text-gray-600 text-sm">Stripe error — invoice was not created. Please try again or contact support.</p>
+              ) : (
+                <p className="text-gray-600 text-sm">Invoice not sent. Please try again or contact support.</p>
+              )}
             </div>
             <div className="px-5 pb-5 flex gap-3">
               <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
