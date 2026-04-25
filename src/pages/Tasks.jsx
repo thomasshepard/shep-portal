@@ -544,6 +544,50 @@ function DoneBuckets({ tasks, doneSearch, doneBuckets, toggleBucket, cardPropsOf
   )
 }
 
+// ── ModuleGroups ──────────────────────────────────────────────────────────────
+const MODULE_ORDER = ['Happy Cuts', 'Properties', 'LLC', 'Manual']
+
+function ModuleGroups({ tasks, collapsedGroups, onToggleGroup, cardPropsOf }) {
+  const grouped = {}
+  for (const task of tasks) {
+    const mod = safeStr(task.fields[FIELDS.MODULE]) || 'Manual'
+    if (!grouped[mod]) grouped[mod] = []
+    grouped[mod].push(task)
+  }
+  const modules = [
+    ...MODULE_ORDER.filter(m => grouped[m]),
+    ...Object.keys(grouped).filter(m => !MODULE_ORDER.includes(m)),
+  ]
+  if (modules.length === 0) return null
+  if (modules.length === 1) {
+    return <>{grouped[modules[0]].map(task => <TaskCard key={task.id} task={task} {...cardPropsOf(task)} />)}</>
+  }
+  return (
+    <>
+      {modules.map(mod => {
+        const items = grouped[mod]
+        const isOpen = !collapsedGroups[mod]
+        return (
+          <div key={mod} className="mb-2">
+            <button
+              onClick={() => onToggleGroup(mod)}
+              className="flex items-center gap-2 w-full text-left py-1.5 mb-1 hover:bg-slate-50 rounded-lg px-1 transition-colors"
+            >
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${MODULE_ACCENT[mod] || 'bg-slate-400'}`} />
+              <span className={`text-xs font-semibold ${MODULE_TEXT[mod] || 'text-slate-500'}`}>{mod}</span>
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${MODULE_PILL_BG[mod] || 'bg-slate-100 text-slate-500'} ml-0.5`}>
+                {items.length}
+              </span>
+              <ChevronDown size={12} className={`text-slate-400 ml-auto transition-transform ${isOpen ? '' : '-rotate-90'}`} />
+            </button>
+            {isOpen && items.map(task => <TaskCard key={task.id} task={task} {...cardPropsOf(task)} />)}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
 // ── Empty column state ────────────────────────────────────────────────────────
 function ColEmpty({ colKey, onAdd }) {
   if (colKey === 'todo') return (
@@ -588,6 +632,10 @@ export default function Tasks() {
     try { return JSON.parse(localStorage.getItem('tasks:doneBuckets')) || DEFAULT_BUCKETS }
     catch { return DEFAULT_BUCKETS }
   })
+  const [moduleGroups, setModuleGroups] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('tasks:moduleGroups')) || {} }
+    catch { return {} }
+  })
 
   const userId = session?.user?.id
 
@@ -615,6 +663,14 @@ export default function Tasks() {
     setDoneBuckets(prev => {
       const next = { ...prev, [key]: !prev[key] }
       try { localStorage.setItem('tasks:doneBuckets', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+
+  function toggleModuleGroup(mod) {
+    setModuleGroups(prev => {
+      const next = { ...prev, [mod]: !prev[mod] }
+      try { localStorage.setItem('tasks:moduleGroups', JSON.stringify(next)) } catch {}
       return next
     })
   }
@@ -943,7 +999,9 @@ export default function Tasks() {
               }
               return tasks.length === 0
                 ? <ColEmpty colKey={activeCol} onAdd={() => setShowAdd(true)} />
-                : tasks.map(task => <TaskCard key={task.id} task={task} {...cardPropsOf(task)} />)
+                : filter === 'All'
+                  ? <ModuleGroups tasks={tasks} collapsedGroups={moduleGroups} onToggleGroup={toggleModuleGroup} cardPropsOf={cardPropsOf} />
+                  : tasks.map(task => <TaskCard key={task.id} task={task} {...cardPropsOf(task)} />)
             })()}
           </div>
 
@@ -981,7 +1039,9 @@ export default function Tasks() {
                     : <DoneBuckets tasks={byStatus('Done')} doneSearch={doneSearch} doneBuckets={doneBuckets} toggleBucket={toggleBucket} cardPropsOf={cardPropsOf} />
                   : byStatus(col.status).length === 0
                     ? <ColEmpty colKey={col.key} onAdd={() => setShowAdd(true)} />
-                    : byStatus(col.status).map(task => <TaskCard key={task.id} task={task} {...cardPropsOf(task)} />)
+                    : filter === 'All'
+                      ? <ModuleGroups tasks={byStatus(col.status)} collapsedGroups={moduleGroups} onToggleGroup={toggleModuleGroup} cardPropsOf={cardPropsOf} />
+                      : byStatus(col.status).map(task => <TaskCard key={task.id} task={task} {...cardPropsOf(task)} />)
                 }
               </div>
             ))}
