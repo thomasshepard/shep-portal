@@ -210,11 +210,15 @@ function AddTaskDialog({ onClose, onAdd }) {
 }
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
-function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle, onDelete, onNotesChange, onDueDateChange, onToast }) {
+function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle, onDelete, onNotesChange, onDueDateChange, onTitleChange, onBodyChange, onToast }) {
   const [expanded,    setExpanded]    = useState(false)
   const [localNotes,  setLocalNotes]  = useState(safeStr(task.fields[FIELDS.NOTES]))
   const [localDue,    setLocalDue]    = useState(safeStr(task.fields[FIELDS.DUE_DATE]))
+  const [localTitle,  setLocalTitle]  = useState(safeStr(task.fields[FIELDS.TITLE]))
+  const [localBody,   setLocalBody]   = useState(safeStr(task.fields[FIELDS.BODY]))
   const [savingNotes, setSavingNotes] = useState(false)
+  const [savingTitle, setSavingTitle] = useState(false)
+  const [savingBody,  setSavingBody]  = useState(false)
   const [copied,      setCopied]      = useState(false)
   const [swipeDel,    setSwipeDel]    = useState(false)
   const touchStart = useRef(null)
@@ -249,6 +253,21 @@ function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle
     setSavingNotes(true)
     await onNotesChange(task.id, localNotes)
     setSavingNotes(false)
+  }
+
+  async function saveTitle() {
+    const trimmed = localTitle.trim()
+    if (!trimmed || trimmed === safeStr(task.fields[FIELDS.TITLE])) return
+    setSavingTitle(true)
+    await onTitleChange(task.id, trimmed)
+    setSavingTitle(false)
+  }
+
+  async function saveBody() {
+    if (localBody === safeStr(task.fields[FIELDS.BODY])) return
+    setSavingBody(true)
+    await onBodyChange(task.id, localBody)
+    setSavingBody(false)
   }
 
   function setDuePreset(days) {
@@ -383,7 +402,29 @@ function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle
       {/* Expanded section */}
       {expanded && (
         <div className="border-t border-slate-100 px-3 py-3 space-y-3">
-          {body && <p className="text-xs text-slate-600 leading-relaxed">{body}</p>}
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">Title</label>
+            <input
+              value={localTitle}
+              onChange={e => setLocalTitle(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur() } }}
+              className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-slate-300"
+            />
+            {savingTitle && <p className="text-[10px] text-slate-400 mt-0.5">Saving…</p>}
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">Description</label>
+            <textarea
+              value={localBody}
+              onChange={e => setLocalBody(e.target.value)}
+              onBlur={saveBody}
+              rows={2}
+              placeholder="Add description…"
+              className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-slate-300 resize-none"
+            />
+            {savingBody && <p className="text-[10px] text-slate-400 mt-0.5">Saving…</p>}
+          </div>
 
           {/* Due date editor */}
           {!isDone && (
@@ -653,6 +694,22 @@ export default function Tasks() {
     await updateTask(recordId, { [FIELDS.DUE_DATE]: dueDate || null })
   }
 
+  async function handleTitleChange(recordId, title) {
+    setAllTasks(prev => prev.map(t =>
+      t.id === recordId ? { ...t, fields: { ...t.fields, [FIELDS.TITLE]: title } } : t
+    ))
+    try { await updateTask(recordId, { [FIELDS.TITLE]: title }) }
+    catch { loadTasks(); showToast('Failed to save title') }
+  }
+
+  async function handleBodyChange(recordId, body) {
+    setAllTasks(prev => prev.map(t =>
+      t.id === recordId ? { ...t, fields: { ...t.fields, [FIELDS.BODY]: body } } : t
+    ))
+    try { await updateTask(recordId, { [FIELDS.BODY]: body }) }
+    catch { loadTasks(); showToast('Failed to save description') }
+  }
+
   async function handleAdd({ title, dueDate }) {
     const record = await createTask({ title, dueDate, module: 'Manual', userId })
     setAllTasks(prev => [...prev, record])
@@ -697,6 +754,8 @@ export default function Tasks() {
       onDelete:       handleDelete,
       onNotesChange:   handleNotesChange,
       onDueDateChange: handleDueDateChange,
+      onTitleChange:   handleTitleChange,
+      onBodyChange:    handleBodyChange,
       onToast:         showToast,
     }
   }
