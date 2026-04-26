@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, AlertTriangle, ChevronDown, X } from 'lucide-react'
+import { RefreshCw, AlertTriangle, ChevronDown, X, BookOpen } from 'lucide-react'
 import { fetchAllRecords, updateRecord, PM_BASE_ID, CHICKENS_BASE_ID } from '../lib/airtable'
 import { fmtDate } from '../lib/airtable'
 import toast from 'react-hot-toast'
@@ -421,14 +421,23 @@ export default function Triage() {
               {dateLabel} · {total} item{total !== 1 ? 's' : ''}
             </p>
           </div>
-          <button
-            onClick={() => loadData(true)}
-            disabled={loading}
-            className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-40"
-            title="Refresh"
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => navigate('/triage/guide')}
+              className="p-2 rounded-full hover:bg-gray-100 text-gray-400 transition-colors"
+              title="User guide"
+            >
+              <BookOpen size={16} />
+            </button>
+            <button
+              onClick={() => loadData(true)}
+              disabled={loading}
+              className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-40"
+              title="Refresh"
+            >
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
         </div>
       </div>
 
