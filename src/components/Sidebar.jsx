@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Building2, Landmark, Wrench, FolderOpen,
-  Users, ScrollText, FileCode, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat,
+  Users, ScrollText, FileCode, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -34,6 +34,7 @@ export default function Sidebar({ open, onClose }) {
   }
 
   const navItems = [
+    permissions.can_view_triage && { to: '/triage', icon: Activity, label: 'Triage' },
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     (isAdmin || permissions.can_view_tasks) && { to: '/tasks', icon: ListTodo, label: 'Tasks' },
     permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },

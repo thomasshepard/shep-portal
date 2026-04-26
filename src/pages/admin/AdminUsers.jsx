@@ -28,6 +28,7 @@ const emptyForm = {
   can_view_tools: false,
   can_view_files: false,
   can_view_listings: false,
+  can_view_triage: false,
   allowed_tags: '',
 }
 
@@ -106,6 +107,7 @@ export default function AdminUsers() {
           can_view_tools: form.can_view_tools,
           can_view_files: form.can_view_files,
           can_view_listings: form.can_view_listings,
+          can_view_triage: form.can_view_triage,
           allowed_tags: form.allowed_tags || null,
         })
         .eq('id', newUserId)
@@ -205,6 +207,7 @@ export default function AdminUsers() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Tools</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Files</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Listings</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Triage</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -307,6 +310,13 @@ export default function AdminUsers() {
                         onChange={() => togglePerm(u, 'can_view_listings')}
                       />
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_triage}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_triage')}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -334,7 +344,7 @@ export default function AdminUsers() {
       </div>
 
       <div className="text-xs text-gray-400 space-y-0.5">
-        <p>• <strong>Properties</strong>, <strong>LLCs</strong>, <strong>Chickens</strong>, <strong>Documents</strong>, <strong>Facebook Deals</strong>, <strong>Tasks</strong>, <strong>Recipes</strong>, <strong>Tools</strong>, <strong>Files</strong>, and <strong>Listings</strong> toggles control which sections each user can see.</p>
+        <p>• <strong>Properties</strong>, <strong>LLCs</strong>, <strong>Chickens</strong>, <strong>Documents</strong>, <strong>Facebook Deals</strong>, <strong>Tasks</strong>, <strong>Recipes</strong>, <strong>Tools</strong>, <strong>Files</strong>, <strong>Listings</strong>, and <strong>Triage</strong> toggles control which sections each user can see.</p>
         <p>• Admin users always have full access — their toggles are locked.</p>
         <p>• <strong>Active/Inactive</strong> is a soft flag. To fully block access, also disable the account in Supabase Auth dashboard.</p>
         <p>• <strong>Delete</strong> permanently removes the account. Requires the <code>delete-user</code> edge function to be deployed.</p>
@@ -509,6 +519,15 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Listings</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_triage}
+                        onChange={e => setField('can_view_triage', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Triage</span>
                     </label>
                   </div>
                 </div>

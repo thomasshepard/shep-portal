@@ -32,6 +32,8 @@ import ChickenIncubatorGuide from './pages/ChickenIncubatorGuide'
 import Notifications from './pages/Notifications'
 import Tasks from './pages/Tasks'
 import Recipes from './pages/Recipes'
+import Triage from './pages/Triage'
+import TriageSetup from './pages/TriageSetup'
 import PropertyListings from './pages/PropertyListings.jsx'
 import CrossvilleDashboard from './pages/CrossvilleDashboard.jsx'
 
@@ -75,6 +77,8 @@ export default function App() {
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="recipes" element={<ProtectedRoute><Recipes /></ProtectedRoute>} />
+            <Route path="triage" element={<PermRoute permission="can_view_triage"><Triage /></PermRoute>} />
+            <Route path="triage/setup" element={<AdminRoute><TriageSetup /></AdminRoute>} />
             <Route
               path="admin"
               element={
