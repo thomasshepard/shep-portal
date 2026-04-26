@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, AlertTriangle, ChevronDown, X, BookOpen } from 'lucide-react'
+import { RefreshCw, AlertTriangle, ChevronDown, X, BookOpen, ExternalLink, Copy } from 'lucide-react'
 import { updateRecord, fmtDate } from '../lib/airtable'
 import {
   fetchAllTriageItems,
@@ -327,10 +327,282 @@ function Section({ bucket, items, onUpdate, onDismiss, onResolved }) {
   )
 }
 
+// ── TriageGuide modal ─────────────────────────────────────────────────────────
+
+const TRIAGE_OPERATOR_URL = 'https://claude.ai/project/019dcb52-9f60-7214-9d58-01b37ebc8b24'
+
+const GUIDE_EXAMPLE = {
+  late: {
+    strip: 'border-l-red-500',
+    source: 'PROPERTY · 56 S HARRIS',
+    what: 'Bi-weekly lender update sent to Brooke at ABC Capital',
+    date: 'Expected Apr 12 · 14 days late',
+    dateColor: 'text-red-600',
+    showConseq: true,
+    conseqBg: 'bg-red-50',
+    conseqText: 'text-red-800',
+    conseq: 'Lender confidence and future draw approvals at risk',
+    handler: 'Thomas',
+  },
+  dueSoon: {
+    strip: 'border-l-amber-500',
+    source: 'PROPERTY · 73 BENWICK',
+    what: 'VA flag repairs completed before inspection',
+    date: 'Due in 2 days',
+    dateColor: 'text-amber-600',
+    showConseq: true,
+    conseqBg: 'bg-amber-50',
+    conseqText: 'text-amber-800',
+    conseq: 'VA loan falls through if items not cleared',
+    handler: 'Subcontractor',
+  },
+  stale: {
+    strip: 'border-l-gray-400',
+    source: 'MAINTENANCE · 243 W MAIN',
+    what: 'Bathroom floor repair scheduled',
+    date: 'No update in 11 days',
+    dateColor: 'text-gray-500',
+    showConseq: false,
+    handler: 'Thomas',
+  },
+  watching: {
+    strip: 'border-l-blue-500',
+    source: 'FLOCK · SPRING 2026 BATCH',
+    what: 'Tractor #2 built before chicks reach week 3',
+    date: 'Watching since Apr 22',
+    dateColor: 'text-blue-600',
+    showConseq: false,
+    handler: 'Thomas',
+  },
+}
+
+const GUIDE_BUCKETS = [
+  { key: 'late',     label: 'LATE',     activeRing: 'ring-2 ring-red-400',   activeBorder: 'border-red-300',   strip: 'bg-red-500',   subtitle: 'Past deadline. Act today.' },
+  { key: 'dueSoon',  label: 'DUE SOON', activeRing: 'ring-2 ring-amber-400', activeBorder: 'border-amber-300', strip: 'bg-amber-500', subtitle: 'Within 3 days. Plan now.' },
+  { key: 'stale',    label: 'STALE',    activeRing: 'ring-2 ring-gray-400',  activeBorder: 'border-gray-300',  strip: 'bg-gray-400',  subtitle: 'Quiet too long. Check in.' },
+  { key: 'watching', label: 'WATCHING', activeRing: 'ring-2 ring-blue-400',  activeBorder: 'border-blue-300',  strip: 'bg-blue-500',  subtitle: 'Eyes on. No action yet.' },
+]
+
+const GUIDE_RULES = [
+  { icon: '$',  bg: 'bg-red-100',    fg: 'text-red-700',    title: 'Rent overdue',           sub: 'Invoice past due, not paid' },
+  { icon: '📜', bg: 'bg-amber-100',  fg: 'text-amber-700',  title: 'Lease ending soon',      sub: 'End date within 60 days, no renewal' },
+  { icon: '🔧', bg: 'bg-gray-100',   fg: 'text-gray-700',   title: 'Maintenance gone quiet', sub: 'Open request untouched 7+ days' },
+  { icon: '📋', bg: 'bg-purple-100', fg: 'text-purple-700', title: 'LLC report approaching', sub: 'Annual filing due within 60 days' },
+  { icon: '🐥', bg: 'bg-green-100',  fg: 'text-green-700',  title: 'Flock candling day',     sub: 'Day 7, 14, or 17 from hatch' },
+  { icon: '⏱', bg: 'bg-orange-100', fg: 'text-orange-700', title: 'Flock processing due',   sub: 'Past target weeks, still growing' },
+  { icon: '📄', bg: 'bg-pink-100',   fg: 'text-pink-700',   title: 'Document needs action',  sub: "Tagged 'Action Required', stale 3+ days" },
+  { icon: '✓',  bg: 'bg-blue-100',   fg: 'text-blue-700',   title: 'Task overdue',           sub: 'Past due, not marked done' },
+  { icon: '!',  bg: 'bg-red-100',    fg: 'text-red-700',    title: 'Active alert >24h',      sub: 'Alert open more than a day' },
+  { icon: '★',  bg: 'bg-amber-100',  fg: 'text-amber-700',  title: 'Manual flag',            sub: 'One-off item you added via Setup' },
+]
+
+const GUIDE_PROMPTS = [
+  'Triage check-in',
+  'Sent the lender email to Brooke',
+  'Mark 73 Benwick repairs as done',
+  'Walk the watches',
+]
+
+function TriageGuide({ onClose }) {
+  const [selectedBucket, setSelectedBucket] = useState('late')
+
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const ex = GUIDE_EXAMPLE[selectedBucket]
+  const handlerCls = HANDLER_COLORS[ex.handler] || 'bg-gray-100 text-gray-600'
+
+  function copyPrompt(text) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast.success('Copied — paste into the Operator'))
+      .catch(() => toast.error('Copy failed'))
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full rounded-t-2xl sm:rounded-xl sm:max-w-lg shadow-xl flex flex-col"
+        style={{ maxHeight: '90vh' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Sticky header */}
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Triage Station</h2>
+            <p className="text-xs text-gray-400">How it works</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 p-1"><X size={18} /></button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 p-5 space-y-6 pb-8">
+
+          {/* Big idea */}
+          <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm text-gray-600 leading-relaxed">
+            Triage doesn't store its own data. It watches your existing modules — Tasks, Maintenance, Leases, Documents, Flock, LLCs, Alerts — and surfaces only what needs you. Fix the underlying thing, the card disappears. No double entry.
+          </div>
+
+          {/* Bucket selector */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Buckets</p>
+            <div className="grid grid-cols-2 gap-2">
+              {GUIDE_BUCKETS.map(btn => (
+                <button
+                  key={btn.key}
+                  onClick={() => setSelectedBucket(btn.key)}
+                  className={`flex items-center gap-2.5 px-3 py-3 rounded-lg border text-left transition-all min-h-[56px] ${
+                    selectedBucket === btn.key
+                      ? `${btn.activeRing} ${btn.activeBorder} bg-white`
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className={`w-1.5 h-8 rounded-full flex-shrink-0 ${btn.strip}`} />
+                  <div>
+                    <p className="text-xs font-bold text-gray-800">{btn.label}</p>
+                    <p className="text-[10px] text-gray-500 leading-snug">{btn.subtitle}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Example card */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Example card</p>
+            <div
+              aria-live="polite"
+              className={`bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden border-l-4 ${ex.strip}`}
+            >
+              <div className="px-4 py-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">{ex.source}</p>
+                <p className="text-sm font-medium text-gray-900 leading-snug mb-2">{ex.what}</p>
+                <p className={`text-xs font-medium mb-2 ${ex.dateColor}`}>{ex.date}</p>
+                {ex.showConseq && (
+                  <div className={`flex items-start gap-1.5 rounded-md px-2 py-1.5 mb-2 ${ex.conseqBg}`}>
+                    <AlertTriangle size={12} className={`flex-shrink-0 mt-0.5 ${ex.dateColor}`} />
+                    <p className={`text-xs ${ex.conseqText}`}>{ex.conseq}</p>
+                  </div>
+                )}
+                <span className={`inline-block text-[10px] font-medium px-2 py-0.5 rounded-full mb-2 ${handlerCls}`}>
+                  {ex.handler}
+                </span>
+                <div className="flex gap-2 justify-end">
+                  <span className="text-xs px-3 py-1.5 border border-gray-200 rounded-lg text-gray-400 select-none">Open</span>
+                  <span className="text-xs px-3 py-1.5 rounded-lg text-white bg-gray-400 select-none">Resolve</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Buttons */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">The buttons</p>
+            <div className="space-y-2.5">
+              {[
+                { label: 'Resolve',              desc: 'Closes out the item. For tasks, marks them done inline.' },
+                { label: 'Open',                 desc: 'Jumps to the source record in its module.' },
+                { label: '× Dismiss',            desc: 'Hides the card for 24 hours. Comes back tomorrow.' },
+                { label: 'Update (manual only)', desc: 'Log a status note, adjust the checkpoint, or mark it done.' },
+              ].map(({ label, desc }) => (
+                <div key={label} className="flex gap-3 items-start">
+                  <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded font-medium whitespace-nowrap flex-shrink-0 leading-5">{label}</span>
+                  <p className="text-xs text-gray-500 leading-relaxed">{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Rules */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">What gets surfaced automatically</p>
+            <div className="space-y-2">
+              {GUIDE_RULES.map((rule, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-xs font-bold ${rule.bg} ${rule.fg}`}>
+                    {rule.icon}
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-800">{rule.title}</p>
+                    <p className="text-[10px] text-gray-400 leading-snug">{rule.sub}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Daily flow */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Daily flow</p>
+            <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-3">
+              {[
+                { n: '1', time: 'Morning · 60 sec',          desc: 'Open Triage. Read the reds. Decide: handle, route, or wait.' },
+                { n: '2', time: 'Throughout the day · 15 sec', desc: 'Tap Resolve on the card, or tell the Operator AI.' },
+                { n: '3', time: 'Sunday night · 20 min',     desc: 'In the Operator AI, say "walk the watches."' },
+              ].map(({ n, time, desc }) => (
+                <div key={n} className="flex gap-3">
+                  <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0 mt-0.5">{n}</span>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-700">{time}</p>
+                    <p className="text-xs text-gray-500 leading-relaxed">{desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Operator AI */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Triage Operator AI</p>
+            <a
+              href={TRIAGE_OPERATOR_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-3 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors mb-3"
+            >
+              <ExternalLink size={15} />
+              Open Triage Operator
+            </a>
+            <p className="text-[10px] text-gray-400 mb-2">Tap to copy a prompt, then paste into the Operator:</p>
+            <div className="grid grid-cols-2 gap-2">
+              {GUIDE_PROMPTS.map(prompt => (
+                <button
+                  key={prompt}
+                  onClick={() => copyPrompt(prompt)}
+                  className="flex items-center gap-1.5 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-700 hover:bg-gray-100 text-left transition-colors"
+                >
+                  <Copy size={11} className="flex-shrink-0 text-gray-400" />
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Manual flags callout */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 leading-relaxed">
+            <span className="font-semibold">Almost never use manual flags.</span>{' '}
+            They're for watching a person, a custom project, or a one-off follow-up that doesn't fit a module.
+            If it fits Tasks, Maintenance, or Documents — put it there. The rules catch it automatically.
+          </div>
+
+          {/* Footer */}
+          <p className="text-xs text-gray-400 text-center pb-2">
+            Triage Station · Shep Portal · Questions? Ask the Operator AI.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Triage() {
-  const navigate  = useNavigate()
   const { profile } = useAuth()
   const userId    = profile?.id
 
@@ -340,6 +612,7 @@ export default function Triage() {
   const [refreshing,   setRefreshing]   = useState(false)
   const [error,        setError]        = useState(null)
   const [updateTarget, setUpdateTarget] = useState(null)
+  const [showGuide,    setShowGuide]    = useState(false)
 
   const loadData = useCallback(async (force = false) => {
     if (force) setRefreshing(true)
@@ -395,7 +668,7 @@ export default function Triage() {
               <span className="text-xs text-gray-400 mr-1 hidden sm:inline">{cacheAge}</span>
             )}
             <button
-              onClick={() => navigate('/triage/guide')}
+              onClick={() => setShowGuide(true)}
               className="p-2 rounded-full hover:bg-gray-100 text-gray-400 transition-colors"
               title="User guide"
             >
@@ -449,11 +722,12 @@ export default function Triage() {
           onClose={() => setUpdateTarget(null)}
           onSaved={() => {
             setUpdateTarget(null)
-            cacheRef.current = { data: null, ts: 0 }
+            invalidateTriageCache()
             loadData(true)
           }}
         />
       )}
+      {showGuide && <TriageGuide onClose={() => setShowGuide(false)} />}
     </div>
   )
 }
