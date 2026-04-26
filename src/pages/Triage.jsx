@@ -4,6 +4,7 @@ import { RefreshCw, AlertTriangle, ChevronDown, X, BookOpen } from 'lucide-react
 import { updateRecord, fmtDate } from '../lib/airtable'
 import {
   fetchAllTriageItems,
+  invalidateTriageCache,
   getActiveDismissals,
   dismissItem,
   resolveTriageItem,
@@ -19,7 +20,13 @@ const safeRender = (v, fb = '—') => {
   return String(v) || fb
 }
 
-const CACHE_TTL_MS = 60_000
+function formatCacheAge(fetchedAt) {
+  if (!fetchedAt) return null
+  const mins = Math.floor((Date.now() - fetchedAt) / 60000)
+  if (mins < 1) return 'Just updated'
+  if (mins < 60) return `Updated ${mins} min ago`
+  return `Updated ${Math.floor(mins / 60)}h ago`
+}
 
 const HANDLER_COLORS = {
   Thomas:        'bg-slate-100 text-slate-700',
@@ -327,33 +334,28 @@ export default function Triage() {
   const { profile } = useAuth()
   const userId    = profile?.id
 
-  const [items,        setItems]        = useState([])
+  const [items,        setItems]        = useState(null)   // null = first load
+  const [fetchedAt,    setFetchedAt]    = useState(null)
   const [dismissed,    setDismissed]    = useState(new Set())
-  const [loading,      setLoading]      = useState(true)
+  const [refreshing,   setRefreshing]   = useState(false)
   const [error,        setError]        = useState(null)
   const [updateTarget, setUpdateTarget] = useState(null)
-  const cacheRef = useRef({ data: null, ts: 0 })
 
   const loadData = useCallback(async (force = false) => {
-    if (!force && cacheRef.current.data && Date.now() - cacheRef.current.ts < CACHE_TTL_MS) {
-      setItems(cacheRef.current.data)
-      setLoading(false)
-      return
-    }
-    setLoading(true)
+    if (force) setRefreshing(true)
     setError(null)
     try {
-      const [allItems, activeDismissals] = await Promise.all([
-        fetchAllTriageItems(new Date(), { userId }),
+      const [{ items: allItems, fetchedAt: ts }, activeDismissals] = await Promise.all([
+        fetchAllTriageItems(new Date(), { userId, forceRefresh: force }),
         getActiveDismissals(userId),
       ])
       setDismissed(activeDismissals)
-      cacheRef.current = { data: allItems, ts: Date.now() }
       setItems(allItems)
+      setFetchedAt(ts)
     } catch (e) {
       setError(e.message)
     } finally {
-      setLoading(false)
+      setRefreshing(false)
     }
   }, [userId])
 
@@ -363,17 +365,19 @@ export default function Triage() {
     setDismissed(prev => new Set([...prev, itemId]))
     await dismissItem(userId, itemId)
     toast('Dismissed for 24 hours', { icon: '⏱' })
+    invalidateTriageCache()
   }
 
   function handleResolved() {
-    cacheRef.current = { data: null, ts: 0 }
+    invalidateTriageCache()
     loadData(true)
   }
 
-  const visible = items.filter(item => !dismissed.has(item.id))
-  const grouped = Object.fromEntries(BUCKET_ORDER.map(b => [b, visible.filter(r => r.bucket === b)]))
-  const total   = visible.length
+  const visible   = (items || []).filter(item => !dismissed.has(item.id))
+  const grouped   = Object.fromEntries(BUCKET_ORDER.map(b => [b, visible.filter(r => r.bucket === b)]))
+  const total     = visible.length
   const dateLabel = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  const cacheAge  = formatCacheAge(fetchedAt)
 
   return (
     <div>
@@ -387,6 +391,9 @@ export default function Triage() {
             </p>
           </div>
           <div className="flex items-center gap-1">
+            {cacheAge && (
+              <span className="text-xs text-gray-400 mr-1 hidden sm:inline">{cacheAge}</span>
+            )}
             <button
               onClick={() => navigate('/triage/guide')}
               className="p-2 rounded-full hover:bg-gray-100 text-gray-400 transition-colors"
@@ -396,11 +403,11 @@ export default function Triage() {
             </button>
             <button
               onClick={() => loadData(true)}
-              disabled={loading}
+              disabled={refreshing}
               className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-40"
               title="Refresh"
             >
-              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
@@ -414,7 +421,7 @@ export default function Triage() {
           </div>
         )}
 
-        {loading ? (
+        {items === null ? (
           <Skeleton />
         ) : total === 0 ? (
           <div className="text-center py-16">

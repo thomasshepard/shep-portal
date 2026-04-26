@@ -596,24 +596,45 @@ export const TRIAGE_RULES = [
   },
 ]
 
+// ── Module-level cache (survives component unmount/remount) ───────────────────
+
+const CACHE_TTL_MS = 5 * 60 * 1000
+
+let _cache = { items: null, fetchedAt: null, userId: null }
+
+export function invalidateTriageCache() {
+  _cache = { items: null, fetchedAt: null, userId: null }
+}
+
 // ── Main aggregator ───────────────────────────────────────────────────────────
 
 /**
  * Fetches and evaluates all triage items from all enabled rules.
  * @param {Date} today - reference date (defaults to now, zeroed to midnight)
- * @param {{ userId?: string }} options
- * @returns {Promise<TriageItem[]>}
+ * @param {{ userId?: string, forceRefresh?: boolean }} options
+ * @returns {Promise<{ items: TriageItem[], fetchedAt: number }>}
  */
 export async function fetchAllTriageItems(today = new Date(), options = {}) {
+  const { forceRefresh = false, userId } = options
+  const now = Date.now()
+  const cacheValid = _cache.items !== null
+    && _cache.fetchedAt !== null
+    && (now - _cache.fetchedAt) < CACHE_TTL_MS
+    && _cache.userId === userId
+
+  if (cacheValid && !forceRefresh) {
+    return { items: _cache.items, fetchedAt: _cache.fetchedAt }
+  }
+
   today = new Date(today)
   today.setHours(0, 0, 0, 0)
 
-  const cache   = new DataCache()
-  const allItems = []
+  const callCache = new DataCache()
+  const allItems  = []
 
   for (const rule of TRIAGE_RULES.filter(r => r.enabled)) {
     try {
-      const records = await rule.fetch(cache, options)
+      const records = await rule.fetch(callCache, options)
       for (const record of records) {
         const item = rule.evaluate(record, today)
         if (item) allItems.push(item)
@@ -623,5 +644,6 @@ export async function fetchAllTriageItems(today = new Date(), options = {}) {
     }
   }
 
-  return allItems
+  _cache = { items: allItems, fetchedAt: now, userId }
+  return { items: allItems, fetchedAt: now }
 }
