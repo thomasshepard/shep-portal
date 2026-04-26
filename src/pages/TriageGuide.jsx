@@ -73,6 +73,9 @@ export default function TriageGuide() {
       <P>
         Think of it as your morning floor walk. 90 seconds, you know what's late, what's about to be late, what's gone quiet, and what you're watching. Then you put the phone down and go to work.
       </P>
+      <P>
+        <strong>Most items surface automatically from the rules engine.</strong> You don't need to tag anything — overdue rent, expiring leases, stale maintenance requests, LLC filing deadlines, and overdue tasks appear without any manual work. The manual flag system (Triage Setup) is for one-off situations that don't fit a rule.
+      </P>
 
       <HR />
 
@@ -111,35 +114,62 @@ Expected May 1 · Due in 2 days
       <HR />
 
       {/* Buttons */}
-      <H2>The two buttons on every card</H2>
+      <H2>The buttons on every card</H2>
 
-      <H3>Update</H3>
+      <H3>× (dismiss)</H3>
+      <P>Small X in the top-right corner of every card. Hides the card for 24 hours. Use this when you've seen it and you're choosing to let it sit. It comes back tomorrow.</P>
+
+      <H3>Open</H3>
+      <P>Jumps directly to the source record — the full Property detail, Lease page, Maintenance request, Flock detail, or LLC record. Use this when you need context or want to take action in the module.</P>
+
+      <H3>Update (manual items only)</H3>
       <P>Opens a quick modal with:</P>
       <UL items={[
         'Last Observed — pre-filled with the current note. Rewrite it with what\'s true now. Keep it to one line.',
-        'Last Observed Date — defaults to today. Change only if you\'re logging something that happened earlier.',
+        'Last Observed Date — defaults to today.',
         'Optional: Expected Next Checkpoint and Triage Status (mark as Done, change to Watch, etc.)',
+        'Mark Done button — closes out the item immediately.',
       ]} />
-      <P>Hit Save. Takes 15 seconds.</P>
 
-      <H3>Open →</H3>
-      <P>Jumps directly to the source record — the full Property detail, Lease page, Maintenance request, Flock detail, or LLC record. Use this when you need context or want to take action beyond just logging an update.</P>
+      <H3>Action button (rule-based items)</H3>
+      <P>Items from the rules engine show an action button based on what the rule says to do — e.g. "Complete Task" for overdue tasks. Tapping it resolves the item inline and removes the card.</P>
 
       <HR />
+
+      {/* Rules engine */}
+      <H2>The rules engine</H2>
+      <P>These 9 rules run automatically on every refresh. No setup needed.</P>
+      <GuideTable
+        headers={['Rule', 'Triggers when']}
+        rows={[
+          ['Rent overdue',              'An invoice payment is past due and not marked Paid'],
+          ['Lease ending',              'A lease expires within 60 days with no closed status'],
+          ['Maintenance stale',         'An open maintenance request hasn\'t been updated in 7+ days'],
+          ['LLC annual report',         'An LLC\'s annual report is due within 60 days'],
+          ['Flock candling day',        'Today is Day 7, 14, or 17 since a growing flock\'s hatch date'],
+          ['Flock processing due',      'A flock\'s processing date is within 7 days or past'],
+          ['Document action required',  'A document tagged "Action Required" hasn\'t been updated in 3+ days'],
+          ['Task overdue',              'A task is past its due date and not marked Done'],
+          ['Alert stale',               'An Alerts table record is marked Active and is 24h+ old'],
+        ]}
+      />
+      <P>Plus the manual flag system (Rule 10) — items you tag directly in Airtable with Triage Status = Initiative, Rhythm, or Watch.</P>
 
       {/* Adding things */}
       <H2>Adding things to Triage</H2>
 
-      <H3>Option 1: The Setup page (admin only)</H3>
-      <P>Go to <code className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-xs font-mono">/triage/setup</code>. Shows all records across every source table that haven't been tagged yet. Tab through Property, Lease, Maintenance, Flock, and LLC. Fill in the 8 fields and save.</P>
-      <P>Use this for the initial backfill. After that, use Option 2.</P>
+      <H3>Most things appear automatically</H3>
+      <P>If rent is overdue, a lease is expiring, or a task is late — it just shows up. No action needed. Close the underlying record (mark it paid, close the lease, complete the task) and it disappears on the next refresh.</P>
 
-      <H3>Option 2: Conversational via Claude (recommended)</H3>
-      <P>Say it out loud to Claude in the Triage Operator project. For example:</P>
+      <H3>For one-off situations: Setup page (admin only)</H3>
+      <P>Go to <code className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded text-xs font-mono">/triage/setup</code>. Use this only for items that don't fit a rule — situations, custom projects, or follow-ups with people. Fill in the 8 fields and save.</P>
+
+      <H3>Conversational via Claude (recommended for one-offs)</H3>
+      <P>Tell Claude in the Triage Operator project:</P>
       <Callout>"I need to track the new chicks coming Friday. Need to build tractor #2 before they hit week 3."</Callout>
       <P>Claude pulls up the right record, fills in all 8 fields, and confirms. You don't touch a form.</P>
 
-      <H3>Option 3: Directly in Airtable</H3>
+      <H3>Directly in Airtable</H3>
       <P>Open any of the 5 tables and fill in the 8 triage fields manually. The triage page picks it up on the next refresh.</P>
 
       <HR />
