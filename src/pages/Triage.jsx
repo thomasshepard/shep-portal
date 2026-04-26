@@ -364,6 +364,7 @@ function Skeleton() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Triage() {
+  const navigate = useNavigate()
   const [items,        setItems]        = useState([])
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
