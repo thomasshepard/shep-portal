@@ -77,6 +77,8 @@ Deno.serve(async (req) => {
       description,
     } = body
 
+    console.log('[Invoice] Request start — mowRecordId:', mowRecordId, 'contactRecordId:', contactRecordId, 'clientName:', clientName, 'amount:', amount)
+
     if (!mowRecordId || !amount || !description) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields: mowRecordId, amount, description', errorType: 'validation' }),
@@ -187,16 +189,20 @@ Deno.serve(async (req) => {
     // --- Step 4: Write invoice ID to Airtable BEFORE finalizing ---
     // Validates Airtable auth early so a broken PAT never orphans a finalized Stripe invoice.
     if (mowRecordId) {
+      console.log('[Invoice] Step 4 — writing invoice ID to Airtable before finalize:', invoice.id)
       await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
         [FIELDS.stripeInvoiceId]:  invoice.id,
         [FIELDS.invoiceStatus]:    'Processing',
       })
+      console.log('[Invoice] Step 4 — Airtable pre-finalize write OK')
     }
 
     // --- Step 5: Finalize invoice ---
+    console.log('[Invoice] Step 5 — finalizing invoice:', invoice.id)
     const finalized = await stripe.invoices.finalizeInvoice(invoice.id, {
       auto_advance: false,
     })
+    console.log('[Invoice] Step 5 — finalized OK status:', finalized.status, 'hosted_url:', finalized.hosted_invoice_url)
 
     const hostedUrl = finalized.hosted_invoice_url ?? ''
     const pdfUrl    = finalized.invoice_pdf ?? ''
@@ -204,12 +210,15 @@ Deno.serve(async (req) => {
 
     // --- Step 6: Update Airtable with hosted URL and final status ---
     if (mowRecordId) {
+      console.log('[Invoice] Step 6 — writing hosted URL back to Airtable')
       await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
         [FIELDS.stripeInvoiceUrl]: hostedUrl,
         [FIELDS.invoiceStatus]:    'Finalized',
       })
+      console.log('[Invoice] Step 6 — Airtable post-finalize write OK')
     }
 
+    console.log('[Invoice] Success — invoiceId:', invoiceId, 'mowRecordId:', mowRecordId, 'hostedUrl:', hostedUrl)
     return new Response(
       JSON.stringify({
         invoiceId,
@@ -221,8 +230,8 @@ Deno.serve(async (req) => {
     )
 
   } catch (err) {
-    console.error('Edge function error:', err)
     const { errorType, message } = classifyError(err)
+    console.error('[Invoice] Error — errorType:', errorType, 'message:', message, err)
     return new Response(
       JSON.stringify({ error: message, errorType }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
