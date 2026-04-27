@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { ShoppingBag, ThumbsDown, RotateCcw, X } from 'lucide-react'
+import { ShoppingBag, ThumbsDown, RotateCcw, X, ExternalLink, Search } from 'lucide-react'
 import { fetchAllRecords, updateRecord, FBM_BASE_ID } from '../lib/airtable'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
@@ -89,7 +89,7 @@ function buildFormula(showDismissed, withinRange, availableOnly, scoreFilter) {
   const parts = []
   if (!showDismissed) parts.push('{Dismissed} != TRUE()')
   if (withinRange) parts.push('{Within Range} = TRUE()')
-  if (availableOnly) parts.push('OR({Status} = "Available", {Status} = "", BLANK() = {Status})')
+  if (availableOnly) parts.push('OR({Status} = "Available", ISBLANK({Status}))')
   if (scoreFilter === 'hot')      parts.push('{Deal Score} >= 8')
   else if (scoreFilter === 'good')     parts.push('AND({Deal Score} >= 6, {Deal Score} < 8)')
   else if (scoreFilter === 'low')      parts.push('AND({Deal Score} < 6, NOT(BLANK() = {Deal Score}))')
@@ -137,11 +137,12 @@ export default function Deals() {
   const [loading, setLoading] = useState(true)
   const [dismissedCount, setDismissedCount] = useState(0)
   const [showDismissed, setShowDismissed] = useState(false)
-  const [withinRange, setWithinRange] = useState(true)
+  const [withinRange, setWithinRange] = useState(false)
   const [availableOnly, setAvailableOnly] = useState(true)
   const [scoreFilter, setScoreFilter] = useState('all')
   const [itemFilter, setItemFilter] = useState('all')
   const [selected, setSelected] = useState(null)
+  const [keywordFilter, setKeywordFilter] = useState('')
 
   // Pagination state
   const [pageNum, setPageNum] = useState(1)
@@ -226,13 +227,27 @@ export default function Deals() {
   }, [records, searchItemMap])
 
   const filtered = useMemo(() => {
-    if (itemFilter === 'all') return records
-    return records.filter(r => {
-      const itemId = arr(r.fields?.['search-items'])[0]
-      const itemName = itemId ? searchItemMap[itemId] : ''
-      return itemName === itemFilter
-    })
-  }, [records, itemFilter, searchItemMap])
+    let result = records
+    if (itemFilter !== 'all') {
+      result = result.filter(r => {
+        const itemId = arr(r.fields?.['search-items'])[0]
+        const itemName = itemId ? searchItemMap[itemId] : ''
+        return itemName === itemFilter
+      })
+    }
+    if (keywordFilter.trim()) {
+      const kw = keywordFilter.toLowerCase()
+      result = result.filter(r => {
+        const f = r.fields || {}
+        return (
+          safeStr(f['Title']).toLowerCase().includes(kw) ||
+          safeStr(f['Description']).toLowerCase().includes(kw) ||
+          safeStr(f['Seller']).toLowerCase().includes(kw)
+        )
+      })
+    }
+    return result
+  }, [records, itemFilter, searchItemMap, keywordFilter])
 
   const dismiss = useCallback(async (record) => {
     setRecords(prev => prev.filter(r => r.id !== record.id))
@@ -324,6 +339,18 @@ export default function Deals() {
 
       {/* Filter bar */}
       <div className="space-y-2">
+        {/* Keyword search */}
+        <div className="relative">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search titles, descriptions, sellers…"
+            value={keywordFilter}
+            onChange={e => setKeywordFilter(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          />
+        </div>
+
         {/* Toggle row */}
         <div className="flex items-center gap-2 flex-wrap">
           <ToggleBtn active={withinRange} onClick={() => setWithinRange(v => !v)}>
@@ -470,12 +497,13 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore, 
   const score = safeNum(f['Deal Score'])
   const badge = scoreBadge(score)
   const imageUrl = safeStr(f['Image URL'])
-  const title = safeStr(f['Title'], 'Untitled')
+  const title = safeStr(f['Title']) || safeStr(f['Description']).split('\n')[0].trim().slice(0, 80) || 'Untitled'
   const priceText = safeStr(f['Price Text'])
   const price = safeNum(f['Price'])
   const prevPrice = safeNum(f['Previous Price'])
-  const displayPrice = priceText || (price != null ? `$${price.toLocaleString()}` : null)
-  const priceDiff = (price != null && prevPrice != null && price !== prevPrice) ? price - prevPrice : null
+  const displayPrice = priceText || (price != null && price > 0 ? `$${price.toLocaleString()}` : null)
+  const priceDiff = (price != null && price > 0 && prevPrice != null && price !== prevPrice) ? price - prevPrice : null
+  const url = safeStr(f['URL'])
   const locLine = locationLine(f)
   const withinRange = f['Within Range'] === true
   const date = safeStr(f['Date Found'])
@@ -540,17 +568,32 @@ function DealCard({ record, searchItemMap, showDismissed, onDismiss, onRestore, 
             )}
             {date && <span className="text-xs text-gray-400 flex-shrink-0">{relativeTime(date)}</span>}
           </div>
-          {isDismissed ? (
-            <button data-action="restore" onClick={e => { e.stopPropagation(); onRestore(record) }} title="Restore deal"
-              className="flex-shrink-0 p-1.5 text-gray-400 hover:text-green-600 transition-colors">
-              <RotateCcw size={15} />
-            </button>
-          ) : (
-            <button data-action="dismiss" onClick={e => { e.stopPropagation(); onDismiss(record) }} title="Dismiss deal"
-              className="flex-shrink-0 p-1.5 text-gray-300 hover:text-red-400 transition-colors">
-              <ThumbsDown size={15} />
-            </button>
-          )}
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {url && (
+              <a
+                data-action="link"
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                title="Open on Facebook"
+                className="p-1.5 text-gray-300 hover:text-blue-500 transition-colors"
+              >
+                <ExternalLink size={15} />
+              </a>
+            )}
+            {isDismissed ? (
+              <button data-action="restore" onClick={e => { e.stopPropagation(); onRestore(record) }} title="Restore deal"
+                className="p-1.5 text-gray-400 hover:text-green-600 transition-colors">
+                <RotateCcw size={15} />
+              </button>
+            ) : (
+              <button data-action="dismiss" onClick={e => { e.stopPropagation(); onDismiss(record) }} title="Dismiss deal"
+                className="p-1.5 text-gray-300 hover:text-red-400 transition-colors">
+                <ThumbsDown size={15} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -563,12 +606,12 @@ function DealModal({ record, searchItemMap, onClose, onDismiss, onRestore }) {
   const f = record.fields || {}
   const [imgError, setImgError] = useState(false)
 
-  const title = safeStr(f['Title'], 'Untitled')
+  const title = safeStr(f['Title']) || safeStr(f['Description']).split('\n')[0].trim().slice(0, 80) || 'Untitled'
   const priceText = safeStr(f['Price Text'])
   const price = safeNum(f['Price'])
   const prevPrice = safeNum(f['Previous Price'])
-  const displayPrice = priceText || (price != null ? `$${price.toLocaleString()}` : null)
-  const priceDiff = (price != null && prevPrice != null && price !== prevPrice) ? price - prevPrice : null
+  const displayPrice = priceText || (price != null && price > 0 ? `$${price.toLocaleString()}` : null)
+  const priceDiff = (price != null && price > 0 && prevPrice != null && price !== prevPrice) ? price - prevPrice : null
   const status = safeStr(f['Status'])
   const score = safeNum(f['Deal Score'])
   const scoreNotes = safeStr(f['Score Notes'])
