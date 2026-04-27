@@ -89,7 +89,7 @@ function buildFormula(showDismissed, withinRange, availableOnly, scoreFilter) {
   const parts = []
   if (!showDismissed) parts.push('{Dismissed} != TRUE()')
   if (withinRange) parts.push('{Within Range} = TRUE()')
-  if (availableOnly) parts.push('OR({Status} = "Available", ISBLANK({Status}))')
+  if (availableOnly) parts.push('OR({Status} = "Available", {Status} = "", BLANK() = {Status})')
   if (scoreFilter === 'hot')      parts.push('{Deal Score} >= 8')
   else if (scoreFilter === 'good')     parts.push('AND({Deal Score} >= 6, {Deal Score} < 8)')
   else if (scoreFilter === 'low')      parts.push('AND({Deal Score} < 6, NOT(BLANK() = {Deal Score}))')
