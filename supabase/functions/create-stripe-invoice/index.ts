@@ -135,9 +135,11 @@ Deno.serve(async (req) => {
 
     if (!customerId) {
       console.log('[Invoice] Creating new Stripe customer for:', clientName, '(contact:', contactRecordId, ')')
+      // Fall back to clientEmail from request if contactEmail wasn't set (e.g. no contactRecordId)
+      const emailToUse = contactEmail || clientEmail || ''
       const customer = await stripe.customers.create({
         name: clientName || 'Happy Cuts Client',
-        email: contactEmail || undefined,
+        email: emailToUse || undefined,
         metadata: {
           airtable_contact_id: contactRecordId || '',
           source: 'happy_cuts_portal',
@@ -165,18 +167,12 @@ Deno.serve(async (req) => {
     console.log('[Invoice] Created invoice item:', invoiceItem.id, 'customer:', customerId, 'amount:', amountInCents)
 
     // --- Step 3: Create invoice ---
-    let dueDate: number | undefined
-    if (body.mowDate) {
-      const d = new Date(body.mowDate + 'T23:59:59Z')
-      if (!isNaN(d.getTime())) {
-        dueDate = Math.floor(d.getTime() / 1000)
-      }
-    }
-
+    // Always use a future due date. Stripe rejects past due_dates for send_invoice.
+    // Mows are always invoiced after they happen, so mowDate is always in the past — don't use it.
     const invoice = await stripe.invoices.create({
       customer: customerId,
       collection_method: 'send_invoice',
-      ...(dueDate ? { due_date: dueDate } : { days_until_due: 0 }),
+      days_until_due: 14,
       pending_invoice_items_behavior: 'include',
       metadata: {
         airtable_mow_id: mowRecordId,
@@ -212,7 +208,7 @@ Deno.serve(async (req) => {
       console.log('[Invoice] Step 6 — writing hosted URL back to Airtable')
       await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
         [FIELDS.stripeInvoiceUrl]: hostedUrl,
-        [FIELDS.invoiceStatus]:    'Finalized',
+        [FIELDS.invoiceStatus]:    'Sent',
       })
       console.log('[Invoice] Step 6 — Airtable post-finalize write OK')
     }
