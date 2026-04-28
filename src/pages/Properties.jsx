@@ -21,7 +21,8 @@ const STATUS_COLORS = {
 
 // Always returns an array — Airtable linked/rollup/lookup fields can return
 // non-array values (objects, null) when a record has no linked items.
-const arr = v => Array.isArray(v) ? v : []
+const arr    = v => Array.isArray(v) ? v : []
+const safeNum = v => (v == null ? 0 : Number(v) || 0)
 
 function isSold(prop) {
   return (prop.fields?.Status || '').toLowerCase() === 'sold'
@@ -371,6 +372,7 @@ export default function Properties() {
                   <th className="text-right px-4 py-2 font-medium text-gray-600">Rent</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-600">Lease End</th>
                   <th className="text-right px-4 py-2 font-medium text-gray-600">Mo. Remaining</th>
+                  <th className="text-right px-4 py-2 font-medium text-gray-600">Days Overdue</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -381,6 +383,20 @@ export default function Properties() {
                   const propId = unitToPropertyId[unitId]
                   const prop = propMap[propId]
                   const tenant = tenantMap[arr(lf['Tenant Management'])[0]]
+                  const propPayments = paymentsByProperty[propId] || []
+                  const daysOverdue = (() => {
+                    const unpaid = propPayments.filter(p => {
+                      const s = p.fields?.Status || ''
+                      const due = p.fields?.['Due Date'] || ''
+                      if (!due || s === 'Paid') return false
+                      return new Date(due + 'T00:00:00') < today
+                    })
+                    if (!unpaid.length) return null
+                    return Math.max(...unpaid.map(p => {
+                      const due = new Date((p.fields?.['Due Date'] || '') + 'T00:00:00')
+                      return Math.floor(safeNum(today - due) / 86400000)
+                    }))
+                  })()
                   return (
                     <tr key={l.id} className="hover:bg-gray-50">
                       <td className="px-4 py-2 text-gray-700">{prop?.fields?.Address || '—'}</td>
@@ -389,6 +405,11 @@ export default function Properties() {
                       <td className="px-4 py-2 text-right font-medium">{fmtCurrency(lf['Rent Amount'] || lf['Lease Amount'])}</td>
                       <td className="px-4 py-2 text-gray-500">{fmtDate(lf['End Date'])}</td>
                       <td className="px-4 py-2 text-right text-gray-500">{lf['Months Remaining on Lease'] ?? '—'}</td>
+                      <td className="px-4 py-2 text-right font-medium">
+                        {daysOverdue != null
+                          ? <span className="text-red-600">{daysOverdue}d</span>
+                          : <span className="text-green-600">Current</span>}
+                      </td>
                     </tr>
                   )
                 })}
@@ -400,7 +421,7 @@ export default function Properties() {
                     <td className="px-4 py-2 text-right">
                       {fmtCurrency(rentRollLeases.reduce((s, l) => s + (l.fields?.['Rent Amount'] || l.fields?.['Lease Amount'] || 0), 0))}
                     </td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               )}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Plus, ChevronLeft, ChevronDown, Star, Trash2, ExternalLink, Copy, Check, Search, X } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import { supabase } from '../lib/supabase'
 import { fetchTasks, createTask, updateTask, deleteTask, dismissLinkedNotification, FIELDS } from '../lib/tasks'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -210,7 +211,7 @@ function AddTaskDialog({ onClose, onAdd }) {
 }
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
-function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle, onDelete, onNotesChange, onDueDateChange, onTitleChange, onBodyChange, onToast }) {
+function TaskCard({ task, flashStatus, isJustAdded, nudgeNotes, onStatusChange, onStarToggle, onDelete, onNotesChange, onDueDateChange, onTitleChange, onBodyChange, onToast }) {
   const [expanded,    setExpanded]    = useState(false)
   const [localNotes,  setLocalNotes]  = useState(safeStr(task.fields[FIELDS.NOTES]))
   const [localDue,    setLocalDue]    = useState(safeStr(task.fields[FIELDS.DUE_DATE]))
@@ -219,8 +220,9 @@ function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle
   const [savingNotes, setSavingNotes] = useState(false)
   const [savingTitle, setSavingTitle] = useState(false)
   const [savingBody,  setSavingBody]  = useState(false)
-  const [copied,      setCopied]      = useState(false)
-  const [swipeDel,    setSwipeDel]    = useState(false)
+  const [copied,       setCopied]       = useState(false)
+  const [swipeDel,     setSwipeDel]     = useState(false)
+  const [notesPulsing, setNotesPulsing] = useState(false)
   const touchStart = useRef(null)
 
   const status    = safeStr(task.fields[FIELDS.STATUS])
@@ -295,6 +297,14 @@ function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle
     if (dx > 80 && status !== 'Done') { onStatusChange(task, 'Done'); return }
     if (dx < -80) setSwipeDel(true)
   }
+
+  useEffect(() => {
+    if (nudgeNotes) {
+      const tOpen = setTimeout(() => { setExpanded(true); setNotesPulsing(true) }, 0)
+      const tStop = setTimeout(() => setNotesPulsing(false), 3000)
+      return () => { clearTimeout(tOpen); clearTimeout(tStop) }
+    }
+  }, [nudgeNotes])
 
   const entranceStyle = isJustAdded
     ? { animation: 'taskEnter 0.7s ease-out forwards' }
@@ -477,8 +487,13 @@ function TaskCard({ task, flashStatus, isJustAdded, onStatusChange, onStarToggle
               onBlur={saveNotes}
               rows={3}
               placeholder="Add notes…"
-              className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-slate-300 resize-none"
+              className={`w-full text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 resize-none ${notesPulsing ? 'ring-2 ring-amber-400 border-amber-400 focus:ring-amber-400' : 'border-slate-200 focus:ring-slate-300'}`}
             />
+            {notesPulsing && (
+              <p className="text-[10px] text-amber-600 mt-0.5 font-medium">
+                💡 Add completion notes for this task
+              </p>
+            )}
             {savingNotes && <p className="text-[10px] text-slate-400 mt-0.5">Saving…</p>}
           </div>
           <div className="flex gap-2">
@@ -615,7 +630,7 @@ function ColEmpty({ colKey, onAdd }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Tasks() {
-  const { session } = useAuth()
+  const { session, isAdmin } = useAuth()
 
   const [allTasks,    setAllTasks]    = useState([])
   const [loading,     setLoading]     = useState(true)
@@ -636,18 +651,36 @@ export default function Tasks() {
     try { return JSON.parse(localStorage.getItem('tasks:moduleGroups')) || {} }
     catch { return {} }
   })
+  const [viewingUserId, setViewingUserId] = useState(null)
+  const [otherUsers,    setOtherUsers]    = useState([])
+  const [nudgeTaskId,   setNudgeTaskId]   = useState(null)
 
   const userId = session?.user?.id
 
+  useEffect(() => {
+    if (userId && !viewingUserId) setViewingUserId(userId)
+  }, [userId]) // eslint-disable-line
+
   async function loadTasks() {
-    if (!userId) return
+    if (!viewingUserId) return
     setLoading(true); setError(null)
-    try { setAllTasks(await fetchTasks(userId)) }
+    try { setAllTasks(await fetchTasks(viewingUserId)) }
     catch (err) { console.error('[Tasks]', err); setError(err.message || 'Failed to load tasks') }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { loadTasks() }, [userId]) // eslint-disable-line
+  useEffect(() => { loadTasks() }, [viewingUserId]) // eslint-disable-line
+
+  useEffect(() => {
+    if (!isAdmin || !userId) return
+    supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('can_view_tasks', true)
+      .neq('id', userId)
+      .order('full_name')
+      .then(({ data }) => setOtherUsers(data || []))
+  }, [isAdmin, userId]) // eslint-disable-line
 
   // 'N' keyboard shortcut to open add dialog
   useEffect(() => {
@@ -699,6 +732,14 @@ export default function Tasks() {
     const fields = { [FIELDS.STATUS]: newStatus }
     if (newStatus === 'Done') fields[FIELDS.COMPLETED_AT] = today
     else                      fields[FIELDS.COMPLETED_AT] = null
+
+    if (newStatus === 'Done') {
+      const currentNotes = task.fields[FIELDS.NOTES]
+      if (!currentNotes || String(currentNotes).trim() === '') {
+        setNudgeTaskId(task.id)
+        setTimeout(() => setNudgeTaskId(null), 3500)
+      }
+    }
 
     const updated = { ...task, fields: { ...task.fields, ...fields } }
     setFlashMap(prev => ({ ...prev, [task.id]: newStatus }))
@@ -767,7 +808,7 @@ export default function Tasks() {
   }
 
   async function handleAdd({ title, dueDate }) {
-    const record = await createTask({ title, dueDate, module: 'Manual', userId })
+    const record = await createTask({ title, dueDate, module: 'Manual', userId: viewingUserId })
     setAllTasks(prev => [...prev, record])
     setActiveCol('todo')
     setJustAddedId(record.id)
@@ -805,6 +846,7 @@ export default function Tasks() {
     return {
       flashStatus:    flashMap[task.id] || null,
       isJustAdded:    justAddedId === task.id,
+      nudgeNotes:     nudgeTaskId === task.id,
       onStatusChange: handleStatusChange,
       onStarToggle:   handleStarToggle,
       onDelete:       handleDelete,
@@ -857,7 +899,12 @@ export default function Tasks() {
           {/* Title row */}
           <div className="flex items-center gap-3 mb-0.5">
             <div className="flex-shrink-0">
-              <h1 className="text-xl font-bold text-slate-900 leading-none">Tasks</h1>
+              <h1 className="text-xl font-bold text-slate-900 leading-none">
+                {(() => {
+                  const vu = viewingUserId && viewingUserId !== userId ? otherUsers.find(u => u.id === viewingUserId) : null
+                  return vu ? `${vu.full_name}'s Tasks` : 'Tasks'
+                })()}
+              </h1>
               <p className="text-[11px] text-slate-400 hidden md:block mt-0.5">N to add</p>
             </div>
 
@@ -895,6 +942,35 @@ export default function Tasks() {
               </button>
             </div>
           </div>
+
+          {/* Admin user-switcher */}
+          {isAdmin && otherUsers.length > 0 && (
+            <div className="flex gap-1.5 mt-2 mb-1 overflow-x-auto scrollbar-hide">
+              <button
+                onClick={() => { setAllTasks([]); setViewingUserId(userId) }}
+                className={`flex-none text-xs font-medium px-3 py-1 rounded-full border transition-colors ${
+                  viewingUserId === userId
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                }`}
+              >
+                My Tasks
+              </button>
+              {otherUsers.map(u => (
+                <button
+                  key={u.id}
+                  onClick={() => { setAllTasks([]); setViewingUserId(u.id) }}
+                  className={`flex-none text-xs font-medium px-3 py-1 rounded-full border transition-colors ${
+                    viewingUserId === u.id
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                  }`}
+                >
+                  {u.full_name}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Stats row */}
           <p className="text-sm text-slate-500 mb-3 mt-1">

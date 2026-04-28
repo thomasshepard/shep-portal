@@ -10,6 +10,7 @@ const emptyForm = {
   'Item Name': '',
   'Search Query': '',
   'Location': 'cookeville',
+  'Radius': '',
   'Max Price': '',
   'Min Price': '',
   'Keywords Include': '',
@@ -17,6 +18,8 @@ const emptyForm = {
   'Notes': '',
   'Active': true,
 }
+
+const arr = v => Array.isArray(v) ? v : []
 
 function safeStr(val, fallback = '') {
   if (val === null || val === undefined) return fallback
@@ -66,6 +69,7 @@ export default function DealsSearchCriteria() {
       'Item Name':         safeStr(f['Item Name']),
       'Search Query':      safeStr(f['Search Query']),
       'Location':          safeStr(f['Location'], 'cookeville'),
+      'Radius':            safeNum(f['Radius']) ?? '',
       'Max Price':         safeNum(f['Max Price']) ?? '',
       'Min Price':         safeNum(f['Min Price']) ?? '',
       'Keywords Include':  safeStr(f['Keywords Include']),
@@ -101,6 +105,7 @@ export default function DealsSearchCriteria() {
       'Notes':            form['Notes'].trim(),
       'Active':           form['Active'],
     }
+    if (form['Radius'] !== '') fields['Radius'] = Number(form['Radius'])
     if (form['Max Price'] !== '') fields['Max Price'] = Number(form['Max Price'])
     if (form['Min Price'] !== '') fields['Min Price'] = Number(form['Min Price'])
 
@@ -171,6 +176,7 @@ export default function DealsSearchCriteria() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Search Query</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Max Price</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Location</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-600">Matches</th>
                 <th className="px-4 py-3 w-20" />
               </tr>
             </thead>
@@ -205,6 +211,12 @@ export default function DealsSearchCriteria() {
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {safeStr(f['Location'], '—')}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {arr(f['matches']).length > 0
+                        ? <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{arr(f['matches']).length.toLocaleString()}</span>
+                        : <span className="text-xs text-gray-300">—</span>
+                      }
                     </td>
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
@@ -269,15 +281,27 @@ export default function DealsSearchCriteria() {
                 />
               </Field>
 
-              <Field label="Location *" hint="FB location slug: cookeville, chattanooga, nashville, knoxville">
-                <input
-                  required
-                  value={form['Location']}
-                  onChange={e => setField('Location', e.target.value)}
-                  placeholder="cookeville"
-                  className={inp}
-                />
-              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Location *" hint="FB location slug">
+                  <input
+                    required
+                    value={form['Location']}
+                    onChange={e => setField('Location', e.target.value)}
+                    placeholder="cookeville"
+                    className={inp}
+                  />
+                </Field>
+                <Field label="Radius (miles)" hint="Search radius on FB">
+                  <input
+                    type="number"
+                    min={1}
+                    value={form['Radius']}
+                    onChange={e => setField('Radius', e.target.value)}
+                    placeholder="e.g. 40"
+                    className={inp}
+                  />
+                </Field>
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Max Price">
