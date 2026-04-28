@@ -72,7 +72,6 @@ Deno.serve(async (req) => {
       contactRecordId,
       clientName,
       clientEmail,
-      stripeCustomerId: existingCustomerId,
       amount,
       description,
     } = body
@@ -106,7 +105,7 @@ Deno.serve(async (req) => {
         const contactData = await contactRes.json()
         console.log('[Invoice] Airtable contact fields:', JSON.stringify(contactData?.fields))
         const storedId = contactData?.fields?.[FIELDS.stripeCustomerId]
-        contactEmail = contactData?.fields?.[FIELDS.email] ?? ''
+        contactEmail = contactData?.fields?.[FIELDS.email] ?? clientEmail ?? ''
         if (storedId) {
           try {
             const existing = await stripe.customers.retrieve(storedId)
