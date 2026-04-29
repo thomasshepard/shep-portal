@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchAllRecords, createRecord, PM_BASE_ID } from '../lib/airtable'
+import { notify, getUserIdsWithPermission } from '../lib/notifications'
 import { Toaster } from 'react-hot-toast'
 import toast from 'react-hot-toast'
 
@@ -46,11 +47,27 @@ export default function MaintenanceSubmit() {
     // Remove undefined values
     Object.keys(fields).forEach(k => fields[k] === undefined && delete fields[k])
 
-    const { error } = await createRecord('Maintenance Requests', fields, PM_BASE_ID)
+    const { error, data: createdRecord } = await createRecord('Maintenance Requests', fields, PM_BASE_ID)
     if (error) {
       toast.error('Failed to submit request. Please try again.')
     } else {
       setSubmitted(true)
+      // Notify all users with property access
+      try {
+        const propName = properties.find(p => p.id === form.propertyId)?.fields?.Address || 'a property'
+        const pmUserIds = await getUserIdsWithPermission('can_view_properties')
+        const desc = form.description.slice(0, 80)
+        const recordId = createdRecord?.records?.[0]?.id || ''
+        notify({
+          userIds:   pmUserIds,
+          title:     `${form.name} at ${propName}: "${desc}"`,
+          module:    'properties',
+          category:  'properties',
+          severity:  'action_needed',
+          actionUrl: '/#/properties',
+          sourceKey: `maint:${recordId}`,
+        })
+      } catch {}
     }
     setSubmitting(false)
   }

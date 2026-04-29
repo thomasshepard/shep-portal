@@ -63,7 +63,7 @@ async function insertIfNew(sb: any, record: object): Promise<boolean> {
       .limit(1)
     if (existing && existing.length > 0) return false
   }
-  const { error } = await sb.from('notifications').insert(record)
+  const { error } = await sb.from('notifications').insert({ ...(record as Record<string, unknown>), created_by_cron: true })
   if (error) console.error('[check-notifications] Insert error:', error, record)
   return !error
 }
@@ -81,7 +81,7 @@ async function insertTaskReminderIfNew(sb: any, record: object): Promise<boolean
       .limit(1)
     if (existing && existing.length > 0) return false
   }
-  const { error } = await sb.from('notifications').insert(record)
+  const { error } = await sb.from('notifications').insert({ ...(record as Record<string, unknown>), created_by_cron: true })
   if (error) console.error('[check-notifications] Insert error:', error, record)
   return !error
 }
@@ -137,6 +137,15 @@ Deno.serve(async (req) => {
     const airtablePat      = Deno.env.get('AIRTABLE_PAT')!
 
     const sb = createClient(supabaseUrl, serviceRoleKey)
+
+    // Cron idempotency: skip if ran within last 30 minutes to prevent double-runs
+    const { data: lastCronRun } = await sb.from('cron_runs').select('last_ran_at').eq('job_name', 'check-notifications').maybeSingle()
+    if (lastCronRun?.last_ran_at && (Date.now() - new Date(lastCronRun.last_ran_at).getTime()) < 30 * 60 * 1000) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: 'ran within last 30m', last_ran_at: lastCronRun.last_ran_at }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+    await sb.from('cron_runs').upsert({ job_name: 'check-notifications', last_ran_at: new Date().toISOString() })
 
     // Fetch admin user IDs
     const { data: adminProfiles } = await sb.from('profiles').select('id').eq('role', 'admin')

@@ -15,3 +15,10 @@ jobs:
             "https://zhboqhhjijktsanxhwjv.supabase.co/functions/v1/check-notifications" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
             -H "Content-Type: application/json"
+
+      - name: Trigger send-daily-digest Edge Function
+        run: |
+          curl -f -X POST \
+            "https://zhboqhhjijktsanxhwjv.supabase.co/functions/v1/send-daily-digest" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json"

@@ -5,14 +5,14 @@ import { useNotifications } from '../hooks/useNotifications'
 import { usePushSubscription } from '../hooks/usePushSubscription'
 
 const MODULE_BADGES = {
-  happy_cuts:  { label: 'Happy Cuts', cls: 'bg-green-100 text-green-700' },
-  incubator:   { label: 'Incubator',  cls: 'bg-amber-100 text-amber-700' },
-  properties:  { label: 'Properties', cls: 'bg-blue-100 text-blue-700' },
-  chickens:    { label: 'Chickens',   cls: 'bg-orange-100 text-orange-700' },
-  documents:   { label: 'Docs',       cls: 'bg-purple-100 text-purple-700' },
-  llcs:        { label: 'LLCs',       cls: 'bg-slate-100 text-slate-700' },
-  alerts:      { label: 'Alerts',     cls: 'bg-red-100 text-red-700' },
-  system:      { label: 'System',     cls: 'bg-gray-100 text-gray-600' },
+  happy_cuts:  { label: 'Happy Cuts', cls: 'bg-green-100 text-green-700',   icon: '🌿' },
+  incubator:   { label: 'Incubator',  cls: 'bg-amber-100 text-amber-700',   icon: '🥚' },
+  properties:  { label: 'Properties', cls: 'bg-blue-100 text-blue-700',     icon: '🏠' },
+  chickens:    { label: 'Chickens',   cls: 'bg-orange-100 text-orange-700', icon: '🐔' },
+  documents:   { label: 'Docs',       cls: 'bg-purple-100 text-purple-700', icon: '📄' },
+  llcs:        { label: 'LLCs',       cls: 'bg-slate-100 text-slate-700',   icon: '🏢' },
+  alerts:      { label: 'Alerts',     cls: 'bg-red-100 text-red-700',       icon: '🚨' },
+  system:      { label: 'System',     cls: 'bg-gray-100 text-gray-600',     icon: '⚙️' },
 }
 
 const SEVERITY_DOT = {
@@ -33,15 +33,34 @@ function relativeTime(isoString) {
   return `${days}d ago`
 }
 
+function extractTaskRecordId(sourceKey) {
+  if (!sourceKey) return null
+  const parts = sourceKey.split(':')
+  const last = parts[parts.length - 1]
+  return last?.startsWith('rec') ? last : null
+}
+
 export default function NotificationBell() {
   const { session } = useAuth()
   const userId = session?.user?.id
-  const { notifications, unreadCount, markRead, markAllRead } = useNotifications(userId)
+  const { notifications, unreadCount, markRead, markAllRead, dismiss, snooze } = useNotifications(userId)
   const { supported: pushSupported, subscribed, permission, loading: pushLoading, subscribe, unsubscribe } = usePushSubscription()
   const [open, setOpen] = useState(false)
   const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 16 })
-  const buttonRef = useRef(null)
+  const [pinging, setPinging] = useState(false)
+  const buttonRef   = useRef(null)
   const dropdownRef = useRef(null)
+  const prevCountRef = useRef(unreadCount)
+
+  // Animate-ping badge when unread count increases
+  useEffect(() => {
+    if (unreadCount > prevCountRef.current) {
+      setPinging(true)
+      const t = setTimeout(() => setPinging(false), 2000)
+      return () => clearTimeout(t)
+    }
+    prevCountRef.current = unreadCount
+  }, [unreadCount])
 
   // Close on outside click
   useEffect(() => {
@@ -59,19 +78,10 @@ export default function NotificationBell() {
   }, [open])
 
   function handleBellClick() {
-    // On mobile, go straight to the notifications page — no dropdown
-    if (window.innerWidth < 640) {
-      window.location.hash = '/notifications'
-      return
-    }
-    // Desktop: show dropdown positioned below the bell
+    if (window.innerWidth < 640) { window.location.hash = '/notifications'; return }
     if (!open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect()
-      setDropdownPos({
-        top: rect.bottom + 8,
-        right: Math.max(8, window.innerWidth - rect.right),
-        fullWidth: false,
-      })
+      setDropdownPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) })
     }
     setOpen(prev => !prev)
   }
@@ -82,8 +92,17 @@ export default function NotificationBell() {
     setOpen(false)
   }
 
+  function handleSnooze(e, n) {
+    e.stopPropagation()
+    snooze(n.id)
+  }
+
+  function handleDismiss(e, n) {
+    e.stopPropagation()
+    dismiss(n.id)
+  }
+
   const recent = notifications.slice(0, 5)
-  const badge = MODULE_BADGES
 
   return (
     <>
@@ -93,31 +112,32 @@ export default function NotificationBell() {
         onClick={handleBellClick}
         className="relative p-2 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
         aria-label="Notifications"
+        aria-expanded={open}
+        aria-haspopup="true"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
-          <span
-            style={{
-              position: 'absolute',
-              top: '2px',
-              right: '2px',
-              minWidth: '18px',
-              height: '18px',
-              background: '#ef4444',
-              color: '#fff',
-              fontSize: '11px',
-              fontWeight: 700,
-              borderRadius: '9999px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '0 3px',
-              lineHeight: 1,
-              pointerEvents: 'none',
-            }}
-          >
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
+          <>
+            {/* Ping animation for new notifications */}
+            {pinging && (
+              <span
+                className="animate-ping absolute top-0.5 right-0.5 inline-flex h-[18px] w-[18px] rounded-full bg-red-400 opacity-75"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
+            <span
+              style={{
+                position: 'absolute', top: '2px', right: '2px',
+                minWidth: '18px', height: '18px',
+                background: '#ef4444', color: '#fff',
+                fontSize: '11px', fontWeight: 700, borderRadius: '9999px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '0 3px', lineHeight: 1, pointerEvents: 'none',
+              }}
+            >
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          </>
         )}
       </button>
 
@@ -125,34 +145,35 @@ export default function NotificationBell() {
       {open && (
         <div
           ref={dropdownRef}
-          style={{
-            position: 'fixed',
-            top: dropdownPos.top,
-            right: dropdownPos.right,
-            width: '320px',
-            zIndex: 9999,
-          }}
+          style={{ position: 'fixed', top: dropdownPos.top, right: dropdownPos.right, width: '340px', zIndex: 9999 }}
           className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <p className="text-sm font-semibold text-gray-800">Notifications</p>
             {unreadCount > 0 && (
-              <button onClick={() => { markAllRead(); setOpen(false) }}
-                className="text-xs text-amber-600 hover:text-amber-800 font-medium">
+              <button
+                onClick={() => { markAllRead(); setOpen(false) }}
+                className="text-xs text-amber-600 hover:text-amber-800 font-medium"
+              >
                 Mark all read
               </button>
             )}
           </div>
 
           {/* List */}
-          <div className="overflow-y-auto divide-y divide-gray-50" style={{ maxHeight: '360px' }}>
+          <div className="overflow-y-auto divide-y divide-gray-50" style={{ maxHeight: '380px' }}>
             {recent.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">No notifications</p>
+              <div className="text-center py-10 px-4">
+                <p className="text-2xl mb-2">🔔</p>
+                <p className="text-sm text-gray-500 font-medium">No notifications</p>
+                <p className="text-xs text-gray-400 mt-1">Lease expirations, task reminders, and more will appear here.</p>
+              </div>
             ) : (
               recent.map(n => {
-                const mod = badge[n.module] || badge.system
+                const mod = MODULE_BADGES[n.module] || MODULE_BADGES.system
                 const dot = SEVERITY_DOT[n.severity] || SEVERITY_DOT.info
+                const isTask = n.module === 'system' && n.source_key?.startsWith('task:')
                 return (
                   <button
                     key={n.id}
@@ -162,7 +183,8 @@ export default function NotificationBell() {
                     {/* Severity dot */}
                     <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <span className="text-sm leading-none" aria-hidden="true">{mod.icon}</span>
                         <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${mod.cls}`}>
                           {mod.label}
                         </span>
@@ -175,6 +197,23 @@ export default function NotificationBell() {
                       </p>
                       {n.body && (
                         <p className="text-xs text-gray-500 mt-0.5 truncate">{n.body}</p>
+                      )}
+                      {/* Inline actions for task notifications */}
+                      {isTask && (
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <button
+                            onClick={e => handleSnooze(e, n)}
+                            className="text-[11px] text-gray-400 hover:text-amber-600 transition-colors"
+                          >
+                            Snooze 1h ⏰
+                          </button>
+                          <button
+                            onClick={e => handleDismiss(e, n)}
+                            className="text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+                          >
+                            Dismiss ×
+                          </button>
+                        </div>
                       )}
                     </div>
                   </button>
@@ -211,7 +250,15 @@ export default function NotificationBell() {
               )}
             </div>
             <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-xs text-gray-400">{notifications.length} active</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400">{notifications.length} active</span>
+                <button
+                  onClick={() => { window.location.hash = '/notifications/settings'; setOpen(false) }}
+                  className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  Settings →
+                </button>
+              </div>
               <button
                 onClick={() => { window.location.hash = '/notifications'; setOpen(false) }}
                 className="text-xs text-amber-600 hover:text-amber-800 font-medium"

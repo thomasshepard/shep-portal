@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, ChevronLeft, ChevronDown, Star, Trash2, ExternalLink, Copy, Check, Search, X } from 'lucide-react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { Plus, ChevronLeft, ChevronDown, Star, Trash2, ExternalLink, Copy, Check, Search, X, Maximize2 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
-import { fetchTasks, createTask, updateTask, deleteTask, dismissLinkedNotification, FIELDS } from '../lib/tasks'
+import { fetchTasks, fetchTaskById, createTask, updateTask, deleteTask, dismissLinkedNotification, FIELDS } from '../lib/tasks'
+import { notify } from '../lib/notifications'
+import TaskDrawer from '../components/TaskDrawer'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const safeStr = (v) => (v == null ? '' : String(v))
@@ -131,10 +134,11 @@ function Toast({ message, onDone }) {
 }
 
 // ── AddTaskDialog ─────────────────────────────────────────────────────────────
-function AddTaskDialog({ onClose, onAdd }) {
-  const [title,   setTitle]   = useState('')
-  const [dueDate, setDueDate] = useState('')
-  const [saving,  setSaving]  = useState(false)
+function AddTaskDialog({ onClose, onAdd, otherUsers = [], currentUserId }) {
+  const [title,          setTitle]          = useState('')
+  const [dueDate,        setDueDate]        = useState('')
+  const [assignUserId,   setAssignUserId]   = useState(null) // null = assign to self
+  const [saving,         setSaving]         = useState(false)
   const titleRef = useRef(null)
 
   useEffect(() => { titleRef.current?.focus() }, [])
@@ -148,7 +152,7 @@ function AddTaskDialog({ onClose, onAdd }) {
     e.preventDefault()
     if (!title.trim() || saving) return
     setSaving(true)
-    await onAdd({ title: title.trim(), dueDate: dueDate || undefined })
+    await onAdd({ title: title.trim(), dueDate: dueDate || undefined, assignUserId })
     setSaving(false)
     onClose()
   }
@@ -197,12 +201,45 @@ function AddTaskDialog({ onClose, onAdd }) {
               className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             />
           </div>
+          {/* Assign to (admin only, when other users exist) */}
+          {otherUsers.length > 0 && (
+            <div>
+              <label className="text-xs text-slate-500 block mb-1.5">Assign to</label>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setAssignUserId(null)}
+                  className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                    assignUserId === null
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                  }`}
+                >
+                  Me
+                </button>
+                {otherUsers.map(u => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => setAssignUserId(u.id)}
+                    className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                      assignUserId === u.id
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                    }`}
+                  >
+                    {u.full_name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <button
             type="submit"
             disabled={!title.trim() || saving}
             className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-40"
           >
-            {saving ? 'Adding…' : 'Add Task'}
+            {saving ? 'Adding…' : assignUserId ? 'Add & Assign' : 'Add Task'}
           </button>
         </form>
       </div>
@@ -211,7 +248,7 @@ function AddTaskDialog({ onClose, onAdd }) {
 }
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
-function TaskCard({ task, flashStatus, isJustAdded, nudgeNotes, onStatusChange, onStarToggle, onDelete, onNotesChange, onDueDateChange, onTitleChange, onBodyChange, onToast }) {
+function TaskCard({ task, flashStatus, isJustAdded, nudgeNotes, onStatusChange, onStarToggle, onDelete, onNotesChange, onDueDateChange, onTitleChange, onBodyChange, onToast, onOpenDrawer }) {
   const [expanded,    setExpanded]    = useState(false)
   const [localNotes,  setLocalNotes]  = useState(safeStr(task.fields[FIELDS.NOTES]))
   const [localDue,    setLocalDue]    = useState(safeStr(task.fields[FIELDS.DUE_DATE]))
@@ -247,6 +284,15 @@ function TaskCard({ task, flashStatus, isJustAdded, nudgeNotes, onStatusChange, 
       setCopied(true)
       setTimeout(() => setCopied(false), 1200)
       onToast('Copied to clipboard')
+    } catch { onToast('Copy failed') }
+  }
+
+  async function handleCopyLink(e) {
+    e.stopPropagation()
+    const url = `https://thomasshepard.github.io/shep-portal/#/tasks/${task.id}`
+    try {
+      await copyToClipboard(url)
+      onToast('Link copied')
     } catch { onToast('Copy failed') }
   }
 
@@ -333,8 +379,16 @@ function TaskCard({ task, flashStatus, isJustAdded, nudgeNotes, onStatusChange, 
       {/* Left accent */}
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent}`} />
 
-      {/* Top-right buttons: copy + star */}
+      {/* Top-right buttons: copy-link + copy-content + maximize + star */}
       <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5">
+        <button
+          onClick={handleCopyLink}
+          className="p-1.5 rounded-md text-slate-300 hover:text-slate-500 hover:bg-slate-50 transition-colors"
+          aria-label="Copy link to task"
+          style={{ minWidth: 36, minHeight: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </button>
         <button
           onClick={handleCopy}
           className="p-1.5 rounded-md text-slate-300 hover:text-slate-500 hover:bg-slate-50 transition-colors"
@@ -346,6 +400,16 @@ function TaskCard({ task, flashStatus, isJustAdded, nudgeNotes, onStatusChange, 
             : <Copy size={13} />
           }
         </button>
+        {onOpenDrawer && (
+          <button
+            onClick={e => { e.stopPropagation(); onOpenDrawer(task.id) }}
+            className="p-1.5 rounded-md text-slate-300 hover:text-slate-500 hover:bg-slate-50 transition-colors"
+            aria-label="Open task detail"
+            style={{ minWidth: 36, minHeight: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Maximize2 size={13} />
+          </button>
+        )}
         <button
           onClick={e => { e.stopPropagation(); onStarToggle(task) }}
           className="p-1.5"
@@ -631,6 +695,8 @@ function ColEmpty({ colKey, onAdd }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Tasks() {
   const { session, isAdmin } = useAuth()
+  const { taskId }  = useParams()
+  const navigate    = useNavigate()
 
   const [allTasks,    setAllTasks]    = useState([])
   const [loading,     setLoading]     = useState(true)
@@ -654,6 +720,7 @@ export default function Tasks() {
   const [viewingUserId, setViewingUserId] = useState(null)
   const [otherUsers,    setOtherUsers]    = useState([])
   const [nudgeTaskId,   setNudgeTaskId]   = useState(null)
+  const [drawerTask,    setDrawerTask]    = useState(null)
 
   const userId = session?.user?.id
 
@@ -670,6 +737,24 @@ export default function Tasks() {
   }
 
   useEffect(() => { loadTasks() }, [viewingUserId]) // eslint-disable-line
+
+  // Sync drawer task from URL param (open drawer when /tasks/:taskId)
+  useEffect(() => {
+    if (!taskId) { setDrawerTask(null); return }
+    const found = allTasks.find(t => t.id === taskId)
+    if (found) {
+      setDrawerTask(found)
+    } else {
+      fetchTaskById(taskId).then(setDrawerTask).catch(() => setDrawerTask(null))
+    }
+  }, [taskId]) // eslint-disable-line
+
+  // Keep drawer task in sync with allTasks edits
+  useEffect(() => {
+    if (!taskId || !drawerTask) return
+    const found = allTasks.find(t => t.id === taskId)
+    if (found) setDrawerTask(found)
+  }, [allTasks]) // eslint-disable-line
 
   useEffect(() => {
     if (!isAdmin || !userId) return
@@ -785,10 +870,36 @@ export default function Tasks() {
   }
 
   async function handleDueDateChange(recordId, dueDate) {
+    const task = allTasks.find(t => t.id === recordId) // capture before optimistic update
     setAllTasks(prev => prev.map(t =>
       t.id === recordId ? { ...t, fields: { ...t.fields, [FIELDS.DUE_DATE]: dueDate || null } } : t
     ))
     await updateTask(recordId, { [FIELDS.DUE_DATE]: dueDate || null })
+
+    if (task) {
+      const assigneeId = safeStr(task.fields[FIELDS.USER_ID])
+      const title      = safeStr(task.fields[FIELDS.TITLE])
+      if (assigneeId && assigneeId !== userId) {
+        notify({
+          userIds:   assigneeId,
+          title:     `Due date changed — "${title}"`,
+          body:      dueDate ? `Now due ${dueDate}` : 'Due date cleared',
+          module:    'system',
+          category:  'tasks',
+          severity:  'info',
+          actionUrl: `/#/tasks/${recordId}`,
+          sourceKey: `task_due_changed:${recordId}:${dueDate || 'cleared'}`,
+        }).catch(() => {})
+      }
+    }
+  }
+
+  async function handleUpdate(recordId, fields) {
+    setAllTasks(prev => prev.map(t =>
+      t.id === recordId ? { ...t, fields: { ...t.fields, ...fields } } : t
+    ))
+    try { await updateTask(recordId, fields) }
+    catch { loadTasks(); showToast('Failed to save') }
   }
 
   async function handleTitleChange(recordId, title) {
@@ -807,17 +918,38 @@ export default function Tasks() {
     catch { loadTasks(); showToast('Failed to save description') }
   }
 
-  async function handleAdd({ title, dueDate }) {
-    const record = await createTask({ title, dueDate, module: 'Manual', userId: viewingUserId })
-    setAllTasks(prev => [...prev, record])
-    setActiveCol('todo')
-    setJustAddedId(record.id)
-    setTimeout(() => setJustAddedId(null), 1200)
-    // Scroll new card into view on mobile after render
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.getElementById(`task-${record.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }))
-    showToast('Task added')
+  async function handleAdd({ title, dueDate, assignUserId }) {
+    const targetUserId = assignUserId || viewingUserId
+    const isAssigning  = targetUserId && targetUserId !== userId
+    const byName       = session?.user?.user_metadata?.full_name || session?.user?.email || 'Admin'
+
+    const record = await createTask({
+      title,
+      dueDate,
+      module:           'Manual',
+      userId:           targetUserId,
+      assignedBy:       isAssigning ? userId : undefined,
+      assignedByName:   isAssigning ? byName : undefined,
+    })
+
+    // Only add to the visible list if the task belongs to the currently viewed user
+    if (targetUserId === viewingUserId) {
+      setAllTasks(prev => [...prev, record])
+      setActiveCol('todo')
+      setJustAddedId(record.id)
+      setTimeout(() => setJustAddedId(null), 1200)
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        document.getElementById(`task-${record.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }))
+    }
+
+    if (isAssigning) {
+      const assignedUser = otherUsers.find(u => u.id === targetUserId)
+      const name = assignedUser?.full_name || 'them'
+      showToast(`Task added — ${name} notified`)
+    } else {
+      showToast('Task added')
+    }
   }
 
   async function handleQuickAdd(e) {
@@ -825,7 +957,7 @@ export default function Tasks() {
     const title = quickTitle.trim()
     if (!title) return
     setQuickTitle('')
-    await handleAdd({ title })
+    await handleAdd({ title, assignUserId: null })
   }
 
   async function handleCopyAll() {
@@ -855,6 +987,7 @@ export default function Tasks() {
       onTitleChange:   handleTitleChange,
       onBodyChange:    handleBodyChange,
       onToast:         showToast,
+      onOpenDrawer:    (id) => navigate(`/tasks/${id}`),
     }
   }
 
@@ -1125,8 +1258,26 @@ export default function Tasks() {
         </>
       )}
 
-      {showAdd && <AddTaskDialog onClose={() => setShowAdd(false)} onAdd={handleAdd} />}
-      {toast    && <Toast message={toast} onDone={() => setToast(null)} />}
+      {showAdd && (
+        <AddTaskDialog
+          onClose={() => setShowAdd(false)}
+          onAdd={handleAdd}
+          otherUsers={isAdmin ? otherUsers : []}
+          currentUserId={userId}
+        />
+      )}
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+      {drawerTask && (
+        <TaskDrawer
+          task={drawerTask}
+          onClose={() => navigate('/tasks')}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+          onToast={showToast}
+          onOpenFull={() => navigate(`/tasks/${drawerTask.id}/full`)}
+          currentUserId={userId}
+        />
+      )}
     </div>
   )
 }

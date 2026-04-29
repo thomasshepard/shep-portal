@@ -30,7 +30,9 @@ import HappyCutsClientDetail from './pages/HappyCutsClientDetail'
 import HappyCutsGuide from './pages/HappyCutsGuide'
 import ChickenIncubatorGuide from './pages/ChickenIncubatorGuide'
 import Notifications from './pages/Notifications'
+import NotificationSettings from './pages/NotificationSettings'
 import Tasks from './pages/Tasks'
+import TaskDetail from './pages/TaskDetail'
 import Recipes from './pages/Recipes'
 import Triage from './pages/Triage'
 import TriageSetup from './pages/TriageSetup'
@@ -76,7 +78,10 @@ export default function App() {
             <Route path="happy-cuts/client/:id" element={<AdminRoute><HappyCutsClientDetail /></AdminRoute>} />
             <Route path="happy-cuts/guide" element={<AdminRoute><HappyCutsGuide /></AdminRoute>} />
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+            <Route path="notifications/settings" element={<ProtectedRoute><NotificationSettings /></ProtectedRoute>} />
             <Route path="tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+            <Route path="tasks/:taskId" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+            <Route path="tasks/:taskId/full" element={<ProtectedRoute><TaskDetail /></ProtectedRoute>} />
             <Route path="recipes" element={<ProtectedRoute><Recipes /></ProtectedRoute>} />
             <Route path="triage" element={<PermRoute permission="can_view_triage"><Triage /></PermRoute>} />
             <Route path="triage/setup" element={<AdminRoute><TriageSetup /></AdminRoute>} />

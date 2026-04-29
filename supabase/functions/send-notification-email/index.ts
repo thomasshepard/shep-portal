@@ -16,6 +16,11 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ skipped: true, reason: 'severity is info' }), { status: 200 })
     }
 
+    // Cron-generated notifications are bundled into the daily digest instead
+    if (notification.created_by_cron) {
+      return new Response(JSON.stringify({ skipped: true, reason: 'created_by_cron' }), { status: 200 })
+    }
+
     // Look up user email via service role (bypasses RLS on auth.users)
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
     const { data: userData, error: userError } = await supabase.auth.admin.getUserById(notification.user_id)
@@ -26,6 +31,43 @@ Deno.serve(async (req) => {
     }
 
     const toEmail   = userData.user.email
+
+    // Check notification preferences
+    const { data: prefs } = await supabase
+      .from('notification_preferences')
+      .select('email_enabled,paused_until,quiet_hours_start,quiet_hours_end,timezone,delivery_tasks,delivery_happy_cuts,delivery_properties,delivery_incubator,delivery_chickens,delivery_documents,delivery_llcs,delivery_alerts,delivery_system')
+      .eq('user_id', notification.user_id)
+      .maybeSingle()
+
+    if (prefs) {
+      const isCritical = notification.severity === 'critical'
+      if (!prefs.email_enabled) {
+        return new Response(JSON.stringify({ skipped: true, reason: 'email_disabled' }), { status: 200 })
+      }
+      if (!isCritical) {
+        if (prefs.paused_until && new Date(prefs.paused_until) > new Date()) {
+          return new Response(JSON.stringify({ skipped: true, reason: 'paused' }), { status: 200 })
+        }
+        if (prefs.quiet_hours_start != null && prefs.quiet_hours_end != null) {
+          const tz = (prefs.timezone as string) || 'America/Chicago'
+          const hourStr = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(new Date())
+          const hour = parseInt(hourStr, 10)
+          const qs = prefs.quiet_hours_start as number
+          const qe = prefs.quiet_hours_end as number
+          const inQuiet = qs <= qe ? (hour >= qs && hour < qe) : (hour >= qs || hour < qe)
+          if (inQuiet) {
+            return new Response(JSON.stringify({ skipped: true, reason: 'quiet_hours' }), { status: 200 })
+          }
+        }
+        const cat = ((notification.category || notification.module) as string).replace(/-/g, '_')
+        const deliveryKey = `delivery_${cat}`
+        const delivery = (prefs as Record<string, unknown>)[deliveryKey] as string | undefined
+        if (delivery === 'digest' || delivery === 'off') {
+          return new Response(JSON.stringify({ skipped: true, reason: `delivery_${delivery}` }), { status: 200 })
+        }
+      }
+    }
+
     // action_url is stored as '/#/dashboard' — strip leading slash so it appends cleanly
     const actionUrl = notification.action_url
       ? `${PORTAL_URL}${notification.action_url.replace(/^\//, '')}`

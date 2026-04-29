@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js'
+import { notify } from './notifications.js'
 
 // Tasks Airtable helper — all CRUD for the Tasks module.
 // Field IDs discovered by running scripts/setup-tasks-table.js against appYVLCn1NVLevdry.
@@ -24,16 +25,12 @@ const TABLE_ID = 'tbl3Di18kSLwEj1vN'
 const PAT      = import.meta.env.VITE_AIRTABLE_PAT
 
 const BASE_URL = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`
-// Always request fields keyed by field ID so FIELDS constants work as object keys.
 const FIELD_ID_PARAM = 'returnFieldsByFieldId=true'
 
-// Appends returnFieldsByFieldId with the correct separator.
 function withFieldIds(url) {
   return url.includes('?') ? `${url}&${FIELD_ID_PARAM}` : `${url}?${FIELD_ID_PARAM}`
 }
 
-// Set to true temporarily to fetch all records and filter client-side (useful for diagnosing
-// filterByFormula issues — check browser console for raw response).
 const DEBUG_FETCH_ALL = false
 
 function headers() {
@@ -74,13 +71,25 @@ export async function fetchTasks(userId) {
     offset = json.offset
   } while (offset)
 
-  // Always filter client-side as a safety net (handles encoding edge cases)
   const safeStr = v => (v == null ? '' : String(v))
   return records.filter(r => safeStr(r.fields[FIELDS.USER_ID]).trim() === userId.trim())
 }
 
-/** Create a new task record. */
-export async function createTask({ title, module, dueDate, body, notes, sourceKey, actionUrl, userId }) {
+/** Fetch a single task record by Airtable record ID. */
+export async function fetchTaskById(recordId) {
+  const json = await apiRequest('GET', withFieldIds(`${BASE_URL}/${recordId}`))
+  return json
+}
+
+/**
+ * Create a new task record.
+ * If assignedBy is provided and differs from userId, the assignee receives
+ * an assignment notification.
+ */
+export async function createTask({
+  title, module, dueDate, body, notes, sourceKey, actionUrl, userId,
+  assignedBy, assignedByName,
+}) {
   const fields = {
     [FIELDS.TITLE]:   title,
     [FIELDS.STATUS]:  'To Do',
@@ -94,7 +103,23 @@ export async function createTask({ title, module, dueDate, body, notes, sourceKe
   if (actionUrl) fields[FIELDS.ACTION_URL] = actionUrl
 
   const json = await apiRequest('POST', withFieldIds(BASE_URL), { records: [{ fields }], typecast: true })
-  return json.records[0]
+  const record = json.records[0]
+
+  // Notify the assignee when an admin creates the task on their behalf.
+  if (assignedBy && userId && userId !== assignedBy) {
+    const duePart = dueDate ? ` · Due ${dueDate}` : ''
+    notify({
+      userIds:   userId,
+      title:     `${assignedByName || 'A teammate'} assigned: "${title}"${duePart}`,
+      module:    'system',
+      category:  'tasks',
+      severity:  'action_needed',
+      actionUrl: `/#/tasks/${record.id}`,
+      sourceKey: `task_assigned:${record.id}`,
+    }).catch(() => {})
+  }
+
+  return record
 }
 
 /** Update a task — only pass fields to change. */
@@ -105,6 +130,25 @@ export async function updateTask(recordId, fields) {
 /** Delete a task. */
 export async function deleteTask(recordId) {
   return apiRequest('DELETE', `${BASE_URL}/${recordId}`)
+}
+
+/**
+ * Reassign a task to a new user and notify them.
+ * Does not notify if reassigning to self.
+ */
+export async function reassignTask(recordId, newUserId, byUserId, byName, title) {
+  await updateTask(recordId, { [FIELDS.USER_ID]: newUserId })
+  if (newUserId && newUserId !== byUserId) {
+    notify({
+      userIds:   newUserId,
+      title:     `${byName || 'Admin'} assigned: "${title}"`,
+      module:    'system',
+      category:  'tasks',
+      severity:  'action_needed',
+      actionUrl: `/#/tasks/${recordId}`,
+      sourceKey: `task_assigned:${recordId}`,
+    }).catch(() => {})
+  }
 }
 
 /** Dismiss any unread notification linked to this sourceKey (fire-and-forget). */
