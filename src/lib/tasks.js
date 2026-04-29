@@ -1,6 +1,41 @@
 import { supabase } from './supabase.js'
 import { notify } from './notifications.js'
 
+// ── Bulk-assignment debounce (Step 8h) ───────────────────────────────────────
+// Buffers assignment notifications keyed by (actorId:recipientId) for 5 seconds.
+// If multiple tasks are assigned to the same user within the window, one collapsed
+// notification fires instead of N individual ones.
+const _assignBuffer = new Map()
+
+function notifyAssignmentDebounced({ actorId, actorName, recipientId, taskTitle, dueDate, recordId }) {
+  const key = `${actorId}:${recipientId}`
+  const existing = _assignBuffer.get(key)
+  if (existing) {
+    clearTimeout(existing.timer)
+    existing.count++
+    existing.items.push({ taskTitle, dueDate, recordId })
+  } else {
+    _assignBuffer.set(key, { count: 1, items: [{ taskTitle, dueDate, recordId }], actorName, recipientId })
+  }
+  const entry = _assignBuffer.get(key)
+  entry.timer = setTimeout(() => {
+    _assignBuffer.delete(key)
+    const { count, items } = entry
+    const single = count === 1
+    notify({
+      userIds:   recipientId,
+      title:     single
+        ? `${actorName} assigned: "${items[0].taskTitle}"${items[0].dueDate ? ` · Due ${items[0].dueDate}` : ''}`
+        : `${actorName} assigned ${count} tasks to you`,
+      module:    'system',
+      category:  'tasks',
+      severity:  'action_needed',
+      actionUrl: single ? `/#/tasks/${items[0].recordId}` : '/#/tasks',
+      sourceKey: single ? `task_assigned:${items[0].recordId}` : `task_assigned_bulk:${recipientId}:${Date.now()}`,
+    }).catch(() => {})
+  }, 5000)
+}
+
 // Tasks Airtable helper — all CRUD for the Tasks module.
 // Field IDs discovered by running scripts/setup-tasks-table.js against appYVLCn1NVLevdry.
 
@@ -106,17 +141,16 @@ export async function createTask({
   const record = json.records[0]
 
   // Notify the assignee when an admin creates the task on their behalf.
+  // Uses debounced helper so bulk-assigning 5 tasks fires one notification, not five.
   if (assignedBy && userId && userId !== assignedBy) {
-    const duePart = dueDate ? ` · Due ${dueDate}` : ''
-    notify({
-      userIds:   userId,
-      title:     `${assignedByName || 'A teammate'} assigned: "${title}"${duePart}`,
-      module:    'system',
-      category:  'tasks',
-      severity:  'action_needed',
-      actionUrl: `/#/tasks/${record.id}`,
-      sourceKey: `task_assigned:${record.id}`,
-    }).catch(() => {})
+    notifyAssignmentDebounced({
+      actorId:    assignedBy,
+      actorName:  assignedByName || 'A teammate',
+      recipientId: userId,
+      taskTitle:  title,
+      dueDate,
+      recordId:   record.id,
+    })
   }
 
   return record

@@ -42,7 +42,7 @@ export default function TaskDrawer({ task, onClose, onUpdate, onDelete, onToast,
         className="fixed z-50 bg-white shadow-2xl flex flex-col
           inset-x-0 bottom-0 rounded-t-2xl max-h-[92vh]
           md:inset-y-0 md:right-0 md:left-auto md:w-[480px] md:rounded-none md:max-h-none"
-        style={{ animation: 'drawerIn 0.2s ease-out forwards' }}
+        style={{ animation: 'drawerIn 0.2s ease-out forwards, amberRing 0.6s ease-out 0.2s forwards' }}
         role="dialog"
         aria-modal="true"
         aria-label="Task detail"
@@ -57,6 +57,11 @@ export default function TaskDrawer({ task, onClose, onUpdate, onDelete, onToast,
               from { opacity: 0; transform: translateX(40px); }
               to   { opacity: 1; transform: translateX(0); }
             }
+          }
+          @keyframes amberRing {
+            0%   { box-shadow: 0 0 0 0   rgba(245,158,11,0.55); }
+            50%  { box-shadow: 0 0 0 10px rgba(245,158,11,0.15); }
+            100% { box-shadow: 0 0 0 0   rgba(245,158,11,0); }
           }
         `}</style>
 

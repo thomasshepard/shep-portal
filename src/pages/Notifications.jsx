@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useNotifications } from '../hooks/useNotifications'
 import { updateTask, FIELDS } from '../lib/tasks'
+import { supabase } from '../lib/supabase'
 
 const MODULE_BADGES = {
   happy_cuts:  { label: 'Happy Cuts', cls: 'bg-green-100 text-green-700',   icon: '🌿' },
@@ -67,6 +68,31 @@ export default function Notifications() {
   const [filter, setFilter] = useState('all')
   const [focused, setFocused] = useState(-1)
   const [completingId, setCompletingId] = useState(null)
+  const [everHad, setEverHad] = useState(null) // null=loading, true=yes, false=never
+
+  // Check localStorage first; fall back to a one-off count query.
+  // Once true, the result is cached so we never re-query.
+  useEffect(() => {
+    if (localStorage.getItem('notif:ever_had')) { setEverHad(true); return }
+    if (!userId) return
+    supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .limit(1)
+      .then(({ count }) => {
+        if (count && count > 0) { localStorage.setItem('notif:ever_had', '1'); setEverHad(true) }
+        else setEverHad(false)
+      })
+  }, [userId])
+
+  // Cache the flag as soon as we see any live notifications
+  useEffect(() => {
+    if (notifications.length > 0 && !localStorage.getItem('notif:ever_had')) {
+      localStorage.setItem('notif:ever_had', '1')
+      setEverHad(true)
+    }
+  }, [notifications.length])
 
   const activeModules = [...new Set(notifications.map(n => n.module))]
 
@@ -198,18 +224,45 @@ export default function Notifications() {
 
       {/* Notification cards */}
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-          <p className="text-3xl mb-3">🔔</p>
-          <p className="text-gray-700 font-medium mb-1">You're all caught up</p>
-          <p className="text-gray-400 text-sm mb-4 max-w-xs mx-auto">
-            Notifications appear here for lease expirations, overdue invoices, task reminders, incubator alerts, and more.
-          </p>
-          {filter !== 'all' && (
-            <button onClick={() => setFilter('all')} className="text-sm text-amber-600 hover:text-amber-800">
-              View all notifications
+        // Brand-new user who has never had a notification: show education copy.
+        // Everyone else (filtered view, or returning users who dismissed everything): plain "caught up".
+        filter === 'all' && everHad === false ? (
+          <div className="bg-white rounded-xl border border-dashed border-gray-200 p-10 text-center">
+            <p className="text-3xl mb-3">🔔</p>
+            <p className="text-gray-800 font-semibold mb-1">You're all set.</p>
+            <p className="text-gray-500 text-sm mb-4">You'll get a ping here when:</p>
+            <div className="text-left max-w-xs mx-auto space-y-2 mb-6">
+              {[
+                'Someone assigns you a task',
+                'A task you own is overdue or due today',
+                'A lease is about to expire',
+                'A maintenance request comes in (admins)',
+                'Incubator candles are due',
+              ].map(text => (
+                <p key={text} className="text-sm text-gray-500 flex items-start gap-2">
+                  <span className="text-green-500 mt-0.5 flex-shrink-0">✓</span>
+                  {text}
+                </p>
+              ))}
+            </div>
+            <button
+              onClick={() => navigate('/notifications/settings')}
+              className="text-sm text-amber-600 hover:text-amber-800 font-medium"
+            >
+              Manage what you receive →
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
+            <p className="text-2xl mb-2">✓</p>
+            <p className="text-gray-500 font-medium">You're all caught up.</p>
+            {filter !== 'all' && (
+              <button onClick={() => setFilter('all')} className="mt-2 text-sm text-amber-600 hover:text-amber-800">
+                View all notifications
+              </button>
+            )}
+          </div>
+        )
       ) : (
         <div className="space-y-5">
           {groups.map(({ label, items }) => (

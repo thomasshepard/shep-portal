@@ -197,20 +197,20 @@ Deno.serve(async (req) => {
 
           if (day >= 7 && !d7done) {
             notifs.push({ key: `incubator:candle7_due:${batch.id}`, days: 3,
-              title: `Candle Day 7 — ${batchName}`,
-              body: 'Check egg development and remove any clears',
+              title: `Day 7 candle due — ${batchName}`,
+              body: `Check development, remove clears · Set ${setDateStr}`,
               expires: addDays(today, 3) })
           }
           if (day >= 14 && !d14done) {
             notifs.push({ key: `incubator:candle14_due:${batch.id}`, days: 3,
-              title: `Candle Day 14 — ${batchName}`,
-              body: 'Check development and prep for lockdown',
+              title: `Day 14 candle due — ${batchName}`,
+              body: `Remove non-developing eggs, prep for lockdown · Set ${setDateStr}`,
               expires: addDays(today, 3) })
           }
           if (day >= 18 && day <= 19) {
             notifs.push({ key: `incubator:lockdown_due:${batch.id}`, days: 2,
-              title: `Lockdown today — ${batchName}`,
-              body: "Stop turning eggs. Raise humidity to 65–70% RH. Don't open lid.",
+              title: `Lockdown day — ${batchName}`,
+              body: `Stop turning, raise humidity to 65–70% · Day ${day} of 21`,
               expires: addDays(today, 2) })
           }
           if (day > 21 && !(f['Chicks Hatched'] > 0)) {
@@ -227,8 +227,9 @@ Deno.serve(async (req) => {
                 title:      n.title,
                 body:       n.body,
                 module:     'incubator',
+                category:   'incubator',
                 severity:   'action_needed',
-                action_url: '/#/chickens',
+                action_url: `/#/chickens?batch=${batch.id}`,
                 source_key: `${n.key}:${uid}`,
                 expires_at: n.expires.toISOString(),
               })
@@ -263,9 +264,10 @@ Deno.serve(async (req) => {
             const srcKey = `hc:invoice_overdue:${mow.id}:${uid}`
             const inserted = await insertIfNew(sb, {
               user_id:    uid,
-              title:      `Invoice overdue — ${clientName}`,
-              body:       `$${amount} sent ${daysAgo} days ago`,
+              title:      `$${amount} invoice overdue — ${clientName}`,
+              body:       `Mowed ${mowDateStr} · ${daysAgo} days overdue`,
               module:     'happy_cuts',
+              category:   'happy_cuts',
               severity:   'action_needed',
               action_url: '/#/happy-cuts',
               source_key: srcKey,
@@ -342,14 +344,16 @@ Deno.serve(async (req) => {
           const taskDueDate = sourceTag === 'lease_expiring_7' ? isoDate(today) : isoDate(addDays(today, 7))
 
           for (const uid of propUserIds) {
-            const srcKey = `prop:${sourceTag}:${lease.id}:${uid}`
+            const srcKey  = `prop:${sourceTag}:${lease.id}:${uid}`
+            const leaseUrl = `/#/properties?lease=${lease.id}`
             const inserted = await insertIfNew(sb, {
               user_id:    uid,
-              title:      `Lease expiring in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
-              body:       `${tenantName} at ${propName}`,
+              title:      `${tenantName} lease at ${propName} expires in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+              body:       severity === 'critical' ? `Ends ${endDateStr} · Immediate action needed` : `Ends ${endDateStr}`,
               module:     'properties',
+              category:   'properties',
               severity,
-              action_url: '/#/properties',
+              action_url: leaseUrl,
               source_key: srcKey,
               expires_at: endDate.toISOString(),
             })
@@ -362,9 +366,9 @@ Deno.serve(async (req) => {
                     'Title':      `Renew lease — ${tenantName} at ${propName}`,
                     'Status':     'To Do',
                     'Module':     'Properties',
-                    'Body':       `Lease expires in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+                    'Body':       `Expires ${endDateStr} · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining`,
                     'Source Key': srcKey,
-                    'Action URL': '/#/properties',
+                    'Action URL': leaseUrl,
                     'User ID':    uid,
                     'Due Date':   taskDueDate,
                   }, airtablePat)
@@ -395,13 +399,15 @@ Deno.serve(async (req) => {
 
           for (const uid of adminIds) {
             const srcKey = `llc:compliance_due:${llc.id}:${uid}`
+            const llcUrl = `/#/llcs?id=${llc.id}`
             const inserted = await insertIfNew(sb, {
               user_id:    uid,
-              title:      `LLC compliance due — ${entityName}`,
-              body:       `Due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+              title:      `${entityName} annual report due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+              body:       `Due ${dueDateStr} · File with state`,
               module:     'llcs',
+              category:   'llcs',
               severity:   'action_needed',
-              action_url: '/#/llcs',
+              action_url: llcUrl,
               source_key: srcKey,
               expires_at: dueDate.toISOString(),
             })
@@ -412,9 +418,9 @@ Deno.serve(async (req) => {
                   'Title':      `File annual report — ${entityName}`,
                   'Status':     'To Do',
                   'Module':     'LLC',
-                  'Body':       `Due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+                  'Body':       `Due ${dueDateStr} · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining`,
                   'Source Key': srcKey,
-                  'Action URL': '/#/llcs',
+                  'Action URL': llcUrl,
                   'User ID':    uid,
                   'Due Date':   isoDate(addDays(today, 14)),
                 }, airtablePat)
@@ -480,10 +486,11 @@ Deno.serve(async (req) => {
           const inserted = await insertTaskReminderIfNew(sb, {
             user_id:    userId,
             title:      notif.title,
-            body:       `Module: ${module} · Status: ${status}`,
+            body:       `Due ${dueDateStr} · ${module}`,
             module:     'system',
+            category:   'tasks',
             severity:   notif.severity,
-            action_url: '/#/tasks',
+            action_url: `/#/tasks/${task.id}`,
             source_key: notif.key,
             expires_at: addDays(dueDate, 3).toISOString(),
           })
