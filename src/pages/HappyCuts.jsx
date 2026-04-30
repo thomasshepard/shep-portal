@@ -663,15 +663,18 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
             <div className="px-5 pt-5 pb-3 border-b border-gray-100">
               <h3 className="font-semibold text-gray-800 text-lg">❌ Something went wrong</h3>
             </div>
-            <div className="px-5 py-4">
+            <div className="px-5 py-4 space-y-2">
               {invoiceError?.type === 'airtable_auth' ? (
-                <p className="text-gray-600 text-sm">Airtable authentication failed — the portal API token is invalid or expired. Contact support to refresh it.</p>
+                <p className="text-gray-600 text-sm">Airtable authentication failed — the portal API token is invalid or expired.</p>
               ) : invoiceError?.type === 'airtable_other' ? (
                 <p className="text-gray-600 text-sm">Failed to save invoice data to Airtable. The Stripe invoice was not created — safe to try again.</p>
               ) : invoiceError?.type === 'stripe' ? (
-                <p className="text-gray-600 text-sm">Stripe error — invoice was not created. Please try again or contact support.</p>
+                <p className="text-gray-600 text-sm">Stripe error — invoice was not created.</p>
               ) : (
-                <p className="text-gray-600 text-sm">Invoice not sent. Please try again or contact support.</p>
+                <p className="text-gray-600 text-sm">Invoice not sent. Please try again.</p>
+              )}
+              {invoiceError?.message && (
+                <p className="text-xs text-red-500 font-mono bg-red-50 rounded px-2 py-1 break-words">{invoiceError.message}</p>
               )}
             </div>
             <div className="px-5 pb-5 flex gap-3">
