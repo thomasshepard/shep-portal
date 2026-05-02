@@ -12,7 +12,9 @@ import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
-const WEBHOOK_URL = import.meta.env.VITE_N8N_CHICKENS_WEBHOOK_URL
+const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+const FEEDING_FN_URL    = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/generate-feeding-schedule` : ''
 
 const CORNISH_CROSS_SCHEDULE = [
   { week: 1, oz_per_bird: 0.66 },
@@ -66,16 +68,27 @@ const STATUS_COLORS = {
 }
 
 async function fireWebhook(payload) {
-  if (!WEBHOOK_URL) { console.warn('VITE_N8N_CHICKENS_WEBHOOK_URL not configured'); return }
+  if (!FEEDING_FN_URL || !SUPABASE_ANON_KEY) {
+    toast.error('Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY')
+    return
+  }
   try {
-    // Use text/plain to avoid CORS preflight — n8n receives the JSON body regardless
-    await fetch(WEBHOOK_URL, {
+    const res = await fetch(FEEDING_FN_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
       body: JSON.stringify(payload),
     })
-  } catch (e) {
-    console.warn('Webhook call failed:', e.message)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err?.error || `HTTP ${res.status}`)
+    }
+    return await res.json()
+  } catch (err) {
+    console.error('[fireWebhook]', err)
+    toast.error('Schedule generator failed: ' + err.message)
   }
 }
 
