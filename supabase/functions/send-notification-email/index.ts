@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
         const cat = ((notification.category || notification.module) as string).replace(/-/g, '_')
         const deliveryKey = `delivery_${cat}`
         const delivery = (prefs as Record<string, unknown>)[deliveryKey] as string | undefined
-        if (delivery === 'digest' || delivery === 'off') {
+        if (delivery === 'digest' || delivery === 'off' || delivery === 'discord') {
           return new Response(JSON.stringify({ skipped: true, reason: `delivery_${delivery}` }), { status: 200 })
         }
       }

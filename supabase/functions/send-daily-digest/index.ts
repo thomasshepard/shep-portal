@@ -1,225 +1,273 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-const RESEND_API_KEY   = Deno.env.get('RESEND_API_KEY')!
-const SUPABASE_URL     = Deno.env.get('SUPABASE_URL')!
-const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-const AIRTABLE_PAT     = Deno.env.get('AIRTABLE_PAT')!
-const TASKS_BASE       = 'appYVLCn1NVLevdry'
-const TASKS_TABLE      = 'tbl3Di18kSLwEj1vN'
-const FROM_EMAIL       = 'onboarding@resend.dev'
-const PORTAL_URL       = 'https://thomasshepard.github.io/shep-portal/'
+const SB_URL       = Deno.env.get('SUPABASE_URL')!
+const SVC_KEY      = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const AIRTABLE_PAT = Deno.env.get('AIRTABLE_PAT')!
+const BOT_TOKEN    = Deno.env.get('DISCORD_BOT_TOKEN')!
+const CHANNEL_ID   = Deno.env.get('DISCORD_DIGEST_CHANNEL_ID')!
+
+const PM_BASE       = 'appeuX9BHNgVXxdYZ'
+const HC_BASE       = 'appZOi48qf8SzyOml'
+const CHICKENS_BASE = 'apppIiT84EaowkQVR'
+const LLC_BASE      = 'appvX3Tu1OGxOZB8k'
+const TASKS_BASE    = 'appYVLCn1NVLevdry'
+const TASKS_TABLE   = 'tbl3Di18kSLwEj1vN'
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-async function fetchAirtableTasks(pat: string): Promise<any[]> {
-  const base = `https://api.airtable.com/v0/${TASKS_BASE}/${TASKS_TABLE}`
-  const params = new URLSearchParams({
-    filterByFormula: "AND(OR({Status}='To Do',{Status}='In Progress'),{Due Date}!='')",
-  })
-  const records: any[] = []
+// ── Helpers ──────────────────────────────────────────────────────────────────
+async function airtableList(baseId: string, table: string, params: Record<string, string> = {}) {
+  const all: any[] = []
   let offset: string | undefined
   do {
-    if (offset) params.set('offset', offset)
-    const res = await fetch(`${base}?${params}`, { headers: { Authorization: `Bearer ${pat}` } })
-    if (!res.ok) break
-    const json = await res.json()
-    records.push(...(json.records || []))
-    offset = json.offset
+    const u = new URL(`https://api.airtable.com/v0/${baseId}/${encodeURIComponent(table)}`)
+    Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v))
+    if (offset) u.searchParams.set('offset', offset)
+    const r = await fetch(u.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
+    if (!r.ok) throw new Error(`Airtable ${table}: ${r.status} ${await r.text()}`)
+    const j = await r.json()
+    all.push(...(j.records ?? []))
+    offset = j.offset
   } while (offset)
-  return records
+  return all
 }
 
-const MODULE_LABEL: Record<string, string> = {
-  happy_cuts: 'Happy Cuts', properties: 'Properties', incubator: 'Incubator',
-  chickens: 'Chickens', documents: 'Docs', llcs: 'LLCs', alerts: 'Alerts', system: 'System',
+function todayISO(): string { return new Date().toISOString().slice(0, 10) }
+function yesterdayISO(): string {
+  const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10)
+}
+function daysBetween(a: string, b: string): number {
+  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000)
 }
 
-function buildDigestHtml(opts: {
-  userName: string
-  notifs: any[]
-  pastDue: any[]
-  dueToday: any[]
-  dueTomorrow: any[]
-  laterTasks: any[]
-  todayStr: string
-}): string {
-  const { userName, notifs, pastDue, dueToday, dueTomorrow, laterTasks, todayStr } = opts
+// ── Build today's snapshot ────────────────────────────────────────────────────
+async function buildSnapshot(_userId: string) {
+  const today = todayISO()
 
-  function notifRows() {
-    if (!notifs.length) return ''
-    const rows = notifs.slice(0, 10).map(n => {
-      const label = MODULE_LABEL[n.module] || n.module
-      const actionHref = n.action_url ? `${PORTAL_URL}${n.action_url.replace(/^\//, '')}` : PORTAL_URL
-      const dotColor = n.severity === 'critical' ? '#ef4444' : n.severity === 'action_needed' ? '#f59e0b' : '#9ca3af'
-      return `<tr><td style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:14px;">
-        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${dotColor};vertical-align:middle;margin-right:6px;"></span>
-        <span style="font-size:11px;color:#9ca3af;text-transform:uppercase;">${label}</span><br>
-        <span style="color:#111827;font-weight:${n.read ? '400' : '600'};">${n.title}</span>
-        ${n.body ? `<br><span style="font-size:13px;color:#6b7280;">${n.body}</span>` : ''}
-        ${n.action_url ? `<br><a href="${actionHref}" style="font-size:12px;color:#d97706;text-decoration:none;">View →</a>` : ''}
-      </td></tr>`
-    }).join('')
-    return `<tr><td style="padding:16px 0 6px;"><p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#374151;border-bottom:2px solid #f3f4f6;padding-bottom:6px;">
-      Notifications <span style="color:#9ca3af;font-weight:400;">(${notifs.length})</span></p></td></tr>${rows}`
+  const [leases, maintTickets, payments] = await Promise.all([
+    airtableList(PM_BASE, 'Lease Agreements'),
+    airtableList(PM_BASE, 'Maintenance', { filterByFormula: "AND(NOT({Status}='Closed'), NOT({Status}='Resolved'))" }),
+    airtableList(PM_BASE, 'Rent Payments', { filterByFormula: "{Status}='Overdue'" }),
+  ])
+  const expiringSoon = leases.filter(l => {
+    const ed = l.fields['End Date']; if (!ed) return false
+    const d = daysBetween(today, ed); return d >= 0 && d <= 30
+  }).length
+  const expired = leases.filter(l => {
+    const ed = l.fields['End Date']; if (!ed) return false
+    const d = daysBetween(today, ed)
+    const status = (l.fields['Status'] ?? '').toLowerCase()
+    return d < 0 && (status === 'active' || status === 'month-to-month')
+  }).length
+  const overdueRentTotal = payments.reduce((s, p) => s + (Number(p.fields['Amount']) || 0), 0)
+
+  const mows = await airtableList(HC_BASE, 'tbli7OArESf2SHL10', {
+    filterByFormula: `AND({fldcu9rgNI8REbrE0}>='${today}', {fldcu9rgNI8REbrE0}<='${today}')`,
+  })
+  const todaysMowsCount   = mows.length
+  const todaysMowsRevenue = mows.reduce((s, m) => s + (Number(m.fields['fldJoKhtQX4MujAOi']) || 0), 0)
+
+  const flocks = await airtableList(CHICKENS_BASE, 'Flock', { filterByFormula: "{Status}='Active'" })
+  const activeFlocks = flocks.map(f => {
+    const hd = f.fields['Hatch Date']
+    const day = hd ? daysBetween(hd, today) + 1 : null
+    return { name: f.fields['Name'], day, count: f.fields['Current Count'] ?? f.fields['Bird Count'], target_weeks: f.fields['Target Weeks'] }
+  })
+
+  const llcs = await airtableList(LLC_BASE, 'LLCs')
+  const llcOverdue  = llcs.filter(l => { const d = l.fields['Annual Report Due Date']; return d && daysBetween(today, d) < 0 }).length
+  const llcDueSoon  = llcs.filter(l => { const d = l.fields['Annual Report Due Date']; if (!d) return false; const n = daysBetween(today, d); return n >= 0 && n <= 30 }).length
+
+  const tasks = await airtableList(TASKS_BASE, TASKS_TABLE, {
+    filterByFormula: "AND({Status}!='Done', {Due Date}!='')", returnFieldsByFieldId: 'true',
+  })
+  const tasksDueToday = tasks.filter(t => t.fields['fldLxGJRu1XeK4z7t'] === today).length
+  const tasksOverdue  = tasks.filter(t => { const d = t.fields['fldLxGJRu1XeK4z7t']; return d && d < today }).length
+
+  return {
+    properties: {
+      open_maintenance: maintTickets.length,
+      overdue_rent: { count: payments.length, amount_cents: Math.round(overdueRentTotal * 100) },
+      leases_expiring_30d: expiringSoon,
+      leases_expired: expired,
+    },
+    happy_cuts: { mows_today: todaysMowsCount, revenue_booked_today_cents: Math.round(todaysMowsRevenue * 100) },
+    chickens: { active_flocks: activeFlocks },
+    llcs: { overdue: llcOverdue, due_30d: llcDueSoon },
+    tasks: { open: tasks.length, due_today: tasksDueToday, overdue: tasksOverdue },
+  }
+}
+
+// ── Compute deltas vs yesterday ───────────────────────────────────────────────
+function computeDeltas(today: any, yesterday: any | null): string[] {
+  if (!yesterday) return []
+  const lines: string[] = []
+  const fmtDelta = (label: string, a: number, b: number) => {
+    if (a === b) return null
+    return `${b > a ? '↑' : '↓'} ${label}: ${a} → ${b}`
+  }
+  const candidates = [
+    fmtDelta('Open maintenance',   yesterday.properties.open_maintenance,    today.properties.open_maintenance),
+    fmtDelta('Overdue rent count', yesterday.properties.overdue_rent.count,  today.properties.overdue_rent.count),
+    fmtDelta('Expired leases',     yesterday.properties.leases_expired,      today.properties.leases_expired),
+    fmtDelta('Tasks overdue',      yesterday.tasks.overdue,                  today.tasks.overdue),
+    fmtDelta('LLCs overdue',       yesterday.llcs.overdue,                   today.llcs.overdue),
+  ]
+  return candidates.filter(Boolean) as string[]
+}
+
+// ── Render Discord message text ───────────────────────────────────────────────
+function fmtCurrency(cents: number) {
+  return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+}
+
+function renderDigest(snap: any, deltas: string[], actionableTasks: any[]) {
+  const lines: string[] = []
+  const date = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', timeZone: 'America/Chicago',
+  })
+
+  lines.push(`🌅  **${date}**`, '')
+  lines.push('**Today**')
+
+  if (snap.happy_cuts.mows_today > 0) {
+    lines.push(`• ${snap.happy_cuts.mows_today} mow${snap.happy_cuts.mows_today === 1 ? '' : 's'} — ${fmtCurrency(snap.happy_cuts.revenue_booked_today_cents)} booked`)
+  }
+  if (snap.properties.open_maintenance > 0) {
+    lines.push(`• ${snap.properties.open_maintenance} maintenance ticket${snap.properties.open_maintenance === 1 ? '' : 's'} open`)
+  }
+  if (snap.properties.overdue_rent.count > 0) {
+    lines.push(`• ${snap.properties.overdue_rent.count} overdue rent — ${fmtCurrency(snap.properties.overdue_rent.amount_cents)}`)
+  }
+  if (snap.properties.leases_expired > 0) {
+    lines.push(`• ⚠️ ${snap.properties.leases_expired} expired lease${snap.properties.leases_expired === 1 ? '' : 's'} unrenewed`)
+  }
+  if (snap.properties.leases_expiring_30d > 0) {
+    lines.push(`• ${snap.properties.leases_expiring_30d} lease${snap.properties.leases_expiring_30d === 1 ? '' : 's'} expiring within 30d`)
+  }
+  if (snap.llcs.overdue > 0) {
+    lines.push(`• ⚠️ ${snap.llcs.overdue} LLC annual report${snap.llcs.overdue === 1 ? '' : 's'} overdue`)
+  }
+  if (snap.chickens.active_flocks.length > 0) {
+    const f = snap.chickens.active_flocks[0]
+    lines.push(`• Chickens: ${f.name} day ${f.day}, ${f.count} birds`)
+  }
+  if (snap.tasks.due_today > 0)  lines.push(`• ${snap.tasks.due_today} tasks due today`)
+  if (snap.tasks.overdue > 0)    lines.push(`• ${snap.tasks.overdue} tasks overdue`)
+
+  if (deltas.length) {
+    lines.push('', '**Yesterday → today**')
+    for (const d of deltas) lines.push(`• ${d}`)
   }
 
-  function taskSection(label: string, tasks: any[], labelColor: string) {
-    if (!tasks.length) return ''
-    const rows = tasks.map(t => {
-      const title = t.fields['Title'] || 'Task'
-      const due = t.fields['Due Date'] || ''
-      const taskUrl = `${PORTAL_URL}#/tasks`
-      return `<tr><td style="padding:5px 0 5px 12px;border-bottom:1px solid #f3f4f6;font-size:14px;color:#374151;">
-        ${title}<span style="color:#9ca3af;font-size:12px;margin-left:8px;">${due}</span>
-        <a href="${taskUrl}" style="font-size:12px;color:#d97706;text-decoration:none;margin-left:8px;">→</a>
-      </td></tr>`
-    }).join('')
-    return `<tr><td style="padding:12px 0 4px;"><p style="margin:0;font-size:13px;font-weight:700;color:${labelColor};">${label}</p></td></tr>${rows}`
+  if (actionableTasks.length) {
+    lines.push('', '**Quick actions** (tap a button below):')
+    actionableTasks.slice(0, 5).forEach((t, i) => {
+      lines.push(`\`${i + 1}\` ${t.fields['fldx2xmuxOVDls72i'] ?? 'Task'}`)
+    })
   }
 
-  const hasAnything = notifs.length || pastDue.length || dueToday.length || dueTomorrow.length || laterTasks.length
-  if (!hasAnything) return ''
-
-  return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:32px 16px;">
-    <tr><td align="center">
-      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#fff;border-radius:8px;border:1px solid #e5e7eb;overflow:hidden;">
-        <tr><td style="background:#1e293b;padding:16px 24px;">
-          <span style="color:#fff;font-size:16px;font-weight:600;">Shep Portal</span>
-          <span style="color:#94a3b8;font-size:13px;margin-left:8px;">Morning Digest · ${todayStr}</span>
-        </td></tr>
-        <tr><td style="padding:20px 24px 12px;">
-          <p style="margin:0 0 4px;font-size:16px;font-weight:600;color:#111827;">Good morning, ${userName}.</p>
-          <p style="margin:0;font-size:14px;color:#6b7280;">Here's what's on your plate today.</p>
-        </td></tr>
-        <tr><td style="padding:0 24px;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            ${notifRows()}
-            ${taskSection('⚠ Past due', pastDue, '#ef4444')}
-            ${taskSection('Today', dueToday, '#f59e0b')}
-            ${taskSection('Tomorrow', dueTomorrow, '#6b7280')}
-            ${taskSection('This week', laterTasks, '#9ca3af')}
-          </table>
-        </td></tr>
-        <tr><td style="padding:20px 24px 24px;">
-          <a href="${PORTAL_URL}" style="display:inline-block;background:#1e293b;color:#fff;text-decoration:none;font-size:14px;font-weight:500;padding:10px 20px;border-radius:6px;">Open Portal →</a>
-        </td></tr>
-        <tr><td style="background:#f8fafc;border-top:1px solid #e5e7eb;padding:12px 24px;">
-          <p style="margin:0;font-size:12px;color:#9ca3af;">Shep Portal · Daily digest.
-            <a href="${PORTAL_URL}#/notifications/settings" style="color:#9ca3af;">Manage preferences</a></p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`
+  return lines.join('\n')
 }
 
+// ── Discord helpers ───────────────────────────────────────────────────────────
+async function postToDiscord(content: string, components: any[]) {
+  const r = await fetch(`https://discord.com/api/v10/channels/${CHANNEL_ID}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bot ${BOT_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, components, allowed_mentions: { parse: ['users'] } }),
+  })
+  if (!r.ok) throw new Error(`Discord post failed: ${r.status} ${await r.text()}`)
+  return r.json()
+}
+
+function buildButtons(actionableTasks: any[]) {
+  const taskButtons = actionableTasks.slice(0, 5).map((t, i) => ({
+    type: 2, style: 1, custom_id: `done:task:${t.id}`, label: `✓ Done ${i + 1}`,
+  }))
+  const rows: any[] = []
+  if (taskButtons.length) {
+    rows.push({ type: 1, components: taskButtons.slice(0, 5) })
+  }
+  rows.push({
+    type: 1,
+    components: [
+      { type: 2, style: 5, label: 'Open portal', url: 'https://thomasshepard.github.io/shep-portal/' },
+      { type: 2, style: 2, custom_id: 'dismiss:digest', label: 'Dismiss all' },
+    ],
+  })
+  return rows
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    const sb = createClient(SB_URL, SVC_KEY)
 
-    // 12-hour idempotency
-    const { data: lastRun } = await sb.from('cron_runs').select('last_ran_at').eq('job_name', 'send-daily-digest').maybeSingle()
-    if (lastRun?.last_ran_at && Date.now() - new Date(lastRun.last_ran_at).getTime() < 12 * 60 * 60 * 1000) {
-      return new Response(JSON.stringify({ ok: true, skipped: true, reason: 'ran within 12h' }), {
+    const { data: prefs } = await sb
+      .from('notification_preferences')
+      .select('user_id, discord_user_id, digest_hour_local, timezone')
+      .eq('digest_enabled', true)
+      .eq('discord_enabled', true)
+
+    if (!prefs || prefs.length === 0) {
+      return new Response(JSON.stringify({ ok: true, sent: 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-    await sb.from('cron_runs').upsert({ job_name: 'send-daily-digest', last_ran_at: new Date().toISOString() })
 
-    const todayStr     = new Date().toISOString().slice(0, 10)
-    const tomorrowStr  = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
-    const thisWeekEnd  = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
-    const since48h     = new Date(Date.now() - 48 * 3600000).toISOString()
+    let sent = 0
+    for (const p of prefs) {
+      const today = todayISO()
+      const snap  = await buildSnapshot(p.user_id)
 
-    // All auth users + prefs
-    const [{ data: { users } }, { data: allPrefs }] = await Promise.all([
-      sb.auth.admin.listUsers(),
-      sb.from('notification_preferences').select('*'),
-    ])
-    const prefsMap = Object.fromEntries((allPrefs || []).map((p: any) => [p.user_id, p]))
+      const { data: ySnapRow } = await sb
+        .from('daily_snapshots')
+        .select('snapshot')
+        .eq('user_id', p.user_id)
+        .eq('date', yesterdayISO())
+        .maybeSingle()
+      const deltas = computeDeltas(snap, ySnapRow?.snapshot ?? null)
 
-    // All active tasks from Airtable, grouped by User ID
-    const allTasks = await fetchAirtableTasks(AIRTABLE_PAT)
-    const tasksByUser: Record<string, any[]> = {}
-    for (const t of allTasks) {
-      const uid = t.fields['User ID']
-      if (uid) {
-        if (!tasksByUser[uid]) tasksByUser[uid] = []
-        tasksByUser[uid].push(t)
+      // Fetch this user's top actionable tasks (due today + overdue, oldest first, max 5)
+      const tasksRes = await fetch(
+        `https://api.airtable.com/v0/${TASKS_BASE}/${TASKS_TABLE}?` +
+        `filterByFormula=${encodeURIComponent(`AND({User ID}='${p.user_id}', {Status}!='Done', {Due Date}<='${today}')`)}` +
+        `&sort[0][field]=Due Date&sort[0][direction]=asc&maxRecords=5&returnFieldsByFieldId=true`,
+        { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } }
+      )
+      const taskJson      = await tasksRes.json()
+      const actionableTasks = taskJson.records ?? []
+
+      const text       = renderDigest(snap, deltas, actionableTasks)
+      const components = buildButtons(actionableTasks)
+      const greeting   = p.discord_user_id ? `<@${p.discord_user_id}> ` : ''
+
+      try {
+        await postToDiscord(greeting + text, components)
+        sent++
+      } catch (err) {
+        console.error('[digest] Discord post failed for', p.user_id, err)
       }
+
+      await sb.from('daily_snapshots').upsert(
+        { date: today, user_id: p.user_id, snapshot: snap, digest_text: text },
+        { onConflict: 'date,user_id' }
+      )
     }
 
-    let sentCount = 0
-    const errors: string[] = []
-
-    for (const user of users) {
-      if (!user.email) continue
-      const prefs = prefsMap[user.id] as any
-
-      if (prefs?.email_enabled === false) continue
-      if (prefs?.paused_until && new Date(prefs.paused_until) > new Date()) continue
-
-      // Unread notifications from last 48h
-      const { data: notifs } = await sb.from('notifications')
-        .select('id,title,body,module,severity,action_url,read,created_at')
-        .eq('user_id', user.id)
-        .eq('dismissed', false)
-        .gte('created_at', since48h)
-        .order('created_at', { ascending: false })
-        .limit(20)
-
-      const userTasks   = tasksByUser[user.id] || []
-      const pastDue     = userTasks.filter(t => t.fields['Due Date'] < todayStr)
-      const dueToday    = userTasks.filter(t => t.fields['Due Date'] === todayStr)
-      const dueTomorrow = userTasks.filter(t => t.fields['Due Date'] === tomorrowStr)
-      const laterTasks  = userTasks.filter(t => {
-        const d = t.fields['Due Date']
-        return d > tomorrowStr && d <= thisWeekEnd
-      })
-
-      if (!notifs?.length && !pastDue.length && !dueToday.length && !dueTomorrow.length && !laterTasks.length) continue
-
-      const userName = (user.user_metadata?.full_name as string) || user.email.split('@')[0]
-      const html = buildDigestHtml({ userName, notifs: notifs || [], pastDue, dueToday, dueTomorrow, laterTasks, todayStr })
-      if (!html) continue
-
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from:    FROM_EMAIL,
-          to:      user.email,
-          subject: `[Shep] Morning digest — ${todayStr}`,
-          html,
-        }),
-      })
-      if (res.ok) {
-        sentCount++
-      } else {
-        const err = await res.json().catch(() => ({}))
-        console.error('[send-daily-digest] Resend error for', user.email, err)
-        errors.push(user.email)
-      }
-    }
-
-    return new Response(JSON.stringify({ ok: true, sent: sentCount, errors }), {
+    return new Response(JSON.stringify({ ok: true, sent }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (err: any) {
-    console.error('[send-daily-digest] Fatal error:', err)
+    console.error('[digest] fatal:', err)
     return new Response(JSON.stringify({ ok: false, error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
 })

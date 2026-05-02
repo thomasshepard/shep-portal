@@ -5,6 +5,9 @@ import { usePushSubscription } from '../hooks/usePushSubscription'
 import { supabase } from '../lib/supabase'
 import { notify } from '../lib/notifications'
 
+const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
 const MODULE_LABELS = {
   tasks:      { label: 'Tasks',      color: 'bg-slate-100 text-slate-700'   },
   happy_cuts: { label: 'Happy Cuts', color: 'bg-emerald-100 text-emerald-700' },
@@ -17,8 +20,8 @@ const MODULE_LABELS = {
   system:     { label: 'System',     color: 'bg-gray-100 text-gray-700'     },
 }
 
-const DELIVERY_OPTIONS = ['instant', 'digest', 'off']
-const DELIVERY_LABELS  = { instant: 'Instant', digest: 'Digest', off: 'Off' }
+const DELIVERY_OPTIONS = ['instant', 'digest', 'discord', 'off']
+const DELIVERY_LABELS  = { instant: 'Instant', digest: 'Digest', discord: 'Discord', off: 'Off' }
 
 const TZ_OPTIONS = [
   'America/New_York',
@@ -52,8 +55,8 @@ function getPauseUntil(preset) {
 }
 
 export default function NotificationSettings() {
-  const { session }  = useAuth()
-  const userId       = session?.user?.id
+  const { session, isAdmin } = useAuth()
+  const userId               = session?.user?.id
   const push         = usePushSubscription()
 
   const [prefs,   setPrefs]   = useState(null)
@@ -79,6 +82,8 @@ export default function NotificationSettings() {
     return {
       user_id: uid,
       email_enabled: true, push_enabled: true,
+      discord_enabled: true, digest_enabled: true,
+      discord_user_id: null, digest_hour_local: 7,
       mod_tasks: true, mod_happy_cuts: true, mod_properties: true,
       mod_incubator: true, mod_chickens: true, mod_documents: true,
       mod_llcs: true, mod_alerts: true, mod_system: true,
@@ -108,6 +113,16 @@ export default function NotificationSettings() {
   }
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 2500) }
+
+  async function handleTestDigest() {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-daily-digest`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    })
+    if (res.ok) showToast('Digest sent to Discord')
+    else showToast('Digest send failed — check logs')
+  }
 
   async function handleTestNotification() {
     if (!userId) return
@@ -168,6 +183,41 @@ export default function NotificationSettings() {
         <Settings size={20} className="text-slate-500" />
         <h2 className="text-lg font-semibold text-slate-800">Notification Settings</h2>
       </div>
+
+      {/* Discord */}
+      <section className="bg-white rounded-xl border border-slate-200 p-5">
+        <h2 className="text-base font-semibold text-slate-800 mb-1">Discord</h2>
+        <p className="text-sm text-slate-500 mb-4">Primary delivery channel — daily 7 AM digest, two-way commands.</p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-600">Enable Discord delivery</span>
+            <Toggle value={!!prefs?.discord_enabled} onChange={v => set('discord_enabled', v)} />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-600">Send 7 AM morning digest</span>
+            <Toggle value={!!prefs?.digest_enabled} onChange={v => set('digest_enabled', v)} />
+          </div>
+          <div className="mt-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Your Discord user ID</label>
+            <input
+              type="text"
+              value={prefs?.discord_user_id ?? ''}
+              onChange={e => set('discord_user_id', e.target.value || null)}
+              placeholder="1234567890"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+            />
+            <p className="text-xs text-slate-400 mt-1">In Discord: right-click your name → Copy User ID. Lets the digest @-mention you.</p>
+          </div>
+        </div>
+        {isAdmin && (
+          <button
+            onClick={handleTestDigest}
+            className="mt-4 text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Send test digest now
+          </button>
+        )}
+      </section>
 
       {/* Vacation mode */}
       {isPaused ? (
@@ -296,12 +346,13 @@ export default function NotificationSettings() {
         <p className="text-sm font-semibold text-slate-700 mb-1">Email delivery per module</p>
         <p className="text-xs text-slate-500 mb-3">
           <strong>Instant</strong> — email on each event.{' '}
-          <strong>Digest</strong> — bundled in the 7am summary.{' '}
+          <strong>Digest</strong> — bundled in the 7am email summary.{' '}
+          <strong>Discord</strong> — route to Discord instead.{' '}
           <strong>Off</strong> — in-app only. Critical events always email instantly.
         </p>
         <div className="space-y-1">
           {/* Header row */}
-          <div className="grid grid-cols-[1fr_repeat(3,56px)] gap-1 mb-2">
+          <div className="grid grid-cols-[1fr_repeat(4,48px)] gap-1 mb-2">
             <div />
             {DELIVERY_OPTIONS.map(o => (
               <div key={o} className="text-center text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{DELIVERY_LABELS[o]}</div>
@@ -312,7 +363,7 @@ export default function NotificationSettings() {
             const modKey = `mod_${key}`
             const delKey = `delivery_${key}`
             return (
-              <div key={key} className="grid grid-cols-[1fr_repeat(3,56px)] gap-1 items-center py-1 border-b border-slate-50 last:border-0">
+              <div key={key} className="grid grid-cols-[1fr_repeat(4,48px)] gap-1 items-center py-1 border-b border-slate-50 last:border-0">
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
