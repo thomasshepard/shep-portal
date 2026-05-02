@@ -109,7 +109,7 @@ function MortalityInlineForm({ flock, onSaved, onClose }) {
     setSaving(true)
 
     const { error: logErr } = await createRecord('Mortality Log', {
-      'Flocks': [{ id: flock.id }],
+      'Flocks': [flock.id],
       'Date': form.date,
       'Count': count,
       'Cause': form.cause,

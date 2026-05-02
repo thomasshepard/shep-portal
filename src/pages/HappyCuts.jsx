@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
@@ -603,7 +604,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
                 />
                 {!emailInput.trim() && (
-                  <p className="text-xs text-gray-400 mt-1">No email — invoice link will be texted manually</p>
+                  <p className="text-xs text-gray-400 mt-1">Optional — we'll save it to the contact if entered, but it isn't required to create the invoice</p>
                 )}
               </div>
               <div className="text-xs text-gray-400">You'll be CC'd at: thomas@eastmeadowproperties.com</div>
@@ -2489,14 +2490,18 @@ function RevenueTab({ onOpenJob }) {
   function prevMonth() {
     const [y, m] = selectedYM.split('-').map(Number)
     const d = new Date(y, m - 2, 1)
-    setSelectedYM(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-    setFilterChip('Completed')
+    const newYM = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    setSelectedYM(newYM)
+    if (newYM < currentYM) setFilterChip('Completed')
+    else if (newYM > currentYM) setFilterChip('Scheduled')
   }
   function nextMonth() {
     const [y, m] = selectedYM.split('-').map(Number)
     const d = new Date(y, m, 1)
-    setSelectedYM(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-    setFilterChip('Completed')
+    const newYM = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    setSelectedYM(newYM)
+    if (newYM < currentYM) setFilterChip('Completed')
+    else if (newYM > currentYM) setFilterChip('Scheduled')
   }
 
   const mows = arr(cache[selectedYM])
@@ -2511,6 +2516,42 @@ function RevenueTab({ onOpenJob }) {
       ? (a.date || '').localeCompare(b.date || '')
       : (b.date || '').localeCompare(a.date || ''))
 
+  const statsSource = filterChip === 'Completed' ? completedMows : scheduledMows
+
+  const weeklyData = (() => {
+    const [y, m] = selectedYM.split('-').map(Number)
+    const buckets = [0, 0, 0, 0, 0, 0]
+    for (const mow of statsSource) {
+      if (!mow.date) continue
+      const d = new Date(mow.date + 'T12:00:00')
+      if (d.getFullYear() !== y || d.getMonth() !== m - 1) continue
+      const weekIdx = Math.floor((d.getDate() - 1) / 7)
+      buckets[weekIdx] += safeNum(mow.amount) || 0
+    }
+    return buckets
+      .map((revenue, i) => ({ week: `Wk ${i + 1}`, revenue }))
+      .filter(b => b.revenue > 0)
+  })()
+
+  const typeBreakdown = (() => {
+    const map = {}
+    for (const mow of statsSource) {
+      const t = safeStr(mow.type) || 'Other'
+      if (!map[t]) map[t] = { type: t, count: 0, revenue: 0 }
+      map[t].count   += 1
+      map[t].revenue += safeNum(mow.amount) || 0
+    }
+    return Object.values(map)
+      .map(b => ({ ...b, avg: b.count ? b.revenue / b.count : 0 }))
+      .sort((a, b) => b.revenue - a.revenue)
+  })()
+
+  const statsTotal     = statsSource.reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
+  const avgPerMow      = statsSource.length ? statsTotal / statsSource.length : 0
+  const busiestWeek    = weeklyData.length ? weeklyData.reduce((a, b) => a.revenue >= b.revenue ? a : b).week : null
+  const topType        = typeBreakdown[0]?.type || null
+  const maxTypeRevenue = typeBreakdown[0]?.revenue || 1
+
   const monthLabel = new Date(selectedYM + '-01T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   const isCurrentMonth = selectedYM === currentYM
 
@@ -2522,7 +2563,7 @@ function RevenueTab({ onOpenJob }) {
           <ChevronLeft size={20} />
         </button>
         <span className="font-semibold text-gray-800">{monthLabel}</span>
-        <button onClick={nextMonth} disabled={isCurrentMonth} className="min-h-[44px] px-3 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 disabled:opacity-30">
+        <button onClick={nextMonth} className="min-h-[44px] px-3 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600">
           <ChevronRight size={20} />
         </button>
       </div>
@@ -2546,6 +2587,74 @@ function RevenueTab({ onOpenJob }) {
           <p className="text-lg font-bold text-gray-800">{scheduledMows.length}</p>
         </div>
       </div>
+
+      {/* Revenue report panel — hidden when no data for the chip */}
+      {statsSource.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-5 space-y-4">
+          {/* Top stat strip */}
+          <div className="flex flex-wrap gap-2">
+            <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+              Avg per mow: <span className="font-semibold text-gray-800">{fmtCurrency(avgPerMow)}</span>
+            </span>
+            {busiestWeek && (
+              <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                Busiest week: <span className="font-semibold text-gray-800">{busiestWeek}</span>
+              </span>
+            )}
+            {topType && (
+              <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                Most common: <span className="font-semibold text-gray-800">{topType}</span>
+              </span>
+            )}
+          </div>
+
+          {/* Weekly revenue bar chart */}
+          {weeklyData.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                Weekly {filterChip.toLowerCase()} revenue
+              </p>
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={weeklyData} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="2 2" stroke="#e5e7eb" />
+                  <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={40} tickFormatter={v => `$${v}`} />
+                  <Tooltip
+                    contentStyle={{ background: 'white', border: '1px solid #e5e7eb', fontSize: 12, borderRadius: 8 }}
+                    formatter={v => [fmtCurrency(v), 'Revenue']}
+                  />
+                  <Bar dataKey="revenue" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Mow type breakdown */}
+          {typeBreakdown.length > 1 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">By type</p>
+              <div className="space-y-2">
+                {typeBreakdown.map(b => (
+                  <div key={b.type}>
+                    <div className="flex items-baseline justify-between text-sm">
+                      <span className="font-medium text-gray-700">{b.type}</span>
+                      <span className="text-gray-500 text-xs">
+                        {b.count}× · avg {fmtCurrency(b.avg)} · <span className="font-semibold text-gray-800">{fmtCurrency(b.revenue)}</span>
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full mt-1">
+                      <div
+                        className="h-1.5 bg-green-600 rounded-full"
+                        style={{ width: `${Math.max(2, (b.revenue / maxTypeRevenue) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filter chips */}
       <div className="flex gap-2 mb-4">
