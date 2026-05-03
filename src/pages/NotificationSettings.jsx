@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { Settings, Bell, Clock, Pause } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { usePushSubscription } from '../hooks/usePushSubscription'
@@ -217,6 +218,14 @@ export default function NotificationSettings() {
             Send test digest now
           </button>
         )}
+        <div className="mt-3">
+          <Link
+            to="/notifications/digest-guide"
+            className="text-xs text-slate-400 hover:text-amber-600 underline transition-colors"
+          >
+            How does the digest work? →
+          </Link>
+        </div>
       </section>
 
       {/* Vacation mode */}

@@ -31,6 +31,7 @@ import HappyCutsGuide from './pages/HappyCutsGuide'
 import ChickenIncubatorGuide from './pages/ChickenIncubatorGuide'
 import Notifications from './pages/Notifications'
 import NotificationSettings from './pages/NotificationSettings'
+import DigestGuide from './pages/DigestGuide'
 import Tasks from './pages/Tasks'
 import TaskDetail from './pages/TaskDetail'
 import Recipes from './pages/Recipes'
@@ -79,6 +80,7 @@ export default function App() {
             <Route path="happy-cuts/guide" element={<AdminRoute><HappyCutsGuide /></AdminRoute>} />
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="notifications/settings" element={<ProtectedRoute><NotificationSettings /></ProtectedRoute>} />
+            <Route path="notifications/digest-guide" element={<ProtectedRoute><DigestGuide /></ProtectedRoute>} />
             <Route path="tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="tasks/:taskId" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="tasks/:taskId/full" element={<ProtectedRoute><TaskDetail /></ProtectedRoute>} />
