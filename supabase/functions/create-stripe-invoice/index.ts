@@ -1,7 +1,7 @@
-import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno'
+import Stripe from 'https://esm.sh/stripe@17?target=deno'
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
-  apiVersion: '2023-10-16',
+  apiVersion: '2024-12-18.acacia',
   httpClient: Stripe.createFetchHttpClient(),
 })
 
@@ -167,13 +167,15 @@ Deno.serve(async (req) => {
     console.log('[Invoice] Created invoice item:', invoiceItem.id, 'customer:', customerId, 'amount:', amountInCents)
 
     // --- Step 3: Create invoice ---
-    // Always use a future due date. Stripe rejects past due_dates for send_invoice.
-    // Mows are always invoiced after they happen, so mowDate is always in the past — don't use it.
+    // Use charge_automatically (NOT send_invoice) so Stripe doesn't require an
+    // email and doesn't try to email the customer. Combined with auto_advance:false
+    // on finalize, this produces an "open" invoice with a hosted_invoice_url that
+    // the user can text to the customer manually. No email needed.
     const invoice = await stripe.invoices.create({
       customer: customerId,
-      collection_method: 'send_invoice',
-      days_until_due: 14,
+      collection_method: 'charge_automatically',
       pending_invoice_items_behavior: 'include',
+      auto_advance: false,
       metadata: {
         airtable_mow_id: mowRecordId,
         source: 'happy_cuts_portal',

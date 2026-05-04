@@ -47,10 +47,15 @@ function daysBetween(a: string, b: string): number {
 async function buildSnapshot(_userId: string) {
   const today = todayISO()
 
+  // Each Airtable query is wrapped so a missing/inaccessible table doesn't blow up the whole digest.
+  const safeList = async (base: string, table: string, params: Record<string,string> = {}): Promise<any[]> => {
+    try { return await airtableList(base, table, params) }
+    catch (err) { console.warn('[digest] Airtable query failed for', table, '— continuing with empty:', err); return [] }
+  }
   const [leases, maintTickets, payments] = await Promise.all([
-    airtableList(PM_BASE, 'Lease Agreements'),
-    airtableList(PM_BASE, 'Maintenance', { filterByFormula: "AND(NOT({Status}='Closed'), NOT({Status}='Resolved'))" }),
-    airtableList(PM_BASE, 'Rent Payments', { filterByFormula: "{Status}='Overdue'" }),
+    safeList(PM_BASE, 'Lease Agreements'),
+    safeList(PM_BASE, 'Maintenance Requests', { filterByFormula: "AND(NOT({Status}='Closed'), NOT({Status}='Resolved'))" }),
+    safeList(PM_BASE, 'Invoices Payments', { filterByFormula: "{Status}='Overdue'" }),
   ])
   const expiringSoon = leases.filter(l => {
     const ed = l.fields['End Date']; if (!ed) return false
@@ -64,24 +69,24 @@ async function buildSnapshot(_userId: string) {
   }).length
   const overdueRentTotal = payments.reduce((s, p) => s + (Number(p.fields['Amount']) || 0), 0)
 
-  const mows = await airtableList(HC_BASE, 'tbli7OArESf2SHL10', {
+  const mows = await safeList(HC_BASE, 'tbli7OArESf2SHL10', {
     filterByFormula: `AND({fldcu9rgNI8REbrE0}>='${today}', {fldcu9rgNI8REbrE0}<='${today}')`,
   })
   const todaysMowsCount   = mows.length
   const todaysMowsRevenue = mows.reduce((s, m) => s + (Number(m.fields['fldJoKhtQX4MujAOi']) || 0), 0)
 
-  const flocks = await airtableList(CHICKENS_BASE, 'Flock', { filterByFormula: "{Status}='Active'" })
+  const flocks = await safeList(CHICKENS_BASE, 'Flock', { filterByFormula: "{Status}='Active'" })
   const activeFlocks = flocks.map(f => {
     const hd = f.fields['Hatch Date']
     const day = hd ? daysBetween(hd, today) + 1 : null
     return { name: f.fields['Name'], day, count: f.fields['Current Count'] ?? f.fields['Bird Count'], target_weeks: f.fields['Target Weeks'] }
   })
 
-  const llcs = await airtableList(LLC_BASE, 'LLCs')
+  const llcs = await safeList(LLC_BASE, 'LLCs')
   const llcOverdue  = llcs.filter(l => { const d = l.fields['Annual Report Due Date']; return d && daysBetween(today, d) < 0 }).length
   const llcDueSoon  = llcs.filter(l => { const d = l.fields['Annual Report Due Date']; if (!d) return false; const n = daysBetween(today, d); return n >= 0 && n <= 30 }).length
 
-  const tasks = await airtableList(TASKS_BASE, TASKS_TABLE, {
+  const tasks = await safeList(TASKS_BASE, TASKS_TABLE, {
     filterByFormula: "AND({Status}!='Done', {Due Date}!='')", returnFieldsByFieldId: 'true',
   })
   const tasksDueToday = tasks.filter(t => t.fields['fldLxGJRu1XeK4z7t'] === today).length

@@ -10,10 +10,24 @@ const TABLE_ID = 'tblHUG1CGxrirONPB'
 const AIRTABLE_PAT = import.meta.env.VITE_AIRTABLE_PAT
 
 async function fetchRecords() {
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}?sort[0][field]=Status&sort[0][direction]=asc`
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
-  if (!res.ok) throw new Error(`Airtable error: ${res.status}`)
-  return res.json()
+  const all = []
+  let offset = null
+
+  do {
+    const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`)
+    url.searchParams.set('sort[0][field]', 'Status')
+    url.searchParams.set('sort[0][direction]', 'asc')
+    if (offset) url.searchParams.set('offset', offset)
+
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
+    if (!res.ok) throw new Error(`Airtable error: ${res.status}`)
+
+    const data = await res.json()
+    all.push(...(data.records || []))
+    offset = data.offset
+  } while (offset)
+
+  return { records: all }
 }
 
 async function saveRecord(record) {
