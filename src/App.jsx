@@ -38,6 +38,7 @@ import Recipes from './pages/Recipes'
 import Triage from './pages/Triage'
 import TriageSetup from './pages/TriageSetup'
 import TriageGuide from './pages/TriageGuide'
+import Backlog from './pages/Backlog'
 import PropertyListings from './pages/PropertyListings.jsx'
 import CrossvilleDashboard from './pages/CrossvilleDashboard.jsx'
 
@@ -88,6 +89,7 @@ export default function App() {
             <Route path="triage" element={<PermRoute permission="can_view_triage"><Triage /></PermRoute>} />
             <Route path="triage/setup" element={<AdminRoute><TriageSetup /></AdminRoute>} />
             <Route path="triage/guide" element={<PermRoute permission="can_view_triage"><TriageGuide /></PermRoute>} />
+            <Route path="backlog" element={<PermRoute permission="can_view_backlog"><Backlog /></PermRoute>} />
             <Route
               path="admin"
               element={

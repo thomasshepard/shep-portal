@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Building2, Landmark,
+  LayoutDashboard, Building2, Landmark, Clipboard,
   Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -44,6 +44,7 @@ export default function Sidebar({ open, onClose }) {
     (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
     isAdmin && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
     permissions.documents && { to: '/documents', icon: FileText, label: 'Documents' },
+    permissions.can_view_backlog && { to: '/backlog', icon: Clipboard, label: 'Backlog' },
   ].filter(Boolean)
 
   return (
