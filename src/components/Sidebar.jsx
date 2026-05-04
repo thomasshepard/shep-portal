@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Building2, Landmark, Wrench, FolderOpen,
-  Users, ScrollText, FileCode, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity,
+  LayoutDashboard, Building2, Landmark,
+  Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -11,7 +11,6 @@ import toast from 'react-hot-toast'
 const adminItems = [
   { to: '/admin/users', icon: Users, label: 'Users' },
   { to: '/admin/logs', icon: ScrollText, label: 'Access Logs' },
-  { to: '/admin/content', icon: FileCode, label: 'Content' },
 ]
 
 const linkClass = ({ isActive }) =>
@@ -45,8 +44,6 @@ export default function Sidebar({ open, onClose }) {
     (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
     isAdmin && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
     permissions.documents && { to: '/documents', icon: FileText, label: 'Documents' },
-    (isAdmin || permissions.can_view_tools) && { to: '/tools', icon: Wrench, label: 'Tools' },
-    (isAdmin || permissions.can_view_files) && { to: '/files', icon: FolderOpen, label: 'Files' },
   ].filter(Boolean)
 
   return (
