@@ -122,8 +122,8 @@ export default function Backlog() {
   }
 
   const stats = {
-    active: records.filter(r => ['Idea', 'Design'].includes(r.fields['Status'])).length,
-    design: records.filter(r => r.fields['Status'] === 'Design').length,
+    active: records.filter(r => ['Idea', 'Planned', 'In Progress'].includes(r.fields['Status'])).length,
+    inProgress: records.filter(r => r.fields['Status'] === 'In Progress').length,
   }
 
   if (loading) return <div className="max-w-7xl mx-auto px-6 py-8 text-gray-500">Loading backlog...</div>
@@ -137,7 +137,7 @@ export default function Backlog() {
           <h1 className="text-3xl font-bold text-gray-900">Backlog</h1>
           <div className="flex gap-6 mt-2 text-sm text-gray-600">
             <div>Active Features: <span className="font-semibold text-gray-900">{stats.active}</span></div>
-            <div>In Design: <span className="font-semibold text-gray-900">{stats.design}</span></div>
+            <div>In Progress: <span className="font-semibold text-gray-900">{stats.inProgress}</span></div>
           </div>
         </div>
         <button

@@ -20,9 +20,10 @@ const CATEGORY_COLORS = {
 
 const STATUS_CONFIG = {
   Idea: { icon: '💡', color: 'text-gray-600', borderColor: 'border-gray-300' },
-  Design: { icon: '🎨', color: 'text-blue-600', borderColor: 'border-blue-300' },
-  Built: { icon: '✅', color: 'text-green-600', borderColor: 'border-green-300' },
-  Discard: { icon: '🗑️', color: 'text-red-600', borderColor: 'border-red-300' },
+  Planned: { icon: '📋', color: 'text-blue-600', borderColor: 'border-blue-300' },
+  'In Progress': { icon: '🔨', color: 'text-orange-600', borderColor: 'border-orange-300' },
+  Done: { icon: '✅', color: 'text-green-600', borderColor: 'border-green-300' },
+  Archived: { icon: '🗄️', color: 'text-gray-500', borderColor: 'border-gray-300' },
 }
 
 function Column({ status, records, onCardClick }) {
@@ -65,54 +66,73 @@ function Column({ status, records, onCardClick }) {
 }
 
 export default function BacklogKanban({ records, onCardClick, stats }) {
-  const [expandedBuilt, setExpandedBuilt] = useState(false)
-  const [expandedDiscard, setExpandedDiscard] = useState(false)
+  const [expandedInProgress, setExpandedInProgress] = useState(true)
+  const [expandedDone, setExpandedDone] = useState(false)
+  const [expandedArchived, setExpandedArchived] = useState(false)
 
   const grouped = {
     Idea: records.filter(r => r.fields['Status'] === 'Idea'),
-    Design: records.filter(r => r.fields['Status'] === 'Design'),
-    Built: records.filter(r => r.fields['Status'] === 'Built'),
-    Discard: records.filter(r => r.fields['Status'] === 'Discard'),
+    Planned: records.filter(r => r.fields['Status'] === 'Planned'),
+    'In Progress': records.filter(r => r.fields['Status'] === 'In Progress'),
+    Done: records.filter(r => r.fields['Status'] === 'Done'),
+    Archived: records.filter(r => r.fields['Status'] === 'Archived'),
   }
 
   return (
     <div className="space-y-6">
-      {/* Idea + Design in 2-column grid */}
+      {/* Idea + Planned in 2-column grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Column status="Idea" records={grouped.Idea} onCardClick={onCardClick} />
-        <Column status="Design" records={grouped.Design} onCardClick={onCardClick} />
+        <Column status="Planned" records={grouped.Planned} onCardClick={onCardClick} />
       </div>
 
-      {/* Built section (collapsible) */}
+      {/* In Progress section (collapsible, default expanded) */}
       <div className="space-y-3">
         <button
-          onClick={() => setExpandedBuilt(!expandedBuilt)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-green-300 hover:bg-green-50 transition-colors w-full"
+          onClick={() => setExpandedInProgress(!expandedInProgress)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-orange-300 hover:bg-orange-50 transition-colors w-full"
         >
-          {expandedBuilt ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-          <span className="text-lg">✅</span>
-          <span className="font-medium text-green-600">Built ({grouped.Built.length})</span>
+          {expandedInProgress ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          <span className="text-lg">🔨</span>
+          <span className="font-medium text-orange-600">In Progress ({grouped['In Progress'].length})</span>
         </button>
-        {expandedBuilt && (
-          <div className="lg:w-1/2">
-            <Column status="Built" records={grouped.Built} onCardClick={onCardClick} />
+        {expandedInProgress && (
+          <div className="lg:w-full">
+            <Column status="In Progress" records={grouped['In Progress']} onCardClick={onCardClick} />
           </div>
         )}
       </div>
 
-      {/* Discard section (collapsible) */}
+      {/* Done section (collapsible, default collapsed) */}
       <div className="space-y-3">
         <button
-          onClick={() => setExpandedDiscard(!expandedDiscard)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 hover:bg-red-50 transition-colors w-full"
+          onClick={() => setExpandedDone(!expandedDone)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-green-300 hover:bg-green-50 transition-colors w-full"
         >
-          {expandedDiscard ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-          <span className="text-lg">🗑️</span>
-          <span className="font-medium text-red-600">Discarded ({grouped.Discard.length})</span>
+          {expandedDone ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          <span className="text-lg">✅</span>
+          <span className="font-medium text-green-600">Done ({grouped.Done.length})</span>
         </button>
-        {expandedDiscard && (
-          <div className="lg:w-1/2">
-            <Column status="Discard" records={grouped.Discard} onCardClick={onCardClick} />
+        {expandedDone && (
+          <div className="lg:w-full">
+            <Column status="Done" records={grouped.Done} onCardClick={onCardClick} />
+          </div>
+        )}
+      </div>
+
+      {/* Archived section (collapsible, default collapsed) */}
+      <div className="space-y-3">
+        <button
+          onClick={() => setExpandedArchived(!expandedArchived)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors w-full"
+        >
+          {expandedArchived ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          <span className="text-lg">🗄️</span>
+          <span className="font-medium text-gray-500">Archived ({grouped.Archived.length})</span>
+        </button>
+        {expandedArchived && (
+          <div className="lg:w-full">
+            <Column status="Archived" records={grouped.Archived} onCardClick={onCardClick} />
           </div>
         )}
       </div>

@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const EFFORT_OPTIONS = ['S', 'M', 'L', 'XL']
-const STATUS_OPTIONS = ['Idea', 'Design', 'Built', 'Discard']
+const STATUS_OPTIONS = ['Idea', 'Planned', 'In Progress', 'Done', 'Archived']
 const CATEGORY_OPTIONS = ['Operations', 'Real Estate', 'Happy Cuts', 'Homestead', 'Personal', 'Technical', 'Finance']
 
 const VALUE_DESCRIPTIONS = [
