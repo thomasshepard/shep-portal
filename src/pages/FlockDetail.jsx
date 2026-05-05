@@ -134,6 +134,7 @@ function MortalityInlineForm({ flock, onSaved, onClose }) {
     const newCount = Math.max(0, (safeNum(flock.fields['Current Count']) ?? 0) - count)
     await updateRecord('Flock', flock.id, { 'Current Count': newCount }, CHICKENS_BASE_ID)
     toast.success(`Loss recorded — count updated to ${newCount}`)
+    setForm({ date: new Date().toISOString().slice(0, 10), count: '1', cause: 'Unknown', notes: '' })
     setSaving(false)
     onSaved(count, newCount)
   }
