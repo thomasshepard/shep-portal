@@ -48,7 +48,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 **Supabase** — auth, database, file storage, access logging.
 - Tables: `profiles`, `access_logs`, `properties` (read-only from portal), `pages` (custom HTML tools)
 - Storage buckets: `property-photos` (public), `property-docs` (private), `shared-files` (private)
-- Edge Functions: `delete-user` (deployed with `--no-verify-jwt`)
+- Edge Functions: `delete-user` (deployed with `--no-verify-jwt`), `generate-feeding-schedule` (chicken feeding schedule generator — deterministic math, no LLM; requires `AIRTABLE_PAT` Supabase secret)
 - RLS is strict; admin access uses the `is_admin()` helper function defined in `supabase-setup.sql`
 - Run `supabase-setup.sql` once in the Supabase SQL editor to create all tables, RLS policies, and triggers
 
@@ -65,7 +65,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 
 > The Chicken Farm base ID (`apppIiT84EaowkQVR`) uses a capital **I** in position 4 — easy to misread as lowercase l.
 
-**n8n** — generates and recalculates chicken feeding schedules via webhook (`VITE_N8N_CHICKENS_WEBHOOK_URL`). Webhook actions: `generate_schedule` (new flock), `recalculate_schedule` (after mortality update). Payload must include the full schedule array. Uses `text/plain` content-type to avoid CORS preflight.
+**Supabase Edge Function `generate-feeding-schedule`** — generates and recalculates chicken feeding schedules. Called from `Chickens.jsx` (new flock) and `FlockDetail.jsx` (mortality-driven recalculate or manual trigger). Accepts the same JSON payload shape: `{ action, flockId, flockName, hatchDate, birdCount/newBirdCount, targetWeeks, breed, version, schedule[] }`. All math is deterministic (oz × birds ÷ 12) — no LLM involved. Requires `AIRTABLE_PAT` as a Supabase secret.
 
 **Claude API** — used client-side (`VITE_ANTHROPIC_API_KEY`) for AI summaries in Documents and HappyCuts pages.
 
@@ -98,7 +98,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 ### Key Data Flow Patterns
 
 - **Properties** → Airtable PM base + Supabase Storage (`property-photos/<id>/`, `property-docs/<id>/`). Property records are read-only from the portal — never create or delete them.
-- **Chickens** → Airtable Chicken Farm base + n8n webhook for schedule generation/recalculation
+- **Chickens** → Airtable Chicken Farm base + `generate-feeding-schedule` Supabase edge function for schedule generation/recalculation
 - **Lease is the central linking record** in the PM hierarchy: Property → Unit → Lease ← Tenant / Payments
 - **Deals** → Airtable FB Marketplace base (`FBM_BASE_ID`, hardcoded in `airtable.js`)
 - **Happy Cuts** → Airtable Happy Cuts base, has its own field ID constants in `HappyCuts.jsx` / `HappyCutsClientDetail.jsx`
@@ -182,7 +182,6 @@ VITE_AIRTABLE_PM_BASE_ID             # Property Management
 VITE_AIRTABLE_CHICKENS_BASE_ID       # Chicken Farm
 VITE_AIRTABLE_DOCS_BASE_ID           # Desk Paper Cleanup
 VITE_AIRTABLE_HAPPY_CUTS_BASE_ID     # Happy Cuts lawn care
-VITE_N8N_CHICKENS_WEBHOOK_URL        # n8n chicken feeding schedule webhook
 VITE_ANTHROPIC_API_KEY               # Claude API for AI summaries
 VITE_GOOGLE_CLIENT_ID                # Google OAuth (if applicable)
 VITE_TASKS_BASE_ID=appYVLCn1NVLevdry # Shep Portal – Tasks Airtable base

@@ -317,6 +317,7 @@ export default function FlockDetail() {
   const [showExpenseForm, setShowExpenseForm] = useState(false)
   const [showProcessingModal, setShowProcessingModal] = useState(false)
   const [recalculating, setRecalculating] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [sizeChangeBanner, setSizeChangeBanner] = useState(false)
 
   useEffect(() => { loadAll() }, [id])
@@ -353,6 +354,47 @@ export default function FlockDetail() {
     )
   }
 
+  async function handleGenerate() {
+    setGenerating(true)
+    const f = flock.fields
+    const tw = safeNum(f['Target Weeks']) ?? 8
+    const breedName = safeStr(f['Breed'], '')
+
+    let schedule = CORNISH_CROSS_SCHEDULE.slice(0, tw)
+    if (breedName && breedName !== '—') {
+      const res = await fetchAllRecords('Breed Profiles', {
+        filterByFormula: `{Breed Name} = '${breedName}'`,
+      }, CHICKENS_BASE_ID)
+      const profile = (res.data || [])[0]
+      if (profile) {
+        const built = WEEK_OZ_FIELDS
+          .slice(0, tw)
+          .map((fn, i) => ({ week: i + 1, oz_per_bird: safeNum(profile.fields[fn]) || 0 }))
+          .filter(w => w.oz_per_bird > 0)
+        if (built.length > 0) schedule = built
+      }
+    }
+
+    await fireWebhook({
+      action: 'generate_schedule',
+      flockId: id,
+      flockName: safeStr(f['Name']),
+      hatchDate: f['Hatch Date'] || '',
+      birdCount: safeNum(f['Current Count']) ?? 0,
+      targetWeeks: tw,
+      breed: breedName,
+      version: 1,
+      baseId: CHICKENS_BASE_ID,
+      tableId: 'tbl55s9JUg6g38w3g',
+      schedule,
+    })
+    toast.success('Schedule generation triggered — reloading in 3s…')
+    setTimeout(async () => {
+      await loadScheduleOnly()
+      setGenerating(false)
+    }, 3000)
+  }
+
   async function handleRecalculate() {
     setRecalculating(true)
     const f = flock.fields
@@ -360,7 +402,7 @@ export default function FlockDetail() {
     const tw = safeNum(f['Target Weeks']) ?? 8
     const breedName = safeStr(f['Breed'], '')
 
-    // 1. Deactivate all current version rows so n8n doesn't create duplicates
+    // 1. Deactivate all current version rows to prevent duplicate version rows
     if (scheduleRows.length > 0) {
       await Promise.all(
         scheduleRows.map(s =>
@@ -538,9 +580,19 @@ export default function FlockDetail() {
         </div>
 
         {scheduleRows.length === 0 ? (
-          <p className="px-5 py-10 text-center text-gray-400 text-sm">
-            No feeding schedule yet. n8n generates it automatically after flock creation.
-          </p>
+          <div className="px-5 py-10 text-center">
+            <p className="text-gray-400 text-sm mb-3">No feeding schedule yet.</p>
+            {isAdmin && (
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 border border-blue-200 rounded-lg px-3 py-1.5 disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={generating ? 'animate-spin' : ''} />
+                {generating ? 'Generating…' : 'Generate Feeding Schedule'}
+              </button>
+            )}
+          </div>
         ) : (
           <>
             {/* Bell curve chart */}
