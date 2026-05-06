@@ -95,6 +95,12 @@ export async function resolveTriageItem(item) {
     return { ok: !error, error }
   }
 
+  if (resolveAction.handler === 'updateField') {
+    const { targetBaseId, targetTableId, targetRecordId, targetField, targetValue } = resolveAction
+    const { error } = await updateRecord(targetTableId, targetRecordId, { [targetField]: targetValue }, targetBaseId, { typecast: true })
+    return { ok: !error, error }
+  }
+
   return { ok: false, error: 'Use navigateToSource directly' }
 }
 
@@ -384,39 +390,98 @@ export const TRIAGE_RULES = [
 
   /**
    * Rule 7 — document-action-required
-   * Triggers when a document tagged "Action Required" hasn't been updated in 3+ days.
+   * Triggers when a document has Action Required text and Action Done is not checked.
    */
   {
     id: 'document-action-required',
     label: 'Document action required',
     enabled: !!import.meta.env.VITE_AIRTABLE_DOCS_BASE_ID,
     fetch: async (cache) =>
-      cache.get('documents', () => fetchAll('Documents', {}, DOCS_BASE_ID)),
+      cache.get('docs-action-required', () =>
+        fetchAll('tbltkTOMpJHPIUBXN', {
+          filterByFormula: `AND({fldmjyqB4dHpjITgX} != '', NOT({fld4XJN71y37c4OiW}))`,
+        }, DOCS_BASE_ID)
+      ),
     evaluate: (record, today) => {
       const f = record.fields || {}
-      const tags = safeStr(f['Tags']).toLowerCase()
-      if (!tags.includes('action required')) return null
-      const modDate = f['Last Modified'] ? new Date(f['Last Modified']) : null
-      const daysSince = modDate ? daysBetween(modDate, today) : 99
-      if (daysSince < 3) return null
+      const action  = safeStr(f['fldmjyqB4dHpjITgX'])
+      if (!action) return null
+
+      const name    = safeStr(f['fldD9BtzWbY12XpmF'])
+      const docType = safeStr(f['fldVoiLAgAvnRsBfV']?.name || f['fldVoiLAgAvnRsBfV'])
+      const dateStr = f['fldRp65lQj9fxxwdF']
+      const sender  = safeStr(f['fldW1rrz2yCDoMzoJ']).split('\n')[0]
+
+      const docDate = dateStr ? new Date(dateStr) : null
+      const daysOld = docDate ? Math.floor((today - docDate) / 86400000) : 999
+
+      const urgentTypes = [
+        'Collection Notice', 'Delinquent Notice', 'Final Bill Reminder',
+        'Past Due Notice', 'Overdraft Notice', 'Government Notice', 'Tax Notice',
+      ]
+      const timeSensitiveTypes = [
+        'Medical Bill', 'Medical Bill Statement', 'Billing Invoice', 'Billing Statement',
+        'Electric Bill', 'Electric Statement', 'Utility Bill', 'Bill', 'Premium Notice',
+        'Health Insurance Premium Notice', 'Insurance Notice', 'Loan Payment Notice',
+        'Loan Payment Notification', 'Bank Notice', 'Account Status Notification',
+      ]
+      const taxTypes = [
+        'Tax Form', 'Tax Document', 'Tax Notice', 'Form 1098', 'IRS Interest Income Statement',
+      ]
+
+      let bucket = 'stale'
+      let consequence = null
+
+      if (urgentTypes.includes(docType)) {
+        bucket = 'late'
+        consequence = `${docType} — requires immediate response`
+      } else if (timeSensitiveTypes.includes(docType)) {
+        if (daysOld > 30) {
+          bucket = 'late'
+          consequence = `${docType} — ${daysOld} days old, unresolved`
+        } else if (daysOld > 7) {
+          bucket = 'dueSoon'
+        } else {
+          bucket = 'stale'
+        }
+      } else if (taxTypes.includes(docType)) {
+        bucket = 'watching'
+      } else {
+        if (daysOld > 30) bucket = 'late'
+        else if (daysOld > 7) bucket = 'dueSoon'
+        else bucket = 'stale'
+      }
+
+      const cleanName = name.replace(/\s*[-—]\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{4}.*$/i, '').trim()
+      const identifier = sender ? `${cleanName} (${sender})` : cleanName
+
       return {
         id: `rule:document-action-required:${record.id}`,
         source: 'Document',
         sourceRecordId: record.id,
-        sourceBaseId: DOCS_BASE_ID,
-        sourceTable: 'Documents',
-        identifier: safeStr(f['Name'] || f['Description'] || f['Title'] || 'Document'),
-        whatShouldBeTrue: 'Document reviewed and action taken or tag removed',
-        expectedDate: null,
-        lastObservedDate: modDate,
-        daysLate: null,
+        sourceBaseId: 'app9ZYxynGul6hYZU',
+        sourceTableId: 'tbltkTOMpJHPIUBXN',
+        sourceTable: 'tbltkTOMpJHPIUBXN',
+        identifier,
+        whatShouldBeTrue: action,
+        expectedDate: docDate,
+        lastObservedDate: docDate,
+        daysLate: bucket === 'late' ? daysOld : null,
         daysUntil: null,
-        daysSinceObserved: daysSince,
-        bucket: 'stale',
+        daysSinceObserved: daysOld,
+        bucket,
         handler: 'Thomas',
-        consequence: 'Document needs review/action',
+        consequence,
         detailRoute: '/documents',
-        resolveAction: { label: 'View Documents', handler: 'navigateToSource' },
+        resolveAction: {
+          label: 'Mark Done',
+          handler: 'updateField',
+          targetBaseId: 'app9ZYxynGul6hYZU',
+          targetTableId: 'tbltkTOMpJHPIUBXN',
+          targetRecordId: record.id,
+          targetField: 'fld4XJN71y37c4OiW',
+          targetValue: true,
+        },
         ruleId: 'document-action-required',
         isManual: false,
       }

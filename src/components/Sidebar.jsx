@@ -1,9 +1,11 @@
 import { NavLink, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
   Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import { useAccessLog } from '../hooks/useAccessLog'
 import toast from 'react-hot-toast'
@@ -20,10 +22,24 @@ const linkClass = ({ isActive }) =>
       : 'text-slate-300 hover:bg-slate-700 hover:text-white'
   }`
 
+function useDocsActionCount(enabled) {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (!enabled || !DOCS_BASE_ID) return
+    fetchAllRecords(
+      'tbltkTOMpJHPIUBXN',
+      { filterByFormula: `AND({fldmjyqB4dHpjITgX} != '', NOT({fld4XJN71y37c4OiW}))` },
+      DOCS_BASE_ID
+    ).then(({ data }) => setCount(data?.length || 0))
+  }, [enabled])
+  return count
+}
+
 export default function Sidebar({ open, onClose }) {
   const { isAdmin, permissions } = useAuth()
   const { log } = useAccessLog()
   const navigate = useNavigate()
+  const docsActionCount = useDocsActionCount(!!(permissions.documents || isAdmin))
 
   async function handleLogout() {
     await log('logout', '/login')
@@ -43,7 +59,7 @@ export default function Sidebar({ open, onClose }) {
     (isAdmin || permissions.can_view_recipes) && { to: '/recipes', icon: ChefHat, label: 'Recipes' },
     (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
     isAdmin && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
-    permissions.documents && { to: '/documents', icon: FileText, label: 'Documents' },
+    permissions.documents && { to: '/documents', icon: FileText, label: 'Documents', badge: docsActionCount || null },
     permissions.can_view_backlog && { to: '/backlog', icon: Clipboard, label: 'Backlog' },
   ].filter(Boolean)
 
@@ -72,10 +88,15 @@ export default function Sidebar({ open, onClose }) {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {navItems.map(({ to, icon: Icon, label, badge }) => (
             <NavLink key={to} to={to} className={linkClass} onClick={onClose}>
               <Icon size={18} />
-              {label}
+              <span className="flex-1">{label}</span>
+              {badge ? (
+                <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center">
+                  {badge}
+                </span>
+              ) : null}
             </NavLink>
           ))}
 

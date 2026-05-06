@@ -203,7 +203,9 @@ function TriageCard({ item, onUpdate, onDismiss, onResolved }) {
   const showConsequence = (item.bucket === 'late' || item.bucket === 'dueSoon') && item.consequence
   const [resolving, setResolving] = useState(false)
 
-  const hasInlineResolve = item.resolveAction?.handler === 'completeTask' || item.resolveAction?.handler === 'manualDone'
+  const hasInlineResolve = item.resolveAction?.handler === 'completeTask'
+    || item.resolveAction?.handler === 'manualDone'
+    || item.resolveAction?.handler === 'updateField'
 
   async function handleResolve() {
     if (item.resolveAction?.handler === 'navigateToSource') {
@@ -214,7 +216,7 @@ function TriageCard({ item, onUpdate, onDismiss, onResolved }) {
     const { ok, error } = await resolveTriageItem(item)
     setResolving(false)
     if (!ok) { toast.error(error || 'Failed'); return }
-    toast.success('Done')
+    toast.success(item.resolveAction?.handler === 'updateField' ? 'Document marked done' : 'Done')
     onResolved()
   }
 
