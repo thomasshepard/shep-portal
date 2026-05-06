@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Plus, ChevronLeft, ChevronDown, Star, Trash2, ExternalLink, Copy, Check, Search, X, Maximize2 } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronDown, Star, Trash2, ExternalLink, Copy, Check, Search, X, Maximize2, Mail } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import { fetchTasks, fetchTaskById, createTask, updateTask, deleteTask, dismissLinkedNotification, FIELDS } from '../lib/tasks'
@@ -719,8 +719,9 @@ export default function Tasks() {
   })
   const [viewingUserId, setViewingUserId] = useState(null)
   const [otherUsers,    setOtherUsers]    = useState([])
-  const [nudgeTaskId,   setNudgeTaskId]   = useState(null)
-  const [drawerTask,    setDrawerTask]    = useState(null)
+  const [nudgeTaskId,     setNudgeTaskId]     = useState(null)
+  const [drawerTask,      setDrawerTask]      = useState(null)
+  const [sendingReminder, setSendingReminder] = useState(false)
 
   const userId = session?.user?.id
 
@@ -737,6 +738,28 @@ export default function Tasks() {
   }
 
   useEffect(() => { loadTasks() }, [viewingUserId]) // eslint-disable-line
+
+  async function handleRemind() {
+    if (!viewingUserId || viewingUserId === userId) return
+    setSendingReminder(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('send-task-reminder', {
+        body: { userId: viewingUserId },
+      })
+      if (error) throw error
+      if (data?.skipped) {
+        showToast('No open tasks to remind about')
+      } else {
+        const name = otherUsers.find(u => u.id === viewingUserId)?.full_name?.split(' ')[0] || 'User'
+        showToast(`Reminder sent to ${name}`)
+      }
+    } catch (err) {
+      console.error('[Tasks] remind failed:', err)
+      showToast('Failed to send reminder')
+    } finally {
+      setSendingReminder(false)
+    }
+  }
 
   // Sync drawer task from URL param (open drawer when /tasks/:taskId)
   useEffect(() => {
@@ -1052,6 +1075,18 @@ export default function Tasks() {
             </form>
 
             <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+              {/* Remind — only shown when viewing another user's tasks */}
+              {viewingUserId && viewingUserId !== userId && (
+                <button
+                  onClick={handleRemind}
+                  disabled={sendingReminder}
+                  title="Send task reminder email"
+                  className="flex items-center gap-1.5 h-8 px-3 bg-white border border-slate-200 text-slate-600 text-xs font-medium rounded-full hover:bg-slate-50 hover:border-slate-300 disabled:opacity-50 transition-colors"
+                >
+                  <Mail size={13} />
+                  <span className="hidden sm:inline">{sendingReminder ? 'Sending…' : 'Remind'}</span>
+                </button>
+              )}
               {/* Copy all visible */}
               <button
                 onClick={handleCopyAll}
