@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS public.cron_runs (
   last_ran_at TIMESTAMPTZ NOT NULL
 );
 
+-- Internal-only table: no public or authenticated policies.
+-- Service role (edge functions, GitHub Actions) bypasses RLS automatically.
+ALTER TABLE public.cron_runs ENABLE ROW LEVEL SECURITY;
+
 -- ── Per-user notification preferences ─────────────────────────────────────────
 -- Smart defaults: instant for tasks/properties/alerts/system (real interruptions
 -- the user needs to act on immediately); digest for incubator/chickens/documents/
