@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Check, Copy } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Check, Copy, X, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { fetchAllRecords, createRecord, fmtCurrency, fmtDate } from '../lib/airtable'
-import { BTC_BASE_ID } from '../lib/airtable'
+import { fetchAllRecords, createRecord, updateRecord, deleteRecord, fmtCurrency, fmtDate, BTC_BASE_ID } from '../lib/airtable'
 
 const safeStr = (val, fallback = '') => (val == null ? fallback : String(val))
 const safeNum = (val) => (typeof val === 'number' ? val : parseFloat(val) || 0)
@@ -14,16 +13,16 @@ const LC_JANINE_TBL    = 'tblz9xROlto0R2xCz'
 const LC_RH_TBL        = 'tblK0E5G4wGQO6Yu1'
 const RH_PURCHASES_TBL = 'tblg0eLNtJQPtikRb'
 
-// WRITE field IDs — used in createRecord payloads
+// WRITE field IDs — used in createRecord / updateRecord payloads
 const RHF = {
-  date:          'fldzmuHFuSbTg00Su',
-  btc:           'fldE3FZrCCjHxdc6r',
-  price:         'fld0N14QwwbueJLFM',
-  walletFrom:    'fldevTavL8JKIaz9A',
-  walletTo:      'fld9AtB1A2m0dMpgJ',
-  fee:           'fldTbLUfEVPx1oa4h',
+  date:            'fldzmuHFuSbTg00Su',
+  btc:             'fldE3FZrCCjHxdc6r',
+  price:           'fld0N14QwwbueJLFM',
+  walletFrom:      'fldevTavL8JKIaz9A',
+  walletTo:        'fld9AtB1A2m0dMpgJ',
+  fee:             'fldTbLUfEVPx1oa4h',
   amountUSDManual: 'fldJRgkH3s7DCIYh4',
-  feeUSDManual:  'fldZ9GmVLDv42qsIa',
+  feeUSDManual:    'fldZ9GmVLDv42qsIa',
 }
 
 const BPF = {
@@ -39,13 +38,13 @@ const BPF = {
 }
 
 const LCJF = {
-  date:           'fldezoIxNO07cStc6',
-  btc:            'fldgucypKQpoieHU2',
-  price:          'fld4Ql8993mh046pG',
-  feeSats:        'fldzNLiszLvOJMUlR',
-  feeUSDManual:   'fld2uk44yKHr6Iua7',
-  conversionRate: 'fldzmqK9CBG8gi0y1',
-  conversionPesos:'fldGRkvgWyROiktEn',
+  date:            'fldezoIxNO07cStc6',
+  btc:             'fldgucypKQpoieHU2',
+  price:           'fld4Ql8993mh046pG',
+  feeSats:         'fldzNLiszLvOJMUlR',
+  feeUSDManual:    'fld2uk44yKHr6Iua7',
+  conversionRate:  'fldzmqK9CBG8gi0y1',
+  conversionPesos: 'fldGRkvgWyROiktEn',
 }
 
 const LCRHF = {
@@ -61,7 +60,7 @@ const RHPF = {
   notes: 'fldKI9qNRcpwBGpwg',
 }
 
-// READ field names — as returned by Airtable API (record.fields is keyed by name, not ID)
+// READ field names — record.fields is keyed by name, not ID
 const RH_READ = {
   date:  'BTC Settled Date',
   btc:   'Bitcoin calc by coinbase',
@@ -70,7 +69,7 @@ const RH_READ = {
 
 const BP_READ = {
   bankTransferDate: 'Bank Transfer Date',
-  btc:              'Bitcoin Calc by coinbase',
+  btc:              'Bitcoin Calc by coinbaise', // typo matches Airtable exactly
   price:            'Bitcoin in USD',
 }
 
@@ -86,7 +85,7 @@ const LCRH_READ = {
 }
 
 const JANINE_ADDRESS = '1Kdq7Wz8deiQyFSp4oKuaigF3JR1tmZZcC'
-const today = () => new Date().toISOString().split('T')[0]
+const today  = () => new Date().toISOString().split('T')[0]
 const fmtBTC = (val) => safeNum(val).toFixed(8) + ' BTC'
 const fmtUSD = (val) => fmtCurrency(val)
 
@@ -94,6 +93,10 @@ const INPUT          = 'w-full px-3 py-1.5 bg-slate-700 border border-slate-600 
 const INPUT_REQUIRED = 'w-full px-3 py-1.5 bg-slate-700 border-l-2 border-l-yellow-400 border-y border-r border-slate-600 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-l-yellow-300 focus:border-slate-500'
 const LABEL          = 'block text-xs text-slate-400 mb-1'
 const READONLY       = 'w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-400 italic'
+
+const DOT_COLOR = { rh: 'bg-orange-400', bp: 'bg-blue-400', lcj: 'bg-green-400' }
+
+// ── Shared small components ───────────────────────────────────────────────────
 
 function FormField({ label, hint, children }) {
   return (
@@ -161,7 +164,279 @@ function StatCard({ title, btc, usd }) {
   )
 }
 
-const DOT_COLOR = { rh: 'bg-orange-400', bp: 'bg-blue-400', lcj: 'bg-green-400' }
+// ── Recent Activity Panel ─────────────────────────────────────────────────────
+
+function RecentActivityPanel({ feed, btcPrice, onEdit }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 md:cursor-default"
+        onClick={() => setOpen(o => !o)}
+      >
+        <div>
+          <div className="font-semibold text-white text-sm text-left">Recent Activity</div>
+          <div className="text-xs text-slate-400 text-left">Tap any row to edit · last 30 records</div>
+        </div>
+        <ChevronDown
+          className={`w-4 h-4 text-slate-400 transition-transform md:hidden ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      <div className={`${open ? 'block' : 'hidden'} md:block`}>
+        {feed.length === 0 ? (
+          <p className="text-xs text-slate-500 px-4 py-3">No recent transactions.</p>
+        ) : (
+          feed.map((item, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-3 px-4 py-2.5 border-t border-slate-700 cursor-pointer hover:bg-slate-700/50 transition-colors group"
+              onClick={() => onEdit({ id: item.id, type: item.type, fields: item.fields })}
+            >
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${DOT_COLOR[item.type]}`} />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-white">{item.label}</div>
+                <div className="text-xs text-slate-400">{fmtDate(item.date)}</div>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <div className="text-xs font-medium text-white">{item.btc.toFixed(8)} BTC</div>
+                <div className="text-xs text-slate-400">
+                  {btcPrice ? `≈ $${(item.btc * btcPrice).toFixed(2)}` : '—'}
+                </div>
+              </div>
+              <Pencil className="w-3 h-3 text-slate-600 group-hover:text-slate-400 flex-shrink-0 transition-colors" />
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Modal ────────────────────────────────────────────────────────────────
+
+function EditModal({ record, onClose, onSaved }) {
+  const [form, setForm] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  useEffect(() => {
+    const f = record.fields
+    if (record.type === 'rh') {
+      setForm({
+        date:   safeStr(f[RH_READ.date]),
+        btc:    safeStr(f[RH_READ.btc]),
+        price:  safeStr(f[RH_READ.price]),
+        fee:    safeStr(f['Fee']),
+        feeUSD: safeStr(f['Fee (USD) manual']),
+      })
+    } else if (record.type === 'bp') {
+      setForm({
+        bankDate:    safeStr(f[BP_READ.bankTransferDate]),
+        settledDate: safeStr(f['BTC Settled Date']),
+        btc:         safeStr(f[BP_READ.btc]),
+        price:       safeStr(f[BP_READ.price]),
+        feeSats:     safeStr(f['Fee (SATS)']),
+        feeUSD:      safeStr(f['Fee (USD) - manual']),
+      })
+    } else if (record.type === 'lcj') {
+      setForm({
+        date:     safeStr(f[LCJ_READ.date]),
+        btc:      safeStr(f[LCJ_READ.btc]),
+        price:    safeStr(f[LCJ_READ.price]),
+        feeSats:  safeStr(f['Fee']),
+        feeUSD:   safeStr(f['Fee in USD - manual']),
+        convRate: safeStr(f['Conversion Rate']),
+      })
+    }
+  }, [record])
+
+  const set = (key) => (e) => setForm(prev => ({ ...prev, [key]: e.target.value }))
+  const usd = safeNum(form.btc) * safeNum(form.price)
+
+  async function handleSave() {
+    setSaving(true)
+    let tableId, payload
+    if (record.type === 'rh') {
+      tableId = RH_SHEP_TBL
+      payload = {
+        [RHF.date]:            form.date,
+        [RHF.btc]:             parseFloat(form.btc) || 0,
+        [RHF.price]:           parseFloat(form.price) || 0,
+        [RHF.amountUSDManual]: usd,
+        ...(form.fee    && { [RHF.fee]:          parseFloat(form.fee) }),
+        ...(form.feeUSD && { [RHF.feeUSDManual]: parseFloat(form.feeUSD) }),
+      }
+    } else if (record.type === 'bp') {
+      tableId = BTC_PURCHASE_TBL
+      payload = {
+        [BPF.bankTransferDate]: form.bankDate,
+        [BPF.btcSettledDate]:   form.settledDate,
+        [BPF.btc]:              parseFloat(form.btc) || 0,
+        [BPF.price]:            parseFloat(form.price) || 0,
+        ...(form.feeSats && { [BPF.feeSats]:      parseInt(form.feeSats, 10) }),
+        ...(form.feeUSD  && { [BPF.feeUSDManual]: parseFloat(form.feeUSD) }),
+      }
+    } else {
+      tableId = LC_JANINE_TBL
+      payload = {
+        [LCJF.date]:  form.date,
+        [LCJF.btc]:   parseFloat(form.btc) || 0,
+        [LCJF.price]: parseFloat(form.price) || 0,
+        ...(form.feeSats  && { [LCJF.feeSats]:       parseInt(form.feeSats, 10) }),
+        ...(form.feeUSD   && { [LCJF.feeUSDManual]:  parseFloat(form.feeUSD) }),
+        ...(form.convRate && { [LCJF.conversionRate]: parseFloat(form.convRate) }),
+      }
+    }
+    const { error } = await updateRecord(tableId, record.id, payload, BTC_BASE_ID)
+    setSaving(false)
+    if (error) { toast.error(error); return }
+    toast.success('Record updated')
+    onSaved()
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return }
+    setDeleting(true)
+    const tableId =
+      record.type === 'rh' ? RH_SHEP_TBL :
+      record.type === 'bp' ? BTC_PURCHASE_TBL :
+      LC_JANINE_TBL
+    const { error } = await deleteRecord(tableId, record.id, BTC_BASE_ID)
+    setDeleting(false)
+    if (error) { toast.error(error); return }
+    toast.success('Record deleted')
+    onSaved()
+  }
+
+  const LBL     = 'block text-xs text-slate-400 mb-1'
+  const INP     = 'w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500'
+  const INP_REQ = 'w-full px-3 py-1.5 bg-slate-700 border-l-2 border-l-yellow-400 border-y border-r border-slate-600 rounded text-sm text-white focus:outline-none'
+  const RO      = 'w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-400 italic'
+
+  const titles = { rh: 'Edit RH → Shepard', bp: 'Edit Shep → LCWallet1', lcj: 'Edit LC → Janine' }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div className="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
+          <h2 className="font-semibold text-white text-sm">{titles[record.type]}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="px-5 py-4 flex flex-col gap-3">
+
+          {record.type === 'rh' && <>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>BTC Settled Date</label>
+                <input type="date" className={INP_REQ} value={form.date || ''} onChange={set('date')} /></div>
+              <div><label className={LBL}>BTC amount</label>
+                <input type="text" className={INP_REQ} value={form.btc || ''} onChange={set('btc')} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>BTC Price (Coinbase)</label>
+                <input type="text" className={INP_REQ} value={form.price || ''} onChange={set('price')} /></div>
+              <div><label className={LBL}>Amount USD</label>
+                <input className={RO} readOnly value={usd ? `$${usd.toFixed(2)}` : '—'} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>Network fee (BTC)</label>
+                <input type="text" className={INP} value={form.fee || ''} onChange={set('fee')} /></div>
+              <div><label className={LBL}>Fee USD (manual)</label>
+                <input type="text" className={INP} value={form.feeUSD || ''} onChange={set('feeUSD')} /></div>
+            </div>
+          </>}
+
+          {record.type === 'bp' && <>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>Bank Transfer Date</label>
+                <input type="date" className={INP_REQ} value={form.bankDate || ''} onChange={set('bankDate')} /></div>
+              <div><label className={LBL}>BTC Settled Date</label>
+                <input type="date" className={INP_REQ} value={form.settledDate || ''} onChange={set('settledDate')} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>BTC Price (Coinbase)</label>
+                <input type="text" className={INP_REQ} value={form.price || ''} onChange={set('price')} /></div>
+              <div><label className={LBL}>BTC amount</label>
+                <input type="text" className={INP_REQ} value={form.btc || ''} onChange={set('btc')} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>Amount USD</label>
+                <input className={RO} readOnly value={usd ? `$${usd.toFixed(2)}` : '—'} /></div>
+              <div><label className={LBL}>Fee (SATS)</label>
+                <input type="number" className={INP_REQ} value={form.feeSats || ''} onChange={set('feeSats')} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>Fee USD (manual)</label>
+                <input type="text" className={INP} value={form.feeUSD || ''} onChange={set('feeUSD')} /></div>
+            </div>
+          </>}
+
+          {record.type === 'lcj' && <>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>Date</label>
+                <input type="date" className={INP_REQ} value={form.date || ''} onChange={set('date')} /></div>
+              <div><label className={LBL}>BTC amount</label>
+                <input type="text" className={INP_REQ} value={form.btc || ''} onChange={set('btc')} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>BTC Price (Coinbase)</label>
+                <input type="text" className={INP_REQ} value={form.price || ''} onChange={set('price')} /></div>
+              <div><label className={LBL}>Amount USD</label>
+                <input className={RO} readOnly value={usd ? `$${usd.toFixed(2)}` : '—'} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LBL}>Fee (SATS)</label>
+                <input type="number" className={INP_REQ} value={form.feeSats || ''} onChange={set('feeSats')} /></div>
+              <div><label className={LBL}>Fee USD (manual)</label>
+                <input type="text" className={INP} value={form.feeUSD || ''} onChange={set('feeUSD')} /></div>
+            </div>
+            <div><label className={LBL}>Conversion Rate (optional)</label>
+              <input type="text" className={INP} value={form.convRate || ''} onChange={set('convRate')} placeholder="e.g. 19.85 pesos per USD" /></div>
+          </>}
+
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-700 flex items-center gap-3">
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              confirmDelete
+                ? 'bg-red-600 hover:bg-red-700 text-white'
+                : 'bg-slate-700 hover:bg-slate-600 text-red-400'
+            }`}
+          >
+            {deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete' : 'Delete'}
+          </button>
+          {confirmDelete && (
+            <button onClick={() => setConfirmDelete(false)} className="text-xs text-slate-400 hover:text-white">
+              Cancel
+            </button>
+          )}
+          <div className="flex gap-2 ml-auto">
+            <button onClick={onClose} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg">
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Bitcoin() {
   const [btcPrice, setBtcPrice] = useState(null)
@@ -176,6 +451,7 @@ export default function Bitcoin() {
   const [achOpen, setAchOpen] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState(false)
   const [saved, setSaved] = useState({ step1: false, step2: false, step3: false, step4: false })
+  const [editRecord, setEditRecord] = useState(null)
 
   const [s1, setS1] = useState({ date: today(), usd: '', btcReceived: '', price: '', notes: '' })
   const [s2, setS2] = useState({ date: today(), btc: '', price: '', fee: '', feeUSD: '' })
@@ -228,7 +504,7 @@ export default function Bitcoin() {
     loadData()
   }, [fetchPrice, loadData])
 
-  // Stats — read by field name
+  // Stats
   const shepWallet =
     rhRecords.reduce((s, r) => s + safeNum(r.fields[RH_READ.btc]), 0) -
     bpRecords.reduce((s, r) => s + safeNum(r.fields[BP_READ.btc]), 0)
@@ -237,31 +513,40 @@ export default function Bitcoin() {
     bpRecords.reduce((s, r) => s + safeNum(r.fields[BP_READ.btc]), 0) -
     lcjRecords.reduce((s, r) => s + safeNum(r.fields[LCJ_READ.btc]), 0)
 
-  const totalJanine = lcjRecords.reduce((s, r) => s + safeNum(r.fields[LCJ_READ.btc]), 0)
+  const totalJanine  = lcjRecords.reduce((s, r) => s + safeNum(r.fields[LCJ_READ.btc]), 0)
   const lastTransfer = lcjRecords[0] || null
 
-  // Activity feed — merge top 5 from each table, sort desc, take 15
+  // Activity feed — top 10 per table
   const feed = [
-    ...rhRecords.slice(0, 5).map(r => ({
-      type: 'rh', label: 'RH → Shepard',
-      date: safeStr(r.fields[RH_READ.date]),
-      btc:  safeNum(r.fields[RH_READ.btc]),
+    ...rhRecords.slice(0, 10).map(r => ({
+      type:   'rh',
+      label:  'RH → Shepard',
+      id:     r.id,
+      date:   safeStr(r.fields[RH_READ.date]),
+      btc:    safeNum(r.fields[RH_READ.btc]),
+      fields: r.fields,
     })),
-    ...bpRecords.slice(0, 5).map(r => ({
-      type: 'bp', label: 'Shep → LCWallet1',
-      date: safeStr(r.fields[BP_READ.bankTransferDate]),
-      btc:  safeNum(r.fields[BP_READ.btc]),
+    ...bpRecords.slice(0, 10).map(r => ({
+      type:   'bp',
+      label:  'Shep → LCWallet1',
+      id:     r.id,
+      date:   safeStr(r.fields[BP_READ.bankTransferDate]),
+      btc:    safeNum(r.fields[BP_READ.btc]),
+      fields: r.fields,
     })),
-    ...lcjRecords.slice(0, 5).map(r => ({
-      type: 'lcj', label: 'LC → Janine',
-      date: safeStr(r.fields[LCJ_READ.date]),
-      btc:  safeNum(r.fields[LCJ_READ.btc]),
+    ...lcjRecords.slice(0, 10).map(r => ({
+      type:   'lcj',
+      label:  'LC → Janine',
+      id:     r.id,
+      date:   safeStr(r.fields[LCJ_READ.date]),
+      btc:    safeNum(r.fields[LCJ_READ.btc]),
+      fields: r.fields,
     })),
-  ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15)
+  ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30)
 
-  const s2USD  = safeNum(s2.btc) * safeNum(s2.price)
-  const s3USD  = safeNum(s3.btc) * safeNum(s3.price)
-  const s4USD  = safeNum(s4.btc) * safeNum(s4.price)
+  const s2USD   = safeNum(s2.btc) * safeNum(s2.price)
+  const s3USD   = safeNum(s3.btc) * safeNum(s3.price)
+  const s4USD   = safeNum(s4.btc) * safeNum(s4.price)
   const s4Pesos = s4.convRate ? s4USD * safeNum(s4.convRate) : 0
 
   function copyAddress() {
@@ -385,12 +670,12 @@ export default function Bitcoin() {
       <div className="max-w-7xl mx-auto px-4 py-6">
 
         {/* Header */}
-        <div className="flex items-start justify-between mb-6 flex-wrap gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
           <div>
             <h1 className="text-2xl font-bold text-white">Bitcoin Tracker</h1>
             <p className="text-slate-400 text-sm mt-1">Weekly workflow — RH buy → Shep Wallet → LCWallet1 → Janine</p>
           </div>
-          <div className="flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 self-start">
             <div>
               <div className="text-xs text-slate-400">BTC / USD</div>
               <div className="text-lg font-bold text-orange-400">
@@ -410,13 +695,13 @@ export default function Bitcoin() {
 
         {/* Stats row */}
         {loading ? (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-4">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl p-4 animate-pulse h-20" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-4">
             <StatCard
               title="Shepard Wallet"
               btc={shepWallet}
@@ -446,11 +731,11 @@ export default function Bitcoin() {
           </div>
         )}
 
-        {/* Two-column layout */}
-        <div className="flex gap-6 items-start">
+        {/* Two-column on desktop, single column on mobile */}
+        <div className="flex flex-col md:grid md:grid-cols-[1fr_320px] gap-3">
 
-          {/* Left — forms */}
-          <div className="flex-1 space-y-4 min-w-0">
+          {/* Left column — step forms */}
+          <div className="flex flex-col gap-3">
 
             {/* Step 1 — RH Purchase */}
             <StepCard step={1} title="Buy on Robinhood" subtitle="Record the BTC purchase in Robinhood" done={saved.step1}>
@@ -555,7 +840,7 @@ export default function Bitcoin() {
 
             {/* Step 4 — LC → Janine */}
             <StepCard step={4} title="LCWallet1 → Janine" subtitle="Record BTC transfer to Janine's external wallet" done={saved.step4}>
-              {/* Wallet path with inline copy button */}
+              {/* Wallet path with copy button */}
               <div className="flex items-center gap-2 text-xs mb-4 p-2 bg-slate-700/50 rounded-lg">
                 <span className="text-slate-300 font-medium">LC Wallet1-sparrow</span>
                 <span className="text-slate-500">→</span>
@@ -633,41 +918,31 @@ export default function Bitcoin() {
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Right — activity feed */}
-          <div className="w-72 flex-shrink-0 sticky top-6">
-            <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-              <h3 className="font-semibold text-white text-sm mb-3">Recent Activity</h3>
-              {loading ? (
-                <div className="space-y-2">
-                  {[...Array(5)].map((_, i) => (
-                    <div key={i} className="h-14 bg-slate-700 rounded animate-pulse" />
-                  ))}
-                </div>
-              ) : feed.length === 0 ? (
-                <p className="text-sm text-slate-500">No activity yet</p>
-              ) : (
-                <div className="space-y-1">
-                  {feed.map((item, i) => (
-                    <div key={i} className="flex items-start gap-2 p-2 rounded-lg hover:bg-slate-700/50 transition-colors">
-                      <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${DOT_COLOR[item.type]}`} />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs font-medium text-slate-300">{item.label}</div>
-                        <div className="text-xs text-slate-500">{fmtDate(item.date)}</div>
-                        <div className="text-xs text-slate-400">{fmtBTC(item.btc)}</div>
-                        {btcPrice != null && (
-                          <div className="text-xs text-slate-500">{fmtUSD(item.btc * btcPrice)}</div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* Recent Activity — mobile only, below forms */}
+            <div className="md:hidden">
+              <RecentActivityPanel feed={feed} btcPrice={btcPrice} onEdit={setEditRecord} />
             </div>
           </div>
+
+          {/* Right column — desktop only, sticky */}
+          <div className="hidden md:block">
+            <div className="sticky top-4">
+              <RecentActivityPanel feed={feed} btcPrice={btcPrice} onEdit={setEditRecord} />
+            </div>
+          </div>
+
         </div>
       </div>
+
+      {/* Edit modal */}
+      {editRecord && (
+        <EditModal
+          record={editRecord}
+          onClose={() => setEditRecord(null)}
+          onSaved={() => { setEditRecord(null); loadData() }}
+        />
+      )}
     </div>
   )
 }
