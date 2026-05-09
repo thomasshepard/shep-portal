@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Check, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { fetchAllRecords, createRecord, fmtCurrency, fmtDate } from '../lib/airtable'
 import { BTC_BASE_ID } from '../lib/airtable'
@@ -7,55 +7,91 @@ import { BTC_BASE_ID } from '../lib/airtable'
 const safeStr = (val, fallback = '') => (val == null ? fallback : String(val))
 const safeNum = (val) => (typeof val === 'number' ? val : parseFloat(val) || 0)
 
-const RH_SHEP_TBL = 'tblNY2hBqThOmNRky'
+// Table IDs
+const RH_SHEP_TBL      = 'tblNY2hBqThOmNRky'
 const BTC_PURCHASE_TBL = 'tblAmFoRWXRLjNPHj'
-const LC_JANINE_TBL = 'tblz9xROlto0R2xCz'
-const LC_RH_TBL = 'tblK0E5G4wGQO6Yu1'
+const LC_JANINE_TBL    = 'tblz9xROlto0R2xCz'
+const LC_RH_TBL        = 'tblK0E5G4wGQO6Yu1'
+const RH_PURCHASES_TBL = 'tblg0eLNtJQPtikRb'
 
+// WRITE field IDs — used in createRecord payloads
 const RHF = {
-  date: 'fldzmuHFuSbTg00Su',
-  btc: 'fldE3FZrCCjHxdc6r',
-  price: 'fld0N14QwwbueJLFM',
-  walletFrom: 'fldevTavL8JKIaz9A',
-  walletTo: 'fld9AtB1A2m0dMpgJ',
-  fee: 'fldTbLUfEVPx1oa4h',
+  date:          'fldzmuHFuSbTg00Su',
+  btc:           'fldE3FZrCCjHxdc6r',
+  price:         'fld0N14QwwbueJLFM',
+  walletFrom:    'fldevTavL8JKIaz9A',
+  walletTo:      'fld9AtB1A2m0dMpgJ',
+  fee:           'fldTbLUfEVPx1oa4h',
   amountUSDManual: 'fldJRgkH3s7DCIYh4',
-  feeUSDManual: 'fldZ9GmVLDv42qsIa',
+  feeUSDManual:  'fldZ9GmVLDv42qsIa',
 }
 
 const BPF = {
   bankTransferDate: 'fldI0OyaLhGLYm4Oi',
-  btcSettledDate: 'fldn5EUPRu9U9x05L',
-  btc: 'fldgvCerd1oeKnbw3',
-  price: 'fldcvilPw9WjKdl32',
-  walletFrom: 'fld4201ojx6bMj4Jj',
-  walletTo: 'fldmFeTdZUw8xrLsK',
-  feeSats: 'fld6qT48fb9XGixuB',
-  feeUSDManual: 'fldIZPUik2zykn1JV',
-  lcToRH: 'fldXH5teRIsMiZwwW',
+  btcSettledDate:   'fldn5EUPRu9U9x05L',
+  btc:              'fldgvCerd1oeKnbw3',
+  price:            'fldcvilPw9WjKdl32',
+  walletFrom:       'fld4201ojx6bMj4Jj',
+  walletTo:         'fldmFeTdZUw8xrLsK',
+  feeSats:          'fld6qT48fb9XGixuB',
+  feeUSDManual:     'fldIZPUik2zykn1JV',
+  lcToRH:           'fldXH5teRIsMiZwwW',
 }
 
 const LCJF = {
-  date: 'fldezoIxNO07cStc6',
-  btc: 'fldgucypKQpoieHU2',
-  price: 'fld4Ql8993mh046pG',
-  feeSats: 'fldzNLiszLvOJMUlR',
-  feeUSDManual: 'fld2uk44yKHr6Iua7',
+  date:           'fldezoIxNO07cStc6',
+  btc:            'fldgucypKQpoieHU2',
+  price:          'fld4Ql8993mh046pG',
+  feeSats:        'fldzNLiszLvOJMUlR',
+  feeUSDManual:   'fld2uk44yKHr6Iua7',
   conversionRate: 'fldzmqK9CBG8gi0y1',
-  conversionPesos: 'fldGRkvgWyROiktEn',
+  conversionPesos:'fldGRkvgWyROiktEn',
 }
 
 const LCRHF = {
-  date: 'fld2fiF9n8NMaxhWD',
+  date:   'fld2fiF9n8NMaxhWD',
   amount: 'fldLqEPYNP27CF1Rw',
 }
 
+const RHPF = {
+  date:  'fldSr61kcQo2okvU2',
+  usd:   'fldsfLfZ7ZI2ZkmLd',
+  btc:   'fldC3bEqb0Grq27LH',
+  price: 'fldepw744xqlYMGkf',
+  notes: 'fldKI9qNRcpwBGpwg',
+}
+
+// READ field names — as returned by Airtable API (record.fields is keyed by name, not ID)
+const RH_READ = {
+  date:  'BTC Settled Date',
+  btc:   'Bitcoin calc by coinbase',
+  price: 'BTC Price (USD)',
+}
+
+const BP_READ = {
+  bankTransferDate: 'Bank Transfer Date',
+  btc:              'Bitcoin Calc by coinbase',
+  price:            'Bitcoin in USD',
+}
+
+const LCJ_READ = {
+  date:  'Date',
+  btc:   'BTC',
+  price: 'BTC Price in USD',
+}
+
+const LCRH_READ = {
+  date:   'Date',
+  amount: 'Amount',
+}
+
+const JANINE_ADDRESS = '1Kdq7Wz8deiQyFSp4oKuaigF3JR1tmZZcC'
 const today = () => new Date().toISOString().split('T')[0]
 const fmtBTC = (val) => safeNum(val).toFixed(8) + ' BTC'
 const fmtUSD = (val) => fmtCurrency(val)
 
-const INPUT = 'w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500'
-const LABEL = 'block text-xs text-slate-400 mb-1'
+const INPUT    = 'w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500'
+const LABEL    = 'block text-xs text-slate-400 mb-1'
 const READONLY = 'w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300'
 
 function FormField({ label, hint, children }) {
@@ -68,17 +104,24 @@ function FormField({ label, hint, children }) {
   )
 }
 
-function StepCard({ step, title, subtitle, children }) {
+function StepCard({ step, title, subtitle, done, children }) {
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
       <div className="flex items-start gap-3 mb-4">
-        <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0 mt-0.5">
-          {step}
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 transition-colors ${
+          done ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
+        }`}>
+          {done ? <Check className="w-4 h-4" /> : step}
         </div>
-        <div>
-          <h3 className="font-semibold text-white text-sm">{title}</h3>
+        <div className="flex-1">
+          <h3 className={`font-semibold text-sm transition-colors ${done ? 'text-green-400' : 'text-white'}`}>{title}</h3>
           {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
         </div>
+        {done && (
+          <span className="text-xs text-green-400 font-medium flex items-center gap-1">
+            <Check className="w-3 h-3" /> Saved
+          </span>
+        )}
       </div>
       {children}
     </div>
@@ -107,13 +150,12 @@ function SaveButton({ onClick, saving, label }) {
   )
 }
 
-function StatCard({ title, btc, usd, sub }) {
+function StatCard({ title, btc, usd }) {
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
       <div className="text-xs text-slate-400 mb-1">{title}</div>
       <div className="text-base font-bold text-white">{fmtBTC(btc)}</div>
       {usd != null && <div className="text-xs text-slate-400 mt-0.5">{fmtUSD(usd)}</div>}
-      {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}
     </div>
   )
 }
@@ -131,13 +173,16 @@ export default function Bitcoin() {
   const [loading, setLoading] = useState(true)
 
   const [achOpen, setAchOpen] = useState(false)
+  const [copiedAddress, setCopiedAddress] = useState(false)
+  const [saved, setSaved] = useState({ step1: false, step2: false, step3: false, step4: false })
 
-  const [s1, setS1] = useState({ date: '', usd: '', btcReceived: '', notes: '' })
+  const [s1, setS1] = useState({ date: today(), usd: '', btcReceived: '', price: '', notes: '' })
   const [s2, setS2] = useState({ date: today(), btc: '', price: '', fee: '', feeUSD: '' })
   const [s3, setS3] = useState({ bankDate: today(), settledDate: today(), btc: '', price: '', feeSats: '', feeUSD: '', achLink: '' })
   const [s4, setS4] = useState({ date: today(), btc: '', price: '', feeSats: '', feeUSD: '', convRate: '' })
   const [ach, setAch] = useState({ date: today(), amount: '' })
 
+  const [saving1, setSaving1] = useState(false)
   const [saving2, setSaving2] = useState(false)
   const [saving3, setSaving3] = useState(false)
   const [saving4, setSaving4] = useState(false)
@@ -151,6 +196,7 @@ export default function Bitcoin() {
       const price = parseFloat(json.data.amount)
       setBtcPrice(price)
       const ps = String(price)
+      setS1(f => ({ ...f, price: ps }))
       setS2(f => ({ ...f, price: ps }))
       setS3(f => ({ ...f, price: ps }))
       setS4(f => ({ ...f, price: ps }))
@@ -164,10 +210,10 @@ export default function Bitcoin() {
   const loadData = useCallback(async () => {
     setLoading(true)
     const [rh, bp, lcj, lcr] = await Promise.all([
-      fetchAllRecords(RH_SHEP_TBL, { sort: { field: RHF.date, direction: 'desc' } }, BTC_BASE_ID),
-      fetchAllRecords(BTC_PURCHASE_TBL, { sort: { field: BPF.bankTransferDate, direction: 'desc' } }, BTC_BASE_ID),
-      fetchAllRecords(LC_JANINE_TBL, { sort: { field: LCJF.date, direction: 'desc' } }, BTC_BASE_ID),
-      fetchAllRecords(LC_RH_TBL, { sort: { field: LCRHF.date, direction: 'desc' } }, BTC_BASE_ID),
+      fetchAllRecords(RH_SHEP_TBL,      { sort: { field: 'BTC Settled Date',   direction: 'desc' } }, BTC_BASE_ID),
+      fetchAllRecords(BTC_PURCHASE_TBL,  { sort: { field: 'Bank Transfer Date', direction: 'desc' } }, BTC_BASE_ID),
+      fetchAllRecords(LC_JANINE_TBL,     { sort: { field: 'Date',               direction: 'desc' } }, BTC_BASE_ID),
+      fetchAllRecords(LC_RH_TBL,         { sort: { field: 'Date',               direction: 'desc' } }, BTC_BASE_ID),
     ])
     setRhRecords(rh.data || [])
     setBpRecords(bp.data || [])
@@ -181,57 +227,96 @@ export default function Bitcoin() {
     loadData()
   }, [fetchPrice, loadData])
 
+  // Stats — read by field name
   const shepWallet =
-    rhRecords.reduce((s, r) => s + safeNum(r.fields[RHF.btc]), 0) -
-    bpRecords.reduce((s, r) => s + safeNum(r.fields[BPF.btc]), 0)
+    rhRecords.reduce((s, r) => s + safeNum(r.fields[RH_READ.btc]), 0) -
+    bpRecords.reduce((s, r) => s + safeNum(r.fields[BP_READ.btc]), 0)
 
   const lcWallet =
-    bpRecords.reduce((s, r) => s + safeNum(r.fields[BPF.btc]), 0) -
-    lcjRecords.reduce((s, r) => s + safeNum(r.fields[LCJF.btc]), 0)
+    bpRecords.reduce((s, r) => s + safeNum(r.fields[BP_READ.btc]), 0) -
+    lcjRecords.reduce((s, r) => s + safeNum(r.fields[LCJ_READ.btc]), 0)
 
-  const totalJanine = lcjRecords.reduce((s, r) => s + safeNum(r.fields[LCJF.btc]), 0)
+  const totalJanine = lcjRecords.reduce((s, r) => s + safeNum(r.fields[LCJ_READ.btc]), 0)
   const lastTransfer = lcjRecords[0] || null
 
+  // Activity feed — merge top 5 from each table, sort desc, take 15
   const feed = [
     ...rhRecords.slice(0, 5).map(r => ({
       type: 'rh', label: 'RH → Shepard',
-      date: safeStr(r.fields[RHF.date]),
-      btc: safeNum(r.fields[RHF.btc]),
+      date: safeStr(r.fields[RH_READ.date]),
+      btc:  safeNum(r.fields[RH_READ.btc]),
     })),
     ...bpRecords.slice(0, 5).map(r => ({
       type: 'bp', label: 'Shep → LCWallet1',
-      date: safeStr(r.fields[BPF.bankTransferDate]),
-      btc: safeNum(r.fields[BPF.btc]),
+      date: safeStr(r.fields[BP_READ.bankTransferDate]),
+      btc:  safeNum(r.fields[BP_READ.btc]),
     })),
     ...lcjRecords.slice(0, 5).map(r => ({
       type: 'lcj', label: 'LC → Janine',
-      date: safeStr(r.fields[LCJF.date]),
-      btc: safeNum(r.fields[LCJF.btc]),
+      date: safeStr(r.fields[LCJ_READ.date]),
+      btc:  safeNum(r.fields[LCJ_READ.btc]),
     })),
   ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15)
 
-  const s2USD = safeNum(s2.btc) * safeNum(s2.price)
-  const s3USD = safeNum(s3.btc) * safeNum(s3.price)
-  const s4USD = safeNum(s4.btc) * safeNum(s4.price)
+  const s2USD  = safeNum(s2.btc) * safeNum(s2.price)
+  const s3USD  = safeNum(s3.btc) * safeNum(s3.price)
+  const s4USD  = safeNum(s4.btc) * safeNum(s4.price)
   const s4Pesos = s4.convRate ? s4USD * safeNum(s4.convRate) : 0
+
+  function copyAddress() {
+    navigator.clipboard.writeText(JANINE_ADDRESS)
+    setCopiedAddress(true)
+    setTimeout(() => setCopiedAddress(false), 2000)
+  }
+
+  function liveBtn(disabled) {
+    return (
+      <button
+        onClick={fetchPrice}
+        disabled={disabled}
+        className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-slate-300 flex-shrink-0 transition-colors whitespace-nowrap"
+      >
+        {disabled ? '…' : 'Live'}
+      </button>
+    )
+  }
+
+  async function saveStep1() {
+    if (!s1.date || !s1.btcReceived) { toast.error('Date and BTC amount required'); return }
+    setSaving1(true)
+    const payload = {
+      [RHPF.date]: s1.date,
+      [RHPF.btc]:  parseFloat(s1.btcReceived),
+      ...(s1.price && { [RHPF.price]: parseFloat(s1.price) }),
+      ...(s1.usd   && { [RHPF.usd]:   parseFloat(s1.usd) }),
+      ...(s1.notes && { [RHPF.notes]: s1.notes }),
+    }
+    const { error } = await createRecord(RH_PURCHASES_TBL, payload, BTC_BASE_ID)
+    setSaving1(false)
+    if (error) { toast.error(error); return }
+    toast.success('RH purchase recorded')
+    setSaved(p => ({ ...p, step1: true }))
+    setS1({ date: today(), usd: '', btcReceived: '', price: s1.price, notes: '' })
+  }
 
   async function saveStep2() {
     if (!s2.date || !s2.btc || !s2.price) { toast.error('Date, BTC amount, and price required'); return }
     setSaving2(true)
     const payload = {
-      [RHF.date]: s2.date,
-      [RHF.btc]: parseFloat(s2.btc),
-      [RHF.price]: parseFloat(s2.price),
-      [RHF.walletFrom]: 'Robinhood',
-      [RHF.walletTo]: 'Shepard Wallet 1-sparrow',
+      [RHF.date]:            s2.date,
+      [RHF.btc]:             parseFloat(s2.btc),
+      [RHF.price]:           parseFloat(s2.price),
+      [RHF.walletFrom]:      'Robinhood',
+      [RHF.walletTo]:        'Shepard Wallet 1-sparrow',
       [RHF.amountUSDManual]: s2USD,
-      ...(s2.fee && { [RHF.fee]: parseFloat(s2.fee) }),
+      ...(s2.fee    && { [RHF.fee]:          parseFloat(s2.fee) }),
       ...(s2.feeUSD && { [RHF.feeUSDManual]: parseFloat(s2.feeUSD) }),
     }
     const { error } = await createRecord(RH_SHEP_TBL, payload, BTC_BASE_ID)
     setSaving2(false)
     if (error) { toast.error(error); return }
     toast.success('RH → Shepard recorded')
+    setSaved(p => ({ ...p, step2: true }))
     setS2({ date: today(), btc: '', price: s2.price, fee: '', feeUSD: '' })
     loadData()
   }
@@ -241,19 +326,20 @@ export default function Bitcoin() {
     setSaving3(true)
     const payload = {
       [BPF.bankTransferDate]: s3.bankDate,
-      [BPF.btcSettledDate]: s3.settledDate,
-      [BPF.btc]: parseFloat(s3.btc),
-      [BPF.price]: parseFloat(s3.price),
-      [BPF.walletFrom]: 'Shepard Wallet 1-sparrow',
-      [BPF.walletTo]: 'LC Wallet1-sparrow',
-      ...(s3.feeSats && { [BPF.feeSats]: parseInt(s3.feeSats, 10) }),
-      ...(s3.feeUSD && { [BPF.feeUSDManual]: parseFloat(s3.feeUSD) }),
-      ...(s3.achLink && { [BPF.lcToRH]: [s3.achLink] }),
+      [BPF.btcSettledDate]:   s3.settledDate,
+      [BPF.btc]:              parseFloat(s3.btc),
+      [BPF.price]:            parseFloat(s3.price),
+      [BPF.walletFrom]:       'Shepard Wallet 1-sparrow',
+      [BPF.walletTo]:         'LC Wallet1-sparrow',
+      ...(s3.feeSats && { [BPF.feeSats]:      parseInt(s3.feeSats, 10) }),
+      ...(s3.feeUSD  && { [BPF.feeUSDManual]: parseFloat(s3.feeUSD) }),
+      ...(s3.achLink && { [BPF.lcToRH]:        [s3.achLink] }),
     }
     const { error } = await createRecord(BTC_PURCHASE_TBL, payload, BTC_BASE_ID)
     setSaving3(false)
     if (error) { toast.error(error); return }
     toast.success('Shep → LCWallet1 recorded')
+    setSaved(p => ({ ...p, step3: true }))
     setS3({ bankDate: today(), settledDate: today(), btc: '', price: s3.price, feeSats: '', feeUSD: '', achLink: '' })
     loadData()
   }
@@ -262,18 +348,19 @@ export default function Bitcoin() {
     if (!s4.date || !s4.btc || !s4.price) { toast.error('Date, BTC amount, and price required'); return }
     setSaving4(true)
     const payload = {
-      [LCJF.date]: s4.date,
-      [LCJF.btc]: parseFloat(s4.btc),
+      [LCJF.date]:  s4.date,
+      [LCJF.btc]:   parseFloat(s4.btc),
       [LCJF.price]: parseFloat(s4.price),
-      ...(s4.feeSats && { [LCJF.feeSats]: parseInt(s4.feeSats, 10) }),
-      ...(s4.feeUSD && { [LCJF.feeUSDManual]: parseFloat(s4.feeUSD) }),
-      ...(s4.convRate && { [LCJF.conversionRate]: parseFloat(s4.convRate) }),
+      ...(s4.feeSats  && { [LCJF.feeSats]:        parseInt(s4.feeSats, 10) }),
+      ...(s4.feeUSD   && { [LCJF.feeUSDManual]:    parseFloat(s4.feeUSD) }),
+      ...(s4.convRate && { [LCJF.conversionRate]:   parseFloat(s4.convRate) }),
       ...(s4.convRate && s4USD > 0 && { [LCJF.conversionPesos]: s4Pesos }),
     }
     const { error } = await createRecord(LC_JANINE_TBL, payload, BTC_BASE_ID)
     setSaving4(false)
     if (error) { toast.error(error); return }
     toast.success('LC → Janine recorded')
+    setSaved(p => ({ ...p, step4: true }))
     setS4({ date: today(), btc: '', price: s4.price, feeSats: '', feeUSD: '', convRate: '' })
     loadData()
   }
@@ -282,7 +369,7 @@ export default function Bitcoin() {
     if (!ach.date || !ach.amount) { toast.error('Date and amount required'); return }
     setSavingAch(true)
     const { error } = await createRecord(LC_RH_TBL, {
-      [LCRHF.date]: ach.date,
+      [LCRHF.date]:   ach.date,
       [LCRHF.amount]: parseFloat(ach.amount),
     }, BTC_BASE_ID)
     setSavingAch(false)
@@ -348,8 +435,8 @@ export default function Bitcoin() {
               <div className="text-xs text-slate-400 mb-1">Last transfer</div>
               {lastTransfer ? (
                 <>
-                  <div className="text-sm font-semibold text-white">{fmtDate(safeStr(lastTransfer.fields[LCJF.date]))}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">{fmtBTC(lastTransfer.fields[LCJF.btc])}</div>
+                  <div className="text-sm font-semibold text-white">{fmtDate(safeStr(lastTransfer.fields[LCJ_READ.date]))}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{fmtBTC(lastTransfer.fields[LCJ_READ.btc])}</div>
                 </>
               ) : (
                 <div className="text-sm text-slate-500">—</div>
@@ -364,30 +451,38 @@ export default function Bitcoin() {
           {/* Left — forms */}
           <div className="flex-1 space-y-4 min-w-0">
 
-            {/* Step 1 — scratch pad */}
-            <StepCard step={1} title="Buy on Robinhood" subtitle="Purchase BTC in Robinhood — scratch pad only">
+            {/* Step 1 — RH Purchase */}
+            <StepCard step={1} title="Buy on Robinhood" subtitle="Record the BTC purchase in Robinhood" done={saved.step1}>
               <div className="p-3 bg-blue-900/20 border border-blue-800/40 rounded-lg text-xs text-blue-300 mb-4">
-                Buy BTC in Robinhood. Note the BTC amount and cost — you'll enter the Coinbase spot price in Step 2 when recording the withdrawal.
+                Buy BTC in Robinhood. Enter the purchase details below — use the Coinbase spot price at time of purchase.
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <FormField label="Purchase date">
+                <FormField label="Purchase Date">
                   <input type="date" className={INPUT} value={s1.date} onChange={e => setS1(f => ({ ...f, date: e.target.value }))} />
                 </FormField>
-                <FormField label="USD invested">
-                  <input type="number" className={INPUT} placeholder="0.00" value={s1.usd} onChange={e => setS1(f => ({ ...f, usd: e.target.value }))} />
-                </FormField>
-                <FormField label="BTC received">
+                <FormField label="BTC Received">
                   <input type="number" className={INPUT} step="0.00000001" placeholder="0.00000000" value={s1.btcReceived} onChange={e => setS1(f => ({ ...f, btcReceived: e.target.value }))} />
                 </FormField>
-                <FormField label="Notes">
-                  <input type="text" className={INPUT} placeholder="Optional" value={s1.notes} onChange={e => setS1(f => ({ ...f, notes: e.target.value }))} />
+                <FormField label="BTC Price (Coinbase)">
+                  <div className="flex gap-1.5">
+                    <input type="number" className={INPUT} placeholder="95840" value={s1.price} onChange={e => setS1(f => ({ ...f, price: e.target.value }))} />
+                    {liveBtn(priceLoading)}
+                  </div>
                 </FormField>
+                <FormField label="USD Invested">
+                  <input type="number" className={INPUT} step="0.01" placeholder="0.00" value={s1.usd} onChange={e => setS1(f => ({ ...f, usd: e.target.value }))} />
+                </FormField>
+                <div className="col-span-2">
+                  <FormField label="Notes">
+                    <input type="text" className={INPUT} placeholder="Optional" value={s1.notes} onChange={e => setS1(f => ({ ...f, notes: e.target.value }))} />
+                  </FormField>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-2">Scratch pad only — not saved to Airtable</p>
+              <SaveButton onClick={saveStep1} saving={saving1} label="Save RH Purchase" />
             </StepCard>
 
             {/* Step 2 — RH → Shepard */}
-            <StepCard step={2} title="Robinhood → Shepard Wallet" subtitle="Record BTC withdrawal from Robinhood">
+            <StepCard step={2} title="Robinhood → Shepard Wallet" subtitle="Record BTC withdrawal from Robinhood" done={saved.step2}>
               <WalletPath from="Robinhood" to="Shepard Wallet 1-sparrow" />
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="BTC Settled Date">
@@ -399,9 +494,7 @@ export default function Bitcoin() {
                 <FormField label="BTC Price (Coinbase)">
                   <div className="flex gap-1.5">
                     <input type="number" className={INPUT} placeholder="95840" value={s2.price} onChange={e => setS2(f => ({ ...f, price: e.target.value }))} />
-                    <button onClick={fetchPrice} disabled={priceLoading} className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-slate-300 flex-shrink-0 transition-colors whitespace-nowrap">
-                      {priceLoading ? '…' : 'Live'}
-                    </button>
+                    {liveBtn(priceLoading)}
                   </div>
                 </FormField>
                 <FormField label="Amount USD">
@@ -418,7 +511,7 @@ export default function Bitcoin() {
             </StepCard>
 
             {/* Step 3 — Shepard → LCWallet1 */}
-            <StepCard step={3} title="Shepard Wallet → LCWallet1" subtitle="Record BTC transfer to LC wallet">
+            <StepCard step={3} title="Shepard Wallet → LCWallet1" subtitle="Record BTC transfer to LC wallet" done={saved.step3}>
               <WalletPath from="Shepard Wallet 1-sparrow" to="LC Wallet1-sparrow" />
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Bank Transfer Date">
@@ -433,9 +526,7 @@ export default function Bitcoin() {
                 <FormField label="BTC Price (Coinbase)">
                   <div className="flex gap-1.5">
                     <input type="number" className={INPUT} placeholder="95840" value={s3.price} onChange={e => setS3(f => ({ ...f, price: e.target.value }))} />
-                    <button onClick={fetchPrice} disabled={priceLoading} className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-slate-300 flex-shrink-0 transition-colors whitespace-nowrap">
-                      {priceLoading ? '…' : 'Live'}
-                    </button>
+                    {liveBtn(priceLoading)}
                   </div>
                 </FormField>
                 <FormField label="Amount USD">
@@ -452,7 +543,7 @@ export default function Bitcoin() {
                     <option value="">— None —</option>
                     {lcrRecords.map(r => (
                       <option key={r.id} value={r.id}>
-                        {safeStr(r.fields[LCRHF.date])} — {fmtUSD(r.fields[LCRHF.amount])}
+                        {safeStr(r.fields[LCRH_READ.date])} — {fmtUSD(r.fields[LCRH_READ.amount])}
                       </option>
                     ))}
                   </select>
@@ -462,8 +553,26 @@ export default function Bitcoin() {
             </StepCard>
 
             {/* Step 4 — LC → Janine */}
-            <StepCard step={4} title="LCWallet1 → Janine" subtitle="Record BTC transfer to Janine's external wallet">
-              <WalletPath from="LC Wallet1-sparrow" to="Janine's wallet (external)" />
+            <StepCard step={4} title="LCWallet1 → Janine" subtitle="Record BTC transfer to Janine's external wallet" done={saved.step4}>
+              {/* Wallet path with inline copy button */}
+              <div className="flex items-center gap-2 text-xs mb-4 p-2 bg-slate-700/50 rounded-lg">
+                <span className="text-slate-300 font-medium">LC Wallet1-sparrow</span>
+                <span className="text-slate-500">→</span>
+                <span className="text-slate-300 font-medium">Janine's wallet</span>
+                <button
+                  onClick={copyAddress}
+                  className={`ml-auto flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
+                    copiedAddress
+                      ? 'bg-green-700 text-green-200'
+                      : 'bg-slate-600 hover:bg-slate-500 text-slate-300'
+                  }`}
+                  title={JANINE_ADDRESS}
+                >
+                  {copiedAddress
+                    ? <><Check className="w-3 h-3" /> Copied!</>
+                    : <><Copy className="w-3 h-3" /> Copy address</>}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Date">
                   <input type="date" className={INPUT} value={s4.date} onChange={e => setS4(f => ({ ...f, date: e.target.value }))} />
@@ -474,9 +583,7 @@ export default function Bitcoin() {
                 <FormField label="BTC Price (Coinbase)">
                   <div className="flex gap-1.5">
                     <input type="number" className={INPUT} placeholder="95840" value={s4.price} onChange={e => setS4(f => ({ ...f, price: e.target.value }))} />
-                    <button onClick={fetchPrice} disabled={priceLoading} className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-slate-300 flex-shrink-0 transition-colors whitespace-nowrap">
-                      {priceLoading ? '…' : 'Live'}
-                    </button>
+                    {liveBtn(priceLoading)}
                   </div>
                 </FormField>
                 <FormField label="Amount USD">
