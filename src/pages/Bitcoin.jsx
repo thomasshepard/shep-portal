@@ -90,9 +90,10 @@ const today = () => new Date().toISOString().split('T')[0]
 const fmtBTC = (val) => safeNum(val).toFixed(8) + ' BTC'
 const fmtUSD = (val) => fmtCurrency(val)
 
-const INPUT    = 'w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500'
-const LABEL    = 'block text-xs text-slate-400 mb-1'
-const READONLY = 'w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300'
+const INPUT          = 'w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500'
+const INPUT_REQUIRED = 'w-full px-3 py-1.5 bg-slate-700 border-l-2 border-l-yellow-400 border-y border-r border-slate-600 rounded text-sm text-white placeholder-slate-400 focus:outline-none focus:border-l-yellow-300 focus:border-slate-500'
+const LABEL          = 'block text-xs text-slate-400 mb-1'
+const READONLY       = 'w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-400 italic'
 
 function FormField({ label, hint, children }) {
   return (
@@ -458,14 +459,14 @@ export default function Bitcoin() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Purchase Date">
-                  <input type="date" className={INPUT} value={s1.date} onChange={e => setS1(f => ({ ...f, date: e.target.value }))} />
+                  <input type="date" className={INPUT_REQUIRED} value={s1.date} onChange={e => setS1(f => ({ ...f, date: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC Received">
-                  <input type="number" className={INPUT} step="0.00000001" placeholder="0.00000000" value={s1.btcReceived} onChange={e => setS1(f => ({ ...f, btcReceived: e.target.value }))} />
+                  <input type="number" className={INPUT_REQUIRED} step="0.00000001" placeholder="0.00000000" value={s1.btcReceived} onChange={e => setS1(f => ({ ...f, btcReceived: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC Price (Coinbase)">
                   <div className="flex gap-1.5">
-                    <input type="number" className={INPUT} placeholder="95840" value={s1.price} onChange={e => setS1(f => ({ ...f, price: e.target.value }))} />
+                    <input type="number" className={INPUT_REQUIRED} placeholder="95840" value={s1.price} onChange={e => setS1(f => ({ ...f, price: e.target.value }))} />
                     {liveBtn(priceLoading)}
                   </div>
                 </FormField>
@@ -486,14 +487,14 @@ export default function Bitcoin() {
               <WalletPath from="Robinhood" to="Shepard Wallet 1-sparrow" />
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="BTC Settled Date">
-                  <input type="date" className={INPUT} value={s2.date} onChange={e => setS2(f => ({ ...f, date: e.target.value }))} />
+                  <input type="date" className={INPUT_REQUIRED} value={s2.date} onChange={e => setS2(f => ({ ...f, date: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC amount">
-                  <input type="number" className={INPUT} step="0.00000001" placeholder="0.00000000" value={s2.btc} onChange={e => setS2(f => ({ ...f, btc: e.target.value }))} />
+                  <input type="number" className={INPUT_REQUIRED} step="0.00000001" placeholder="0.00000000" value={s2.btc} onChange={e => setS2(f => ({ ...f, btc: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC Price (Coinbase)">
                   <div className="flex gap-1.5">
-                    <input type="number" className={INPUT} placeholder="95840" value={s2.price} onChange={e => setS2(f => ({ ...f, price: e.target.value }))} />
+                    <input type="number" className={INPUT_REQUIRED} placeholder="95840" value={s2.price} onChange={e => setS2(f => ({ ...f, price: e.target.value }))} />
                     {liveBtn(priceLoading)}
                   </div>
                 </FormField>
@@ -515,25 +516,25 @@ export default function Bitcoin() {
               <WalletPath from="Shepard Wallet 1-sparrow" to="LC Wallet1-sparrow" />
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Bank Transfer Date">
-                  <input type="date" className={INPUT} value={s3.bankDate} onChange={e => setS3(f => ({ ...f, bankDate: e.target.value }))} />
+                  <input type="date" className={INPUT_REQUIRED} value={s3.bankDate} onChange={e => setS3(f => ({ ...f, bankDate: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC Settled Date">
-                  <input type="date" className={INPUT} value={s3.settledDate} onChange={e => setS3(f => ({ ...f, settledDate: e.target.value }))} />
-                </FormField>
-                <FormField label="BTC amount">
-                  <input type="number" className={INPUT} step="0.00000001" placeholder="0.00000000" value={s3.btc} onChange={e => setS3(f => ({ ...f, btc: e.target.value }))} />
+                  <input type="date" className={INPUT_REQUIRED} value={s3.settledDate} onChange={e => setS3(f => ({ ...f, settledDate: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC Price (Coinbase)">
                   <div className="flex gap-1.5">
-                    <input type="number" className={INPUT} placeholder="95840" value={s3.price} onChange={e => setS3(f => ({ ...f, price: e.target.value }))} />
+                    <input type="number" className={INPUT_REQUIRED} placeholder="95840" value={s3.price} onChange={e => setS3(f => ({ ...f, price: e.target.value }))} />
                     {liveBtn(priceLoading)}
                   </div>
+                </FormField>
+                <FormField label="BTC amount">
+                  <input type="number" className={INPUT_REQUIRED} step="0.00000001" placeholder="0.00000000" value={s3.btc} onChange={e => setS3(f => ({ ...f, btc: e.target.value }))} />
                 </FormField>
                 <FormField label="Amount USD">
                   <div className={READONLY}>{s3.btc && s3.price ? fmtUSD(s3USD) : '—'}</div>
                 </FormField>
                 <FormField label="Fee (SATS)" hint="Enter in satoshis (e.g. 300, 682)">
-                  <input type="number" className={INPUT} placeholder="300" value={s3.feeSats} onChange={e => setS3(f => ({ ...f, feeSats: e.target.value }))} />
+                  <input type="number" className={INPUT_REQUIRED} placeholder="300" value={s3.feeSats} onChange={e => setS3(f => ({ ...f, feeSats: e.target.value }))} />
                 </FormField>
                 <FormField label="Fee USD (manual)">
                   <input type="number" className={INPUT} step="0.01" placeholder="Optional" value={s3.feeUSD} onChange={e => setS3(f => ({ ...f, feeUSD: e.target.value }))} />
@@ -575,14 +576,14 @@ export default function Bitcoin() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Date">
-                  <input type="date" className={INPUT} value={s4.date} onChange={e => setS4(f => ({ ...f, date: e.target.value }))} />
+                  <input type="date" className={INPUT_REQUIRED} value={s4.date} onChange={e => setS4(f => ({ ...f, date: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC amount">
-                  <input type="number" className={INPUT} step="0.00000001" placeholder="0.00000000" value={s4.btc} onChange={e => setS4(f => ({ ...f, btc: e.target.value }))} />
+                  <input type="number" className={INPUT_REQUIRED} step="0.00000001" placeholder="0.00000000" value={s4.btc} onChange={e => setS4(f => ({ ...f, btc: e.target.value }))} />
                 </FormField>
                 <FormField label="BTC Price (Coinbase)">
                   <div className="flex gap-1.5">
-                    <input type="number" className={INPUT} placeholder="95840" value={s4.price} onChange={e => setS4(f => ({ ...f, price: e.target.value }))} />
+                    <input type="number" className={INPUT_REQUIRED} placeholder="95840" value={s4.price} onChange={e => setS4(f => ({ ...f, price: e.target.value }))} />
                     {liveBtn(priceLoading)}
                   </div>
                 </FormField>
@@ -590,7 +591,7 @@ export default function Bitcoin() {
                   <div className={READONLY}>{s4.btc && s4.price ? fmtUSD(s4USD) : '—'}</div>
                 </FormField>
                 <FormField label="Fee (SATS)" hint="Enter in satoshis">
-                  <input type="number" className={INPUT} placeholder="431" value={s4.feeSats} onChange={e => setS4(f => ({ ...f, feeSats: e.target.value }))} />
+                  <input type="number" className={INPUT_REQUIRED} placeholder="431" value={s4.feeSats} onChange={e => setS4(f => ({ ...f, feeSats: e.target.value }))} />
                 </FormField>
                 <FormField label="Fee USD (manual)">
                   <input type="number" className={INPUT} step="0.01" placeholder="Optional" value={s4.feeUSD} onChange={e => setS4(f => ({ ...f, feeUSD: e.target.value }))} />
