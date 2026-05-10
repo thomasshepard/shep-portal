@@ -62,6 +62,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 | Desk Paper Cleanup | `VITE_AIRTABLE_DOCS_BASE_ID` | Scanned document metadata (date, AI summary, tags, shared status) |
 | FB Marketplace Monitor | Hardcoded as `FBM_BASE_ID` in `airtable.js` | FB Marketplace deal listings |
 | Happy Cuts | `VITE_AIRTABLE_HAPPY_CUTS_BASE_ID` | Lawn care CRM — contacts, mow schedule |
+| Bitcoin Transactions | `VITE_AIRTABLE_BTC_BASE_ID` (`appLvE5luEWaM5dWe`) | BTC purchase log, wallet transfers, ACH records |
 
 > The Chicken Farm base ID (`apppIiT84EaowkQVR`) uses a capital **I** in position 4 — easy to misread as lowercase l.
 
@@ -92,6 +93,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 | `/files` | Files | ProtectedRoute | Supabase Storage file browser |
 | `/notifications` | Notifications | ProtectedRoute | In-app notification inbox |
 | `/tasks` | Tasks | ProtectedRoute | Personal task manager (all authenticated users) |
+| `/bitcoin` | Bitcoin | AdminRoute | BTC purchase + wallet transfer workflow with edit/delete history |
 | `/admin/*` | AdminUsers/Logs/Content | AdminRoute | User mgmt, access logs, content |
 | `/maintenance-request` | MaintenanceSubmit | **None (public)** | Tenant-facing maintenance request form |
 
@@ -105,6 +107,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 - **Documents** → Airtable Desk Paper Cleanup base + `DocumentActionCenter` component for AI-classified action items
 - **Custom tools** → `pages` table in Supabase; rendered in a sandboxed `<iframe srcdoc>` in `ToolView.jsx`
 - **Files** → Supabase Storage `shared-files` bucket with folder-style path navigation
+- **Bitcoin** → Airtable Bitcoin Transactions base (`BTC_BASE_ID`). Four tables: RH Purchases (`tblg0eLNtJQPtikRb`), RH to Shep (`tblNY2hBqThOmNRky`), Bitcoin Purchase / Shep→LC (`tblAmFoRWXRLjNPHj`), LC to Janine (`tblz9xROlto0R2xCz`), LC to Robinhood / ACH (`tblK0E5G4wGQO6Yu1`). **Critical:** `record.fields` from the Airtable API is keyed by field NAME not field ID — write payloads use field IDs (fldXXX), reads use name strings. The Bitcoin Purchase BTC amount field name is `'Bitcoin Calc by coinbaise'` (intentional typo in Airtable — do not correct).
 - **Admin** → `profiles` + `access_logs` tables (RLS-restricted to admin)
 
 ### Access Logging
@@ -150,7 +153,8 @@ A `pg_net` trigger fires the `send-notification-email` Supabase edge function on
 ## Key Files
 
 - `src/lib/supabase.js` — Supabase client initialization
-- `src/lib/airtable.js` — Airtable wrapper (fetchAllRecords, createRecord, updateRecord, deleteRecord) + formatters (`fmtCurrency`, `fmtPercent`, `fmtDate`, `fmtField`) + base ID exports (`PM_BASE_ID`, `CHICKENS_BASE_ID`, `DOCS_BASE_ID`, `FBM_BASE_ID`)
+- `src/lib/airtable.js` — Airtable wrapper (fetchAllRecords, createRecord, updateRecord, deleteRecord) + formatters (`fmtCurrency`, `fmtPercent`, `fmtDate`, `fmtField`) + base ID exports (`PM_BASE_ID`, `CHICKENS_BASE_ID`, `DOCS_BASE_ID`, `FBM_BASE_ID`, `BTC_BASE_ID`)
+- `src/pages/Bitcoin.jsx` — Bitcoin tracker (admin-only). All field ID constants (`RHF`, `BPF`, `LCJF`, `LCRHF`, `RHPF`) are for writes only. Separate `*_READ` objects use field name strings for reading `record.fields`. Contains `RecentActivityPanel` (collapsible on mobile, sticky on desktop) and `EditModal` (edit/delete past transactions).
 - `src/lib/tasks.js` — Tasks CRUD (fetchTasks, createTask, updateTask, deleteTask, taskExistsForSourceKey) + `FIELDS` constants for the Tasks Airtable base (`appYVLCn1NVLevdry`, table `tbl3Di18kSLwEj1vN`)
 - `src/lib/notifications.js` — `notify()` helper (inserts to Supabase `notifications` table with dedup via `sourceKey`), `getAdminUserIds()`, `getUserIdsWithPermission(flag)`. Call these from feature code to push in-app alerts.
 - `src/hooks/useAuth.jsx` — Auth context: session, profile, role, isAdmin, isVA, permissions
@@ -185,6 +189,8 @@ VITE_AIRTABLE_HAPPY_CUTS_BASE_ID     # Happy Cuts lawn care
 VITE_ANTHROPIC_API_KEY               # Claude API for AI summaries
 VITE_GOOGLE_CLIENT_ID                # Google OAuth (if applicable)
 VITE_TASKS_BASE_ID=appYVLCn1NVLevdry # Shep Portal – Tasks Airtable base
+VITE_RENTCAST_API_KEY               # Rentcast API key for rental market estimates (used by RentalAnalyzer)
+VITE_AIRTABLE_BTC_BASE_ID           # Bitcoin Transactions Airtable base (appLvE5luEWaM5dWe)
 ```
 
 > Note: `FBM_BASE_ID` (FB Marketplace Monitor) is hardcoded in `src/lib/airtable.js`, not in `.env`.
