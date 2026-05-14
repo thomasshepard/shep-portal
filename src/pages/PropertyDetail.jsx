@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail } from 'lucide-react'
+import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail, TrendingUp } from 'lucide-react'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtPercent, fmtDate, PM_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -9,6 +9,7 @@ import MaintenanceForm from '../components/MaintenanceForm'
 import AddTenantWorkflow from '../components/AddTenantWorkflow'
 import EditTenantModal from '../components/EditTenantModal'
 import AlertsPanel from '../components/AlertsPanel'
+import RentalAnalyzer from '../components/RentalAnalyzer'
 import { useAlerts } from '../hooks/useAlerts'
 import toast from 'react-hot-toast'
 
@@ -52,6 +53,12 @@ export default function PropertyDetail() {
   const [editingProperty, setEditingProperty] = useState(false)
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [analyzerOpen, setAnalyzerOpen] = useState(false)
+  const [analyzerUnit, setAnalyzerUnit] = useState(null)       // rental unit record (null = property-level)
+  const [analyzerCurrentRent, setAnalyzerCurrentRent] = useState(0)
+  const [pastAnalyses, setPastAnalyses] = useState(null)       // null = not loaded yet
+  const [pastAnalysesOpen, setPastAnalysesOpen] = useState(false)
+  const [pastAnalysesLoading, setPastAnalysesLoading] = useState(false)
   const [utilitiesOpen, setUtilitiesOpen] = useState(false)
   const [billsOpen, setBillsOpen] = useState(false)
   const [paymentModal, setPaymentModal] = useState(null)
@@ -75,6 +82,28 @@ export default function PropertyDetail() {
         unitsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       }, 150)
     })
+  }
+
+  async function loadPastAnalyses() {
+    if (pastAnalysesLoading) return
+    setPastAnalysesLoading(true)
+    try {
+      const { data, error } = await fetchAllRecords(
+        'Rent Analyses',
+        { filterByFormula: `{Property ID}="${id}"`, sort: { field: 'Analysis Date', direction: 'desc' } },
+        PM_BASE_ID
+      )
+      if (!error) setPastAnalyses(data || [])
+    } catch (e) {
+      setPastAnalyses([])
+    }
+    setPastAnalysesLoading(false)
+  }
+
+  function handlePastAnalysesToggle() {
+    const next = !pastAnalysesOpen
+    setPastAnalysesOpen(next)
+    if (next && pastAnalyses === null) loadPastAnalyses()
   }
 
   async function load() {
@@ -253,14 +282,22 @@ export default function PropertyDetail() {
             )}
           </div>
         </div>
-        {isAdmin && (
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
-            onClick={() => { setEditForm({ Status: f.Status || '', 'Est Market Value': f['Est Market Value'] || '', Notes: f.Notes || '' }); setEditingProperty(true) }}
-            className="flex items-center gap-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg px-3 py-2 hover:bg-gray-50 flex-shrink-0"
+            onClick={() => setAnalyzerOpen(true)}
+            className="flex items-center gap-1.5 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 hover:bg-blue-100"
           >
-            <Edit2 size={14} /> Edit
+            <TrendingUp size={14} /> Analyze Rent
           </button>
-        )}
+          {isAdmin && (
+            <button
+              onClick={() => { setEditForm({ Status: f.Status || '', 'Est Market Value': f['Est Market Value'] || '', Notes: f.Notes || '' }); setEditingProperty(true) }}
+              className="flex items-center gap-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg px-3 py-2 hover:bg-gray-50"
+            >
+              <Edit2 size={14} /> Edit
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Financial Overview — Admin Only */}
@@ -360,14 +397,22 @@ export default function PropertyDetail() {
                       <span className="font-semibold text-gray-800">{safeRender(uf.Name, 'Unit')}</span>
                       <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">VACANT</span>
                     </div>
-                    {isAdmin && (
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       <button
-                        onClick={() => setAddTenantUnit(unit)}
-                        className="flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-700"
+                        onClick={() => { setAnalyzerUnit(unit); setAnalyzerCurrentRent(estIncome); setAnalyzerOpen(true) }}
+                        className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded-lg px-2 py-1.5 hover:bg-blue-50"
                       >
-                        <Plus size={14} /> Add Tenant
+                        <TrendingUp size={12} /> Analyze Rent
                       </button>
-                    )}
+                      {isAdmin && (
+                        <button
+                          onClick={() => setAddTenantUnit(unit)}
+                          className="flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-700"
+                        >
+                          <Plus size={14} /> Add Tenant
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {estIncome > 0 && (
                     <p className="text-sm text-orange-700 mt-2 font-medium">
@@ -413,22 +458,30 @@ export default function PropertyDetail() {
                       <span className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{leaseStatus}</span>
                     )}
                   </div>
-                  {(isAdmin || isVA) && (
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <button
-                        onClick={() => setEditTenantData({ tenant, lease: activeLease })}
-                        className="flex items-center gap-1 text-xs text-gray-500 border border-gray-300 rounded-lg px-2 py-1.5 hover:bg-gray-50"
-                      >
-                        <Edit2 size={12} /> Edit Tenant
-                      </button>
-                      <button
-                        onClick={() => handleMoveOut(activeLease, unit)}
-                        className="flex items-center gap-1 text-xs text-red-500 border border-red-200 rounded-lg px-2 py-1.5 hover:bg-red-50"
-                      >
-                        Move Out
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                    <button
+                      onClick={() => { setAnalyzerUnit(unit); setAnalyzerCurrentRent(rent); setAnalyzerOpen(true) }}
+                      className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded-lg px-2 py-1.5 hover:bg-blue-50"
+                    >
+                      <TrendingUp size={12} /> Analyze Rent
+                    </button>
+                    {(isAdmin || isVA) && (
+                      <>
+                        <button
+                          onClick={() => setEditTenantData({ tenant, lease: activeLease })}
+                          className="flex items-center gap-1 text-xs text-gray-500 border border-gray-300 rounded-lg px-2 py-1.5 hover:bg-gray-50"
+                        >
+                          <Edit2 size={12} /> Edit Tenant
+                        </button>
+                        <button
+                          onClick={() => handleMoveOut(activeLease, unit)}
+                          className="flex items-center gap-1 text-xs text-red-500 border border-red-200 rounded-lg px-2 py-1.5 hover:bg-red-50"
+                        >
+                          Move Out
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {/* Row 2: Tenant name */}
@@ -788,6 +841,93 @@ export default function PropertyDetail() {
         </div>
       )}
 
+      {/* Past Rent Analyses */}
+      <div className="bg-white rounded-xl border border-gray-200">
+        <button
+          onClick={handlePastAnalysesToggle}
+          className="w-full flex items-center justify-between px-5 py-3 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <TrendingUp size={16} className="text-blue-500" />
+            <span className="font-medium text-gray-800 text-sm">Past Rent Analyses</span>
+            {pastAnalyses && pastAnalyses.length > 0 && (
+              <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">{pastAnalyses.length}</span>
+            )}
+          </div>
+          {pastAnalysesOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        </button>
+        {pastAnalysesOpen && (
+          <div className="border-t border-gray-100 px-5 pb-4">
+            {pastAnalysesLoading && (
+              <p className="text-sm text-gray-400 py-4 text-center">Loading…</p>
+            )}
+            {!pastAnalysesLoading && pastAnalyses !== null && pastAnalyses.length === 0 && (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                No saved analyses yet. Run an analysis and click "Save Report to Airtable."
+              </p>
+            )}
+            {!pastAnalysesLoading && pastAnalyses && pastAnalyses.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {pastAnalyses.map(rec => {
+                  const af = rec.fields || {}
+                  const curR   = safeNum(af['Current Rent'])
+                  const mktR   = safeNum(af['Market Estimate'])
+                  const recR   = safeNum(af['Recommended Rent'])
+                  const delta  = recR && curR ? Math.round(recR - curR) : null
+                  const conf   = safeRender(af.Confidence, '')
+                  const unit   = safeRender(af.Unit, '')
+                  const dateStr= safeRender(af['Analysis Date'], '')
+                  return (
+                    <div key={rec.id} className="border border-gray-100 rounded-lg p-3 bg-gray-50 hover:bg-gray-100 transition-colors">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {unit && <span className="text-xs font-semibold text-gray-700 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5">{unit}</span>}
+                            {dateStr && <span className="text-xs text-gray-400">{fmtDate(dateStr)}</span>}
+                            {conf && <span className={`text-xs px-1.5 py-0.5 rounded-full ${conf === 'high' ? 'bg-green-100 text-green-700' : conf === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>{conf}</span>}
+                          </div>
+                          <div className="flex items-baseline gap-2 mt-1.5 flex-wrap">
+                            {curR > 0 && <span className="text-sm text-gray-500">{fmtCurrency(curR)} current</span>}
+                            {curR > 0 && recR > 0 && <span className="text-gray-300">→</span>}
+                            {recR > 0 && <span className="text-sm font-bold text-blue-700">{fmtCurrency(recR)} recommended</span>}
+                            {delta !== null && (
+                              <span className={`text-xs font-semibold ${delta >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                                {delta >= 0 ? '+' : ''}{fmtCurrency(delta)}
+                              </span>
+                            )}
+                          </div>
+                          {mktR > 0 && (
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              Market: {fmtCurrency(mktR)} · {safeNum(af['Comps Count'])} comps
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setAnalyzerUnit(null)
+                            setAnalyzerCurrentRent(curR || 0)
+                            setAnalyzerOpen(true)
+                          }}
+                          className="text-xs text-blue-600 border border-blue-200 rounded-lg px-2 py-1.5 hover:bg-blue-50 flex-shrink-0"
+                        >
+                          Re-run
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+                <button
+                  onClick={loadPastAnalyses}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline mt-1"
+                >
+                  Refresh
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Airtable source link — Admin only */}
       {isAdmin && (
         <div className="text-center py-2">
@@ -879,6 +1019,16 @@ export default function PropertyDetail() {
           lease={editTenantData.lease}
           onSaved={load}
           onClose={() => setEditTenantData(null)}
+        />
+      )}
+
+      {analyzerOpen && (
+        <RentalAnalyzer
+          property={property}
+          unit={analyzerUnit}
+          currentRent={analyzerCurrentRent}
+          onClose={() => { setAnalyzerOpen(false); setAnalyzerUnit(null); setAnalyzerCurrentRent(0) }}
+          onSaved={() => { setPastAnalyses(null); if (pastAnalysesOpen) loadPastAnalyses() }}
         />
       )}
     </div>
