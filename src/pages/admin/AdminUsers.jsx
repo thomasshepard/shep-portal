@@ -1,17 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2, X, Edit2 } from 'lucide-react'
-import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
-// Secondary client used only for creating users — non-persisting so it
-// never touches the admin's own session.
-const signupClient = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } }
-)
 
 const emptyForm = {
   full_name: '',
@@ -63,23 +55,18 @@ export default function AdminUsers() {
     if (!form.email || !form.password) return toast.error('Email and password are required')
     setSaving(true)
 
-    // Create the auth user via the secondary client (won't affect admin session)
-    const { data, error: signupErr } = await signupClient.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        data: { full_name: form.full_name },
-        emailRedirectTo: 'https://thomasshepard.github.io/shep-portal',
-      },
+    // Create the auth user via edge function (service role key, no confirmation email sent)
+    const { data: fnData, error: fnErr } = await supabase.functions.invoke('create-user', {
+      body: { email: form.email, password: form.password },
     })
 
-    if (signupErr) {
-      toast.error(signupErr.message)
+    if (fnErr || fnData?.error) {
+      toast.error(fnErr?.message || fnData?.error || 'Failed to create user')
       setSaving(false)
       return
     }
 
-    const newUserId = data.user?.id
+    const newUserId = fnData?.userId
     if (!newUserId) {
       toast.error('User created but could not retrieve ID — check Supabase Auth dashboard.')
       setSaving(false)
@@ -108,7 +95,7 @@ export default function AdminUsers() {
           can_view_files: form.can_view_files,
           can_view_listings: form.can_view_listings,
           can_view_triage: form.can_view_triage,
-          allowed_tags: form.allowed_tags || null,
+          allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         })
         .eq('id', newUserId)
       if (!profileErr) { profileUpdated = true; break }
@@ -356,7 +343,8 @@ export default function AdminUsers() {
           user={editingUser}
           onClose={() => setEditingUser(null)}
           onSave={async (userId, tags) => {
-            const ok = await updateUser(userId, { allowed_tags: tags || null })
+            const tagArray = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : null
+            const ok = await updateUser(userId, { allowed_tags: tagArray })
             if (ok) { toast.success('Allowed tags updated'); setEditingUser(null) }
           }}
         />
