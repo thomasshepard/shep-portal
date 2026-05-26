@@ -1,9 +1,5 @@
-import Stripe from 'https://esm.sh/stripe@17?target=deno'
-
-const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
-  apiVersion: '2024-12-18.acacia',
-  httpClient: Stripe.createFetchHttpClient(),
-})
+import { z } from 'https://deno.land/x/zod@v3.23.8/mod.ts'
+import { getStripeClientForAccount } from '../_shared/stripeAccounts.ts'
 
 const AIRTABLE_PAT = Deno.env.get('AIRTABLE_PAT') ?? ''
 const AIRTABLE_BASE = 'appZOi48qf8SzyOml'
@@ -23,7 +19,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Tags the error with errorType so the catch block can classify it.
+const InvoiceRequestSchema = z.object({
+  account:         z.enum(['happy_cuts', 'east_meadow', 'shepard_holdings', 'virginia_holdings']).default('happy_cuts'),
+  mowRecordId:     z.string().min(1),
+  contactRecordId: z.string().optional(),
+  clientName:      z.string().optional(),
+  clientEmail:     z.string().optional(),
+  amount:          z.union([z.string(), z.number()]),
+  description:     z.string().min(1),
+})
+
 async function updateAirtable(table: string, recordId: string, fields: Record<string, string>) {
   const res = await fetch(
     `https://api.airtable.com/v0/${AIRTABLE_BASE}/${table}/${recordId}`,
@@ -49,10 +54,8 @@ function classifyError(err: unknown): { errorType: string; message: string } {
   const anyErr = err as any
   const message = anyErr instanceof Error ? anyErr.message : 'Unknown error'
 
-  // Already tagged by updateAirtable
   if (anyErr?.errorType) return { errorType: anyErr.errorType, message }
 
-  // Stripe SDK errors carry a numeric statusCode
   if (anyErr?.statusCode || anyErr?.type?.startsWith?.('Stripe')) {
     return { errorType: 'stripe', message }
   }
@@ -66,27 +69,31 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const body = await req.json()
-    const {
-      mowRecordId,
-      contactRecordId,
-      clientName,
-      clientEmail,
-      amount,
-      description,
-    } = body
+    const rawBody = await req.json()
 
-    console.log('[Invoice] Request start — mowRecordId:', mowRecordId, 'contactRecordId:', contactRecordId, 'clientName:', clientName, 'amount:', amount)
-
-    if (!mowRecordId || !amount || !description) {
+    const parseResult = InvoiceRequestSchema.safeParse(rawBody)
+    if (!parseResult.success) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: mowRecordId, amount, description', errorType: 'validation' }),
+        JSON.stringify({ error: 'Invalid request', details: parseResult.error.flatten().fieldErrors, errorType: 'validation' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
+    const { account, mowRecordId, contactRecordId, clientName, clientEmail, amount, description } = parseResult.data
+
+    let stripe
+    try {
+      stripe = getStripeClientForAccount(account)
+    } catch (err: any) {
+      return new Response(
+        JSON.stringify({ error: err.message, errorType: 'validation' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log(`[stripe-account: ${account}] Invoice request start — mowRecordId:`, mowRecordId, 'contactRecordId:', contactRecordId, 'clientName:', clientName, 'amount:', amount)
+
     // --- Step 1: Find or create Stripe customer ---
-    // Always look up from Airtable using contactRecordId as source of truth.
     let customerId: string | null = null
     let contactEmail = ''
 
@@ -127,7 +134,6 @@ Deno.serve(async (req) => {
           console.log('[Invoice] No Stripe customer ID on Airtable contact:', contactRecordId)
         }
       } catch (err) {
-        // Re-throw Airtable auth failures so the caller sees errorType: 'airtable_auth'
         if ((err as any)?.errorType) throw err
         console.warn('[Invoice] Could not fetch contact from Airtable:', err)
       }
@@ -135,7 +141,6 @@ Deno.serve(async (req) => {
 
     if (!customerId) {
       console.log('[Invoice] Creating new Stripe customer for:', clientName, '(contact:', contactRecordId, ')')
-      // Fall back to clientEmail from request if contactEmail wasn't set (e.g. no contactRecordId)
       const emailToUse = contactEmail || clientEmail || ''
       const customer = await stripe.customers.create({
         name: clientName || 'Happy Cuts Client',
@@ -185,14 +190,12 @@ Deno.serve(async (req) => {
 
     // --- Step 4: Write invoice ID to Airtable BEFORE finalizing ---
     // Validates Airtable auth early so a broken PAT never orphans a finalized Stripe invoice.
-    if (mowRecordId) {
-      console.log('[Invoice] Step 4 — writing invoice ID to Airtable before finalize:', invoice.id)
-      await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
-        [FIELDS.stripeInvoiceId]:  invoice.id,
-        [FIELDS.invoiceStatus]:    'Processing',
-      })
-      console.log('[Invoice] Step 4 — Airtable pre-finalize write OK')
-    }
+    console.log('[Invoice] Step 4 — writing invoice ID to Airtable before finalize:', invoice.id)
+    await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
+      [FIELDS.stripeInvoiceId]:  invoice.id,
+      [FIELDS.invoiceStatus]:    'Processing',
+    })
+    console.log('[Invoice] Step 4 — Airtable pre-finalize write OK')
 
     // --- Step 5: Finalize invoice ---
     console.log('[Invoice] Step 5 — finalizing invoice:', invoice.id)
@@ -206,14 +209,12 @@ Deno.serve(async (req) => {
     const invoiceId = finalized.id
 
     // --- Step 6: Update Airtable with hosted URL and final status ---
-    if (mowRecordId) {
-      console.log('[Invoice] Step 6 — writing hosted URL back to Airtable')
-      await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
-        [FIELDS.stripeInvoiceUrl]: hostedUrl,
-        [FIELDS.invoiceStatus]:    'Sent',
-      })
-      console.log('[Invoice] Step 6 — Airtable post-finalize write OK')
-    }
+    console.log('[Invoice] Step 6 — writing hosted URL back to Airtable')
+    await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
+      [FIELDS.stripeInvoiceUrl]: hostedUrl,
+      [FIELDS.invoiceStatus]:    'Sent',
+    })
+    console.log('[Invoice] Step 6 — Airtable post-finalize write OK')
 
     console.log('[Invoice] Success — invoiceId:', invoiceId, 'mowRecordId:', mowRecordId, 'hostedUrl:', hostedUrl)
     return new Response(

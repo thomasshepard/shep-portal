@@ -755,7 +755,7 @@ export default function Tasks() {
       }
     } catch (err) {
       console.error('[Tasks] remind failed:', err)
-      showToast('Failed to send reminder')
+      showToast('Reminder failed — email domain not verified yet')
     } finally {
       setSendingReminder(false)
     }

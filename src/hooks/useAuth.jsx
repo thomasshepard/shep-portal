@@ -7,6 +7,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [recoveryMode, setRecoveryMode] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -16,10 +17,19 @@ export function AuthProvider({ children }) {
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === 'PASSWORD_RECOVERY') {
+        setSession(session)
+        setRecoveryMode(true)
+        setLoading(false)
+        // Redirect to reset-password page using hash navigation (HashRouter)
+        window.location.hash = '/reset-password'
+        return
+      }
       setSession(session)
       if (session) fetchProfile(session.user.id)
       else {
         setProfile(null)
+        setRecoveryMode(false)
         setLoading(false)
       }
     })
@@ -60,7 +70,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, profile, loading, isAdmin, isVA, permissions }}>
+    <AuthContext.Provider value={{ session, profile, loading, isAdmin, isVA, permissions, recoveryMode }}>
       {children}
     </AuthContext.Provider>
   )
