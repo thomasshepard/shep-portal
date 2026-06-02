@@ -133,7 +133,9 @@ Documents have an additional visibility layer: non-admin users only see docs who
 
 ### Incubator Phase Targets (MeeF 28-Egg Incubator)
 
-Do NOT revert to the old 99–99.5°F single-range values.
+Batches are **species-aware** (chicken or duck). All per-species cycle lengths, lockdown days, and phase temp/humidity/turning targets live in **`src/lib/incubation.js`** (`SPECIES` map + `getSpecies(fields)`, `phaseForDay`, `targetsForDay`, `phaseName`). The three incubator pages (`ChickenIncubator.jsx`, `ChickenBatchDetail.jsx`, `ChickenIncubatorGuide.jsx`) all read from this config — don't hardcode day/temp values in those files. Candling days are Day 7 and Day 14 for both species. Species is stored in the Airtable `Species` singleSelect field on the Incubator Batches table (`tblKomWeHkj9aGFDC`); missing/legacy values default to Chicken. A batch's species can be changed retroactively in the batch detail edit form.
+
+**Chicken — 21 days, lockdown Day 18** (do NOT revert to the old 99–99.5°F single-range values):
 
 | Phase | Days | Temp (°F) | Humidity | Turning |
 |-------|------|-----------|----------|---------|
@@ -142,7 +144,14 @@ Do NOT revert to the old 99–99.5°F single-range values.
 | Final Growth      | 15–17 | 100.0°F       | 45–55% | ON |
 | Lockdown & Hatch  | 18–21 | 99.5–100°F    | 65–75% | OFF (stop at Day 18) |
 
-Candling schedule: Day 4–5 (optional), Day 7 (first real — remove clears/quitters), Day 10–11 (remove non-developing), Day 17 (final before lockdown).
+**Duck — 28 days, lockdown Day 26:**
+
+| Phase | Days | Temp (°F) | Humidity | Turning |
+|-------|------|-----------|----------|---------|
+| Incubation        | 1–25  | 99.5°F | 45–55% | ON |
+| Lockdown & Hatch  | 26–28 | 99.5°F | 65–75% | OFF (stop at Day 26) |
+
+Candling schedule: Day 4–5 (optional), Day 7 (first real — remove clears/quitters), Day 10–11 (remove non-developing), then a final candle before lockdown (Day 17 chicken / Day 25 duck).
 
 ### Notifications
 
@@ -155,6 +164,7 @@ A `pg_net` trigger fires the `send-notification-email` Supabase edge function on
 - `src/lib/supabase.js` — Supabase client initialization
 - `src/lib/airtable.js` — Airtable wrapper (fetchAllRecords, createRecord, updateRecord, deleteRecord) + formatters (`fmtCurrency`, `fmtPercent`, `fmtDate`, `fmtField`) + base ID exports (`PM_BASE_ID`, `CHICKENS_BASE_ID`, `DOCS_BASE_ID`, `FBM_BASE_ID`, `BTC_BASE_ID`)
 - `src/pages/Bitcoin.jsx` — Bitcoin tracker (admin-only). All field ID constants (`RHF`, `BPF`, `LCJF`, `LCRHF`, `RHPF`) are for writes only. Separate `*_READ` objects use field name strings for reading `record.fields`. Contains `RecentActivityPanel` (collapsible on mobile, sticky on desktop) and `EditModal` (edit/delete past transactions).
+- `src/lib/incubation.js` — Species config for the incubator (`SPECIES` map: chicken/duck cycle length, lockdown day, phase targets) + `getSpecies(fields)`, `phaseForDay`, `targetsForDay`, `phaseName`. Shared by `ChickenIncubator.jsx`, `ChickenBatchDetail.jsx`, and `ChickenIncubatorGuide.jsx`.
 - `src/lib/tasks.js` — Tasks CRUD (fetchTasks, createTask, updateTask, deleteTask, taskExistsForSourceKey) + `FIELDS` constants for the Tasks Airtable base (`appYVLCn1NVLevdry`, table `tbl3Di18kSLwEj1vN`)
 - `src/lib/notifications.js` — `notify()` helper (inserts to Supabase `notifications` table with dedup via `sourceKey`), `getAdminUserIds()`, `getUserIdsWithPermission(flag)`. Call these from feature code to push in-app alerts.
 - `src/hooks/useAuth.jsx` — Auth context: session, profile, role, isAdmin, isVA, permissions

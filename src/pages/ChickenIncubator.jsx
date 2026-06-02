@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, X, Check, BookOpen } from 'lucide-react'
 import ChickenBatchDetail from './ChickenBatchDetail'
 import { CHICKENS_BASE_ID } from '../lib/airtable'
+import { getSpecies, SPECIES } from '../lib/incubation'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -65,10 +66,10 @@ function totalEggs(f) {
   return EGG_COLORS.reduce((sum, { field }) => sum + safeNum(f[field]), 0)
 }
 
-function expectedHatchDate(setDate) {
+function expectedHatchDate(setDate, incubationDays = 21) {
   if (!setDate) return ''
   const d = new Date(setDate + 'T12:00:00')
-  d.setDate(d.getDate() + 21)
+  d.setDate(d.getDate() + incubationDays)
   return d.toISOString().split('T')[0]
 }
 
@@ -81,6 +82,8 @@ function expectedHatchDate(setDate) {
 //   Day 17:   Final candle before lockdown
 //   Day 18:   LOCKDOWN — stop turning, bump humidity to 65–75%
 function getBatchPhase(batch) {
+  const species = getSpecies(batch.fields)
+  const { lockdownDay, incubationDays } = species
   const setDate = new Date(safeStr(batch.fields['Set Date']) + 'T12:00:00')
   const today = new Date()
   today.setHours(12, 0, 0, 0)
@@ -90,28 +93,28 @@ function getBatchPhase(batch) {
   const d7done = safeNum(batch.fields['Day 7 Developing']) > 0 || safeNum(batch.fields['Day 7 Removed']) > 0
   const d14done = safeNum(batch.fields['Day 14 Developing']) > 0 || safeNum(batch.fields['Day 14 Removed']) > 0
 
-  if (day < 7) return { day, phase: 'early', label: 'Early Development', nextAction: null }
-  if (day === 7 && !d7done) return { day, phase: 'candle7', label: 'Day 7 — Candle Now', nextAction: 'candle7' }
-  if (day >= 7 && day < 14) return { day, phase: 'mid', label: 'Growing', nextAction: null }
-  if (day === 14 && !d14done) return { day, phase: 'candle14', label: 'Day 14 — Candle Now', nextAction: 'candle14' }
-  if (day >= 14 && day < 18) return { day, phase: 'prelockdown', label: 'Pre-Lockdown', nextAction: null }
-  if (day === 18) return { day, phase: 'lockdown', label: 'LOCKDOWN TODAY', nextAction: 'lockdown' }
-  if (day >= 19 && day <= 21) return { day, phase: 'hatch', label: 'Watch for Pip', nextAction: null }
-  if (day > 21 && hatched === 0) return { day, phase: 'recordhatch', label: 'Record Hatch Results', nextAction: 'recordhatch' }
-  return { day, phase: 'done', label: 'Complete', nextAction: null }
+  if (day < 7) return { day, species, phase: 'early', label: 'Early Development', nextAction: null }
+  if (day === 7 && !d7done) return { day, species, phase: 'candle7', label: 'Day 7 — Candle Now', nextAction: 'candle7' }
+  if (day >= 7 && day < 14) return { day, species, phase: 'mid', label: 'Growing', nextAction: null }
+  if (day === 14 && !d14done) return { day, species, phase: 'candle14', label: 'Day 14 — Candle Now', nextAction: 'candle14' }
+  if (day >= 14 && day < lockdownDay) return { day, species, phase: 'prelockdown', label: 'Pre-Lockdown', nextAction: null }
+  if (day === lockdownDay) return { day, species, phase: 'lockdown', label: 'LOCKDOWN TODAY', nextAction: 'lockdown' }
+  if (day > lockdownDay && day <= incubationDays) return { day, species, phase: 'hatch', label: 'Watch for Pip', nextAction: null }
+  if (day > incubationDays && hatched === 0) return { day, species, phase: 'recordhatch', label: 'Record Hatch Results', nextAction: 'recordhatch' }
+  return { day, species, phase: 'done', label: 'Complete', nextAction: null }
 }
 
 // ── Progress Bar ─────────────────────────────────────────────────────────────
 
-function ProgressBar({ day }) {
-  const capped = Math.min(Math.max(day, 0), 21)
-  const pct = (capped / 21) * 100
+function ProgressBar({ day, lockdownDay = 18, incubationDays = 21 }) {
+  const capped = Math.min(Math.max(day, 0), incubationDays)
+  const pct = (capped / incubationDays) * 100
 
   function segmentColor(d) {
-    if (d <= 6) return 'bg-yellow-400'
-    if (d <= 13) return 'bg-orange-400'
-    if (d <= 17) return 'bg-amber-500'
-    if (d <= 20) return 'bg-red-500'
+    if (d < 7) return 'bg-yellow-400'
+    if (d < 14) return 'bg-orange-400'
+    if (d < lockdownDay) return 'bg-amber-500'
+    if (d < incubationDays) return 'bg-red-500'
     return 'bg-green-500'
   }
 
@@ -119,7 +122,7 @@ function ProgressBar({ day }) {
     <div className="w-full">
       <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
         <span>Day {capped}</span>
-        <span>Day 21</span>
+        <span>Day {incubationDays}</span>
       </div>
       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all ${segmentColor(capped)}`} style={{ width: `${pct}%` }} />
@@ -221,10 +224,11 @@ async function uploadPhoto(file) {
 // ── Next Action Card ─────────────────────────────────────────────────────────
 
 function NextActionCard({ phase, onAction }) {
+  const lockdownDay = phase.species?.lockdownDay ?? 18
   const config = {
     candle7: { bg: 'bg-amber-50 border-amber-300', label: 'Day 7 — Candle Today', btn: 'Log Results' },
     candle14: { bg: 'bg-amber-50 border-amber-300', label: 'Day 14 — Candle Today', btn: 'Log Results' },
-    lockdown: { bg: 'bg-orange-50 border-orange-300', label: 'Day 18 — Lockdown', btn: 'Start Lockdown' },
+    lockdown: { bg: 'bg-orange-50 border-orange-300', label: `Day ${lockdownDay} — Lockdown`, btn: 'Start Lockdown' },
     recordhatch: { bg: 'bg-green-50 border-green-300', label: 'Record Hatch Results', btn: 'Log Results' },
   }
   const c = config[phase.nextAction]
@@ -248,6 +252,7 @@ function NextActionCard({ phase, onAction }) {
 function ActiveBatchCard({ batch, onAction, onClick }) {
   const f = batch.fields
   const phase = getBatchPhase(batch)
+  const species = phase.species
   const photoUrl = safeStr(f['Batch Photo URL'])
 
   return (
@@ -260,15 +265,15 @@ function ActiveBatchCard({ batch, onAction, onClick }) {
       <div className="p-4 space-y-3">
         <div className="flex items-start justify-between">
           <div>
-            <h3 className="font-semibold text-gray-900">{formatBatchName(safeStr(f['Batch Name'], 'Untitled'))}</h3>
+            <h3 className="font-semibold text-gray-900">{species.emoji} {formatBatchName(safeStr(f['Batch Name'], 'Untitled'))}</h3>
             {f['Rooster'] && <p className="text-sm text-gray-500 mt-0.5">{'\uD83D\uDC13'} {safeStr(f['Rooster'])}</p>}
           </div>
           <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700">Active</span>
         </div>
         <EggCounts fields={f} />
-        <ProgressBar day={phase.day} />
+        <ProgressBar day={phase.day} lockdownDay={species.lockdownDay} incubationDays={species.incubationDays} />
         <p className="text-xs text-gray-500">
-          Set {shortDate(f['Set Date'])} &middot; Expected hatch {shortDate(expectedHatchDate(f['Set Date']))}
+          Set {shortDate(f['Set Date'])} &middot; Expected hatch {shortDate(expectedHatchDate(f['Set Date'], species.incubationDays))}
         </p>
         {(() => {
           try {
@@ -288,6 +293,7 @@ function ActiveBatchCard({ batch, onAction, onClick }) {
 
 function CompletedBatchCard({ batch, onClick }) {
   const f = batch.fields
+  const species = getSpecies(f)
   const status = safeStr(f['Status'], 'Hatched')
   const total = totalEggs(f)
   const hatched = safeNum(f['Chicks Hatched'])
@@ -298,7 +304,7 @@ function CompletedBatchCard({ batch, onClick }) {
     <button onClick={onClick} className="bg-white rounded-xl border border-gray-200 p-4 text-left w-full hover:shadow-sm transition-shadow">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="font-medium text-gray-700">{formatBatchName(safeStr(f['Batch Name'], 'Untitled'))}</h3>
+          <h3 className="font-medium text-gray-700">{species.emoji} {formatBatchName(safeStr(f['Batch Name'], 'Untitled'))}</h3>
           <p className="text-sm text-gray-500 mt-0.5">
             {f['Rooster'] && <>{'\uD83D\uDC13'} {safeStr(f['Rooster'])} &middot; </>}
             {isHatched ? `${hatched} of ${total} hatched (${pct}%)` : 'Failed'}
@@ -326,8 +332,11 @@ function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
   const [newRoosterDesc, setNewRoosterDesc] = useState('')
   const [newRoosterNotes, setNewRoosterNotes] = useState('')
   const [setDate, setSetDate] = useState(todayStr())
+  const [speciesKey, setSpeciesKey] = useState('chicken')
   const [eggs, setEggs] = useState({ brownEggs: '', darkBrownEggs: '', blueEggs: '', greenEggs: '', whiteEggs: '', tanPinkEggs: '' })
   const [saving, setSaving] = useState(false)
+
+  const species = SPECIES[speciesKey]
 
   const total = EGG_COLORS.reduce((sum, { key }) => sum + (Number(eggs[key]) || 0), 0)
 
@@ -374,9 +383,10 @@ function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
 
     const friendly = new Date(setDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     const fields = {
-      'Batch Name': `Batch – ${friendly}`,
+      'Batch Name': `${species.label} Batch – ${friendly}`,
       'Set Date': setDate,
       'Status': 'Active',
+      'Species': species.label,
     }
     const selectedRooster = roosters.find(r => r.id === selectedRoosterId)
     if (selectedRooster) {
@@ -401,8 +411,8 @@ function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
     getUserIdsWithPermission('can_view_chickens').then(userIds => {
       notify({
         userIds,
-        title: 'New incubator batch started',
-        body: `${total} eggs set on ${setDate}`,
+        title: `New ${species.label.toLowerCase()} batch started`,
+        body: `${total} ${species.label.toLowerCase()} eggs set on ${setDate}`,
         module: 'incubator',
         severity: 'info',
         actionUrl: '/#/chickens',
@@ -433,6 +443,26 @@ function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
                 <input type="file" accept="image/*" className="hidden" onChange={onFileChange} />
               </label>
             )}
+          </div>
+
+          {/* Species */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Species</label>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.values(SPECIES).map(s => (
+                <button key={s.key} type="button" onClick={() => setSpeciesKey(s.key)}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                    speciesKey === s.key
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-amber-300'
+                  }`}>
+                  <span className="text-base">{s.emoji}</span> {s.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              {species.incubationDays}-day cycle · lockdown Day {species.lockdownDay}
+            </p>
           </div>
 
           {/* Rooster */}
@@ -594,12 +624,12 @@ function CandleSheet({ batch, candleDay, onClose, onSaved }) {
 const LOCKDOWN_STEPS = [
   'Move eggs to flat hatch tray (lay on side)',
   'Turn OFF the auto-flip',
-  'Bump humidity to 65-70% RH',
+  'Bump humidity to 65-75% RH',
   'Fill water reservoir fully',
   "Close the lid — don't open it again until chicks are dry",
 ]
 
-function LockdownSheet({ onClose }) {
+function LockdownSheet({ onClose, lockdownDay = 18 }) {
   const [checked, setChecked] = useState(LOCKDOWN_STEPS.map(() => false))
 
   function toggle(i) {
@@ -612,7 +642,7 @@ function LockdownSheet({ onClose }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="bg-white rounded-t-2xl sm:rounded-xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-900">Day 18 — Lockdown</h2>
+          <h2 className="font-semibold text-gray-900">Day {lockdownDay} — Lockdown</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
         </div>
         <div className="px-5 py-4 space-y-4">
@@ -847,7 +877,7 @@ export default function ChickenIncubator() {
       {showNew && <NewBatchSheet onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); loadBatches() }} roosters={roosters} onRoosterAdded={handleRoosterAdded} />}
       {sheet?.type === 'candle7' && <CandleSheet batch={sheet.batch} candleDay={7} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
       {sheet?.type === 'candle14' && <CandleSheet batch={sheet.batch} candleDay={14} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
-      {sheet?.type === 'lockdown' && <LockdownSheet onClose={() => setSheet(null)} />}
+      {sheet?.type === 'lockdown' && <LockdownSheet lockdownDay={getSpecies(sheet.batch.fields).lockdownDay} onClose={() => setSheet(null)} />}
       {sheet?.type === 'recordhatch' && <HatchSheet batch={sheet.batch} onClose={() => setSheet(null)} onSaved={handleSheetSaved} />}
       {selectedBatch && (
         <ChickenBatchDetail

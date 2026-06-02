@@ -1,6 +1,28 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronDown, ChevronUp } from 'lucide-react'
+import { SPECIES } from '../lib/incubation'
+
+// Build the Quick Reference lines from a species config so the guide always
+// matches the incubator pages.
+function quickReferenceLines(species) {
+  const lines = []
+  species.phases.forEach((p, i) => {
+    const lo = i === 0 ? 1 : species.phases[i - 1].maxDay + 1
+    const hi = p.maxDay === Infinity ? species.incubationDays : p.maxDay
+    const range = lo === hi ? `DAY ${lo}` : `DAYS ${lo}-${hi}`
+    lines.push(`${range.padEnd(11)}${p.temp} · ${p.humidity} RH · Auto-flip ${p.turn ? 'ON' : 'OFF'}`)
+  })
+  const lockHumidity = species.phases[species.phases.length - 1].humidity
+  lines.push('')
+  lines.push('DAY 7      Candle — remove clears and quitters')
+  lines.push('DAY 14     Second candle — remove non-developers')
+  lines.push(`DAY ${species.lockdownDay - 1}     Final candle before lockdown`)
+  lines.push(`DAY ${species.lockdownDay}     LOCKDOWN — flip OFF · humidity → ${lockHumidity} · lid CLOSED`)
+  lines.push(`DAYS ${species.lockdownDay + 1}-${species.incubationDays}  Watch for pip — don't assist for 24 hrs after external pip`)
+  lines.push('POST-HATCH Leave in incubator until fluffy · move to 95°F brooder')
+  return lines
+}
 
 // ── Accordion helpers ────────────────────────────────────────────────────────
 
@@ -92,6 +114,9 @@ function TroubleshootCard({ problem, cause, fix }) {
 export default function ChickenIncubatorGuide() {
   const navigate = useNavigate()
   const { toggle, isOpen } = useAccordion()
+  const [speciesKey, setSpeciesKey] = useState('chicken')
+  const species = SPECIES[speciesKey]
+  const isDuck = speciesKey === 'duck'
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
@@ -102,17 +127,32 @@ export default function ChickenIncubatorGuide() {
           <ChevronLeft size={16} /> Back to Chickens
         </button>
         <h1 className="text-2xl font-bold text-gray-900">Incubator Guide</h1>
-        <p className="text-sm text-gray-500 mt-1">28-Egg Incubator &middot; Chicken Hatch Cycle</p>
+        <p className="text-sm text-gray-500 mt-1">
+          28-Egg MeeF Incubator &middot; {species.label} Hatch Cycle ({species.incubationDays} days)
+        </p>
+        {/* Species toggle */}
+        <div className="flex gap-2 mt-3">
+          {Object.values(SPECIES).map(s => (
+            <button key={s.key} onClick={() => setSpeciesKey(s.key)}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                speciesKey === s.key
+                  ? 'bg-amber-500 text-white border-amber-500'
+                  : 'bg-white text-gray-600 border-gray-300 hover:border-amber-300'
+              }`}>
+              <span className="text-base">{s.emoji}</span> {s.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Section 1 — Why Use This Tracker (always visible) */}
       <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-5 space-y-3">
         <h2 className="font-semibold text-amber-900">Why Use This Tracker?</h2>
         <p className="text-sm text-amber-800 leading-relaxed">
-          Hatching eggs is exciting — but a lot can go wrong silently over 21 days. This tracker gives you a record of every batch so you can spot patterns, improve over time, and never miss a critical window like Day 7 candling or Day 18 lockdown.
+          Hatching eggs is exciting — but a lot can go wrong silently over {species.incubationDays} days. This tracker gives you a record of every batch so you can spot patterns, improve over time, and never miss a critical window like Day 7 candling or Day {species.lockdownDay} lockdown.
         </p>
         <ul className="space-y-1.5 text-sm text-amber-800">
-          <li className="flex gap-2"><span>✅</span><span><strong>Know exactly where you are</strong> in the 21-day cycle every time you open the app</span></li>
+          <li className="flex gap-2"><span>✅</span><span><strong>Know exactly where you are</strong> in the {species.incubationDays}-day cycle every time you open the app</span></li>
           <li className="flex gap-2"><span>✅</span><span><strong>Never miss a candle day</strong> — the app flags Day 7 and Day 14 automatically</span></li>
           <li className="flex gap-2"><span>✅</span><span><strong>Track what works</strong> — see hatch rates by rooster, batch, and season over time</span></li>
           <li className="flex gap-2"><span>✅</span><span><strong>Photo documentation</strong> — attach photos of each batch to compare egg colors and shell quality</span></li>
@@ -123,29 +163,23 @@ export default function ChickenIncubatorGuide() {
 
       {/* Section 2 — Your Incubator at a Glance */}
       <Section id="specs" title="2 · Your Incubator at a Glance" toggle={toggle} isOpen={isOpen}>
-        <h4 className="font-medium text-gray-800 mt-3 mb-2">28-Egg Incubator</h4>
+        <h4 className="font-medium text-gray-800 mt-3 mb-2">28-Egg MeeF Incubator — {species.emoji} {species.label}</h4>
         <GuideTable
           headers={['Feature', 'Detail']}
           rows={[
-            ['Capacity', '28 chicken eggs'],
+            ['Capacity', '28 eggs'],
+            ['Incubation period', `${species.incubationDays} days (lockdown Day ${species.lockdownDay})`],
             ['Auto egg turning', 'Automatic rotation on timer'],
             ['Humidity control', 'Ultrasonic atomizing humidifier'],
             ['Display', 'Digital LED — temp + humidity'],
             ['Egg tray types', 'Chicken, duck, goose'],
           ]}
         />
-        <h4 className="font-medium text-gray-800 mt-4 mb-2">Quick Reference</h4>
+        <h4 className="font-medium text-gray-800 mt-4 mb-2">Quick Reference — {species.label}</h4>
         <div className="bg-gray-900 text-amber-400 font-mono rounded-xl p-4 text-xs leading-relaxed space-y-1">
-          <p>DAYS 1-7&nbsp;&nbsp;&nbsp;&nbsp;100.0-100.5°F &middot; 50-60% RH &middot; Auto-flip ON</p>
-          <p>DAYS 8-14&nbsp;&nbsp;&nbsp;100.0-100.5°F &middot; 45-55% RH &middot; Auto-flip ON</p>
-          <p>DAYS 15-17&nbsp;&nbsp;100.0°F &middot; 45-55% RH &middot; Auto-flip ON</p>
-          <p>DAY 7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Candle — remove clears and quitters</p>
-          <p>DAY 10-11&nbsp;&nbsp;&nbsp;Remove non-developing eggs</p>
-          <p>DAY 17&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Final candle before lockdown</p>
-          <p>DAY 18&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;LOCKDOWN — flip OFF &middot; humidity → 65-75% &middot; lid CLOSED</p>
-          <p>DAYS 18-21&nbsp;&nbsp;99.5-100°F &middot; 65-75% RH &middot; Auto-flip OFF</p>
-          <p>DAYS 19-21&nbsp;&nbsp;Watch for pip — don't assist for 24 hrs after external pip</p>
-          <p>POST-HATCH&nbsp;&nbsp;Leave in incubator until fluffy &middot; move to 95°F brooder</p>
+          {quickReferenceLines(species).map((line, i) => (
+            <p key={i} className="whitespace-pre">{line || ' '}</p>
+          ))}
         </div>
       </Section>
 
@@ -155,8 +189,12 @@ export default function ChickenIncubatorGuide() {
           <StepItem num={1} title="Prep the incubator">
             <ul className="list-disc list-inside space-y-1">
               <li>Run the incubator empty for 24 hours before adding eggs</li>
-              <li>Confirm temp holds at 100.0-100.5°F — verify with a second thermometer if unsure (budget units often read 1-2° off)</li>
-              <li>Confirm humidity holds at 50-60% RH (Days 1-7), then 45-55% RH (Days 8-17)</li>
+              <li>Confirm temp holds at {species.phases[0].temp} — verify with a second thermometer if unsure (budget units often read 1-2° off)</li>
+              {isDuck ? (
+                <li>Confirm humidity holds at 45-55% RH through Day {species.lockdownDay - 1}, then bump to 65-75% RH at lockdown</li>
+              ) : (
+                <li>Confirm humidity holds at 50-60% RH (Days 1-7), then 45-55% RH (Days 8-17)</li>
+              )}
               <li>Fill the water reservoir before powering on</li>
               <li>Verify the auto-flip is rotating (watch the tray after powering on)</li>
               <li>Place on a stable, level surface away from drafts and direct sunlight</li>
@@ -179,7 +217,8 @@ export default function ChickenIncubatorGuide() {
               <li>Enter your rooster's name</li>
               <li>Set the date</li>
               <li>Enter egg counts by color</li>
-              <li>Tap <strong>Add Batch</strong> — the app calculates your expected hatch date automatically (Set Date + 21 days)</li>
+              <li>Pick the <strong>species</strong> (Chicken or Duck) — this sets the cycle length and incubator targets</li>
+              <li>Tap <strong>Add Batch</strong> — the app calculates your expected hatch date automatically (Set Date + {species.incubationDays} days)</li>
             </ul>
           </StepItem>
 
@@ -193,8 +232,54 @@ export default function ChickenIncubatorGuide() {
         </div>
       </Section>
 
-      {/* Section 4 — The 21-Day Timeline */}
-      <Section id="timeline" title="4 · The 21-Day Timeline" toggle={toggle} isOpen={isOpen}>
+      {/* Section 4 — The Timeline */}
+      <Section id="timeline" title={`4 · The ${species.incubationDays}-Day Timeline`} toggle={toggle} isOpen={isOpen}>
+        {isDuck ? (
+        <div className="space-y-3 mt-3">
+          <TimelineItem label="Days 1-7 · Early Development" border="border-yellow-400">
+            <p>Embryo begins forming and veins develop. Hold <strong>99.5°F · 45-55% RH</strong> with auto-flip ON. Refill water daily and avoid opening the lid.</p>
+          </TimelineItem>
+          <TimelineItem label="Day 7 · First Candle" border="border-amber-500" highlight>
+            <p className="text-amber-700 text-xs font-medium mb-1">The app will flag this day automatically on your batch card.</p>
+            <p>Candle in a dark room. Duck shells are thicker — use a strong candler.</p>
+            <ul className="space-y-1 mt-1">
+              <li>✅ <strong>Developing:</strong> Dark spot with radiating veins</li>
+              <li>⚠️ <strong>Quitter:</strong> Blood ring or dark mass with no structure</li>
+              <li>❌ <strong>Clear:</strong> No development — likely infertile</li>
+            </ul>
+            <p className="mt-1 font-medium">Remove quitters and clears immediately. Log results in the app.</p>
+          </TimelineItem>
+          <TimelineItem label="Days 8-13 · Active Growth" border="border-orange-400">
+            <p>Embryo grows rapidly. Keep 99.5°F · 45-55% RH, flip ON. Monitor temp, humidity, and water level.</p>
+          </TimelineItem>
+          <TimelineItem label="Day 14 · Second Candle" border="border-amber-500" highlight>
+            <p className="text-amber-700 text-xs font-medium mb-1">The app will flag this day automatically on your batch card.</p>
+            <p>Most of the interior should be dark with a clear air cell at the wide end. Remove any non-developers and check the air cell as your humidity gauge (too small = too humid, too large = too dry).</p>
+          </TimelineItem>
+          <TimelineItem label="Days 15-25 · Growth &amp; Pre-Lockdown" border="border-orange-500">
+            <p>Embryo fills most of the egg. Hold <strong>99.5°F · 45-55% RH</strong>, flip ON. Start filling water more aggressively toward Day 25 to prep for the lockdown humidity bump.</p>
+          </TimelineItem>
+          <TimelineItem label="Day 25 · Final Candle" border="border-amber-500" highlight>
+            <p>Last candle before lockdown. Remove any clearly non-developing eggs so they can't rot during hatch.</p>
+          </TimelineItem>
+          <TimelineItem label="Day 26 · LOCKDOWN" border="border-red-500" highlight>
+            <p className="text-amber-700 text-xs font-medium mb-1">The app shows a lockdown checklist on this day.</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Move eggs from turning tray to flat hatch tray (lay on side)</li>
+              <li>Turn off auto-flip or remove eggs from turner</li>
+              <li>Bump humidity to <strong>65-75% RH</strong> (temp stays 99.5°F)</li>
+              <li>Fill water reservoir fully</li>
+              <li><strong>Do not open the lid again until hatch is complete</strong></li>
+            </ul>
+          </TimelineItem>
+          <TimelineItem label="Days 27-28 · Pip &amp; Hatch" border="border-green-500">
+            <p>Ducklings internally pip the air cell, then externally pip the shell. Allow <strong>12-48 hours</strong> from pip to hatch — ducklings can take longer than chicks. Don't rush or assist before 24 hours after an external pip.</p>
+          </TimelineItem>
+          <TimelineItem label="Post-Hatch" border="border-green-400">
+            <p>Leave ducklings in the incubator until fully dry and fluffy. They absorb the yolk sac and don't need food or water immediately. Move to a brooder at 95°F once fluffy and active.</p>
+          </TimelineItem>
+        </div>
+        ) : (
         <div className="space-y-3 mt-3">
           <TimelineItem label="Days 1-6 · Early Development" border="border-yellow-400">
             <p>Embryo begins forming. Veins start developing. Keep temp and humidity stable. Check water level daily. Do not open lid unnecessarily.</p>
@@ -261,6 +346,7 @@ export default function ChickenIncubatorGuide() {
             <p>Leave chicks in the incubator until fully dry and fluffy (12-24 hours). They absorb the yolk sac during this time and do not need food or water immediately. Move to a brooder set at 95°F once fluffy and active.</p>
           </TimelineItem>
         </div>
+        )}
       </Section>
 
       {/* Section 5 — Brooder Temperature Schedule */}
@@ -310,7 +396,7 @@ export default function ChickenIncubatorGuide() {
       <Section id="troubleshoot" title="7 · Troubleshooting" toggle={toggle} isOpen={isOpen}>
         <div className="space-y-2 mt-3">
           <TroubleshootCard problem="Low hatch rate overall" cause="Temp too high or too low" fix="Calibrate with a second thermometer" />
-          <TroubleshootCard problem="Chicks die in shell (pipped but can't hatch)" cause="Humidity too low at lockdown" fix="Bump to 65-75% on Day 18" />
+          <TroubleshootCard problem="Chicks die in shell (pipped but can't hatch)" cause="Humidity too low at lockdown" fix={`Bump to 65-75% on Day ${species.lockdownDay}`} />
           <TroubleshootCard problem="Eggs don't develop at all" cause="Infertile eggs or dead embryo from bad storage" fix="Check rooster coverage; use fresh eggs under 7 days old" />
           <TroubleshootCard problem="Humidity won't hold" cause="Low water level or atomizer issue" fix="Fill reservoir daily; check atomizer is misting" />
           <TroubleshootCard problem="Temp spikes" cause="Draft or direct sunlight" fix="Move incubator away from windows and vents" />
@@ -337,7 +423,7 @@ export default function ChickenIncubatorGuide() {
           </li>
           <li>
             <p className="font-medium">💧 Humidity is harder to nail than temp</p>
-            <p className="text-gray-600 mt-0.5">Most first-time hatchers run too high. Target 50-60% for Days 1-7, then drop to 45-55% for Days 8-17. Your Day 14 air cell size is your humidity report card — look it up when candling.</p>
+            <p className="text-gray-600 mt-0.5">Most first-time hatchers run too high. {isDuck ? `Target 45-55% RH through Day ${species.lockdownDay - 1}, then 65-75% at lockdown.` : 'Target 50-60% for Days 1-7, then drop to 45-55% for Days 8-17.'} Your Day 14 air cell size is your humidity report card — look it up when candling.</p>
           </li>
           <li>
             <p className="font-medium">🔄 Don't open the lid</p>
@@ -365,7 +451,7 @@ export default function ChickenIncubatorGuide() {
           <li>When you set eggs → create the batch immediately</li>
           <li>Day 7 → app will remind you; log candle results right after</li>
           <li>Day 14 → same</li>
-          <li>Day 18 → run through the lockdown checklist in the app</li>
+          <li>Day {species.lockdownDay} → run through the lockdown checklist in the app</li>
           <li>After hatch → record your results while the chicks are still drying</li>
         </ul>
 

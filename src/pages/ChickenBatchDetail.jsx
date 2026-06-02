@@ -3,6 +3,7 @@ import { ChevronLeft, X, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { CHICKENS_BASE_ID } from '../lib/airtable'
+import { getSpecies, phaseName as speciesPhaseName, targetsForDay as speciesTargets, SPECIES } from '../lib/incubation'
 import toast from 'react-hot-toast'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -53,10 +54,10 @@ function formatBatchName(name) {
   })
 }
 
-function expectedHatchDate(setDate) {
+function expectedHatchDate(setDate, incubationDays = 21) {
   if (!setDate) return ''
   const d = new Date(setDate + 'T12:00:00')
-  d.setDate(d.getDate() + 21)
+  d.setDate(d.getDate() + incubationDays)
   return d.toISOString().split('T')[0]
 }
 
@@ -79,14 +80,6 @@ function getBatchDay(setDate) {
   return Math.max(1, Math.floor((today - set) / 86400000) + 1)
 }
 
-function getPhaseName(day) {
-  if (day <= 6) return 'Early Development'
-  if (day <= 13) return 'Growing'
-  if (day <= 17) return 'Pre-Lockdown'
-  if (day === 18) return 'LOCKDOWN TODAY'
-  if (day <= 21) return 'Watch for Pip'
-  return 'Complete'
-}
 
 function hatchBenchmark(pct) {
   if (pct >= 85) return { color: 'text-green-600', label: 'Excellent' }
@@ -95,12 +88,6 @@ function hatchBenchmark(pct) {
   return { color: 'text-red-600', label: 'Problem' }
 }
 
-function getTargetsForDay(day) {
-  if (day <= 7)  return { temp: '100.0–100.5°F', humidity: '50–60%', turn: true }
-  if (day <= 14) return { temp: '100.0–100.5°F', humidity: '45–55%', turn: true }
-  if (day <= 17) return { temp: '100.0°F',        humidity: '45–55%', turn: true }
-  return           { temp: '99.5–100°F',          humidity: '65–75%', turn: false }
-}
 
 // ── Log Helpers ───────────────────────────────────────────────────────────────
 
@@ -277,14 +264,14 @@ function statusBadgeClass(s) {
 
 // ── Progress Bar ──────────────────────────────────────────────────────────────
 
-function ProgressBar({ day }) {
-  const capped = Math.min(Math.max(day, 0), 21)
-  const pct = (capped / 21) * 100
+function ProgressBar({ day, lockdownDay = 18, incubationDays = 21 }) {
+  const capped = Math.min(Math.max(day, 0), incubationDays)
+  const pct = (capped / incubationDays) * 100
   function segColor(d) {
-    if (d <= 6) return 'bg-yellow-400'
-    if (d <= 13) return 'bg-orange-400'
-    if (d <= 17) return 'bg-amber-500'
-    if (d <= 20) return 'bg-red-500'
+    if (d < 7) return 'bg-yellow-400'
+    if (d < 14) return 'bg-orange-400'
+    if (d < lockdownDay) return 'bg-amber-500'
+    if (d < incubationDays) return 'bg-red-500'
     return 'bg-green-500'
   }
   return (
@@ -391,7 +378,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     log_date: new Date().toISOString().split('T')[0],
     temp_f: '',
     humidity_pct: '',
-    eggs_turned: getBatchDay(safeStr(batch.fields['Set Date'])) < 18,
+    eggs_turned: getBatchDay(safeStr(batch.fields['Set Date'])) < getSpecies(batch.fields).lockdownDay,
     notes: '',
   })
   const [readingSaving, setReadingSaving] = useState(false)
@@ -400,6 +387,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
   const [editForm, setEditForm] = useState({
     setDate: safeStr(f['Set Date']),
     status: safeStr(f['Status'], 'Active'),
+    species: getSpecies(f).label,
     brown: String(safeNum(f['Brown Eggs']) || ''),
     darkBrown: String(safeNum(f['Dark Brown Eggs']) || ''),
     blue: String(safeNum(f['Blue Eggs']) || ''),
@@ -457,7 +445,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
       log_date: new Date().toISOString().split('T')[0],
       temp_f: '',
       humidity_pct: '',
-      eggs_turned: day < 18,
+      eggs_turned: day < lockdownDay,
       notes: '',
     })
     fetchReadings()
@@ -468,9 +456,11 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
   const status = safeStr(f['Status'], 'Active')
   const isActive = status === 'Active'
   const total = totalEggs(f)
-  const hatchDate = expectedHatchDate(setDate)
+  const species = getSpecies(f)
+  const { lockdownDay, incubationDays } = species
+  const hatchDate = expectedHatchDate(setDate, incubationDays)
   const day = getBatchDay(setDate)
-  const phaseName = getPhaseName(day)
+  const phaseName = speciesPhaseName(species, day)
 
   const d7dev = safeNum(f['Day 7 Developing'])
   const d7rem = safeNum(f['Day 7 Removed'])
@@ -556,6 +546,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
       'Rooster ID': selectedRoosterId || null,
       'Set Date': editForm.setDate || null,
       'Status': editForm.status,
+      'Species': editForm.species || 'Chicken',
       'Photo URLs': finalPhotoUrls.length > 0 ? JSON.stringify(finalPhotoUrls) : null,
       'Day 7 Notes': editForm.d7notes.trim() || null,
       'Day 14 Notes': editForm.d14notes.trim() || null,
@@ -857,9 +848,14 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
                   })()}
                   <p className="text-sm text-gray-500">Set {fmtDate(setDate)} · Hatch {fmtDate(hatchDate)}</p>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${statusBadgeClass(status)}`}>
-                  {status}
-                </span>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(status)}`}>
+                    {status}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">
+                    {species.emoji} {species.label}
+                  </span>
+                </div>
               </div>
 
               {/* Egg counts */}
@@ -879,10 +875,10 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
               {isActive && (
                 <div className="bg-gray-50 rounded-xl p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-gray-800">Day {day} of 21</span>
+                    <span className="font-semibold text-gray-800">Day {day} of {incubationDays}</span>
                     <span className="text-sm text-gray-500">{phaseName}</span>
                   </div>
-                  <ProgressBar day={day} />
+                  <ProgressBar day={day} lockdownDay={lockdownDay} incubationDays={incubationDays} />
                   <div className="flex justify-between text-xs text-gray-400 pt-0.5">
                     <span>Set {shortDate(setDate)}</span>
                     <span>Hatch {shortDate(hatchDate)}</span>
@@ -893,24 +889,26 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
               {/* Incubator settings (Active only) */}
               {isActive && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                  <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">Incubator Settings</p>
+                  <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">
+                    {species.emoji} {species.label} Incubator Settings
+                  </p>
                   <div className="space-y-2">
-                    {[
-                      { label: 'Days 1–7',   detail: '100.0–100.5°F · 50–60% RH · Flip ON',  active: day <= 7 },
-                      { label: 'Days 8–14',  detail: '100.0–100.5°F · 45–55% RH · Flip ON',  active: day >= 8 && day <= 14 },
-                      { label: 'Days 15–17', detail: '100.0°F · 45–55% RH · Flip ON',         active: day >= 15 && day <= 17 },
-                      { label: 'Day 18+ (Lockdown)', detail: '99.5–100°F · 65–75% RH · STOP turning', active: day >= 18 },
-                    ].map(({ label, detail, active }) => (
-                      <div key={label} className={`flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors ${active ? 'bg-amber-100/70' : ''}`}>
-                        <span className="text-base leading-none mt-0.5">{label.startsWith('Day 18') ? '🔒' : '🌡️'}</span>
-                        <div>
-                          <p className={`text-sm font-medium ${active ? 'text-amber-900' : 'text-gray-700'}`}>
-                            {label}{active ? ' ← today' : ''}
-                          </p>
-                          <p className={`text-sm ${active ? 'text-amber-800' : 'text-gray-500'}`}>{detail}</p>
+                    {species.phases.map((p, i) => {
+                      const lo = i === 0 ? 1 : species.phases[i - 1].maxDay + 1
+                      const active = day >= lo && day <= p.maxDay
+                      const detail = `${p.temp} · ${p.humidity} RH · ${p.turn ? 'Flip ON' : 'STOP turning'}`
+                      return (
+                        <div key={p.label} className={`flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors ${active ? 'bg-amber-100/70' : ''}`}>
+                          <span className="text-base leading-none mt-0.5">{p.turn ? '🌡️' : '🔒'}</span>
+                          <div>
+                            <p className={`text-sm font-medium ${active ? 'text-amber-900' : 'text-gray-700'}`}>
+                              {p.label}{active ? ' ← today' : ''}
+                            </p>
+                            <p className={`text-sm ${active ? 'text-amber-800' : 'text-gray-500'}`}>{detail}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -933,7 +931,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
                 {isActive && (
                   <div className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-2">
                     {(() => {
-                      const t = getTargetsForDay(day)
+                      const t = speciesTargets(species, day)
                       return (
                         <>
                           <span className="font-medium text-gray-600">Day {day} targets: </span>
@@ -1241,6 +1239,20 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
                   <option value="Failed">Failed</option>
                 </select>
               </div>
+            </div>
+
+            {/* Species */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wider block mb-1">Species</label>
+              <select value={editForm.species} onChange={e => setEF('species', e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white">
+                {Object.values(SPECIES).map(s => (
+                  <option key={s.key} value={s.label}>{s.emoji} {s.label} · {s.incubationDays}-day cycle</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Changing species updates the cycle length, lockdown day, and incubator targets.
+              </p>
             </div>
 
             {/* Rooster */}
