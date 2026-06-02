@@ -4,7 +4,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { ArrowLeft, Plus, X, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Plus, X, RefreshCw, CheckCircle2 } from 'lucide-react'
 import {
   fetchAllRecords, createRecord, updateRecord, CHICKENS_BASE_ID, fmtDate, fmtCurrency,
 } from '../lib/airtable'
@@ -319,7 +319,6 @@ export default function FlockDetail() {
   const [showProcessingModal, setShowProcessingModal] = useState(false)
   const [recalculating, setRecalculating] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [sizeChangeBanner, setSizeChangeBanner] = useState(false)
 
   useEffect(() => { loadAll() }, [id])
 
@@ -396,9 +395,10 @@ export default function FlockDetail() {
     }, 3000)
   }
 
-  async function handleRecalculate() {
+  async function handleRecalculate(overrideCount = null) {
     setRecalculating(true)
     const f = flock.fields
+    const birdCount = overrideCount ?? (safeNum(f['Current Count']) ?? 0)
     const currentVersion = scheduleRows.length > 0 ? (safeNum(scheduleRows[0].fields['Version']) ?? 1) : 1
     const tw = safeNum(f['Target Weeks']) ?? 8
     const breedName = safeStr(f['Breed'], '')
@@ -434,7 +434,7 @@ export default function FlockDetail() {
       flockId: id,
       flockName: safeStr(f['Name']),
       hatchDate: f['Hatch Date'] || '',
-      newBirdCount: safeNum(f['Current Count']) ?? 0,
+      newBirdCount: birdCount,
       targetWeeks: tw,
       breed: breedName,
       previousVersion: currentVersion,
@@ -447,15 +447,20 @@ export default function FlockDetail() {
     setTimeout(async () => {
       await loadScheduleOnly()
       setRecalculating(false)
-      setSizeChangeBanner(false)
     }, 3000)
   }
 
   function handleMortalitySaved(deathCount, newCount) {
     setShowMortalityForm(false)
     setFlock(prev => ({ ...prev, fields: { ...prev.fields, 'Current Count': newCount } }))
-    const scheduledSize = scheduleRows.length > 0 ? safeNum(scheduleRows[0].fields['Flock Size at Version']) : null
-    if (scheduledSize !== null && newCount !== scheduledSize) setSizeChangeBanner(true)
+    const hasSchedule = scheduleRows.length > 0
+    const scheduledSize = hasSchedule ? safeNum(scheduleRows[0].fields['Flock Size at Version']) : null
+    // Auto-recalculate the feeding schedule whenever a loss changes the bird
+    // count away from the size the current schedule was built for.
+    if (hasSchedule && scheduledSize !== null && newCount !== scheduledSize) {
+      toast('Recalculating feeding schedule for new flock size…', { icon: '🔄' })
+      handleRecalculate(newCount)
+    }
     loadAll()
   }
 
@@ -672,24 +677,6 @@ export default function FlockDetail() {
           </>
         )}
       </div>
-
-      {/* Size change banner */}
-      {sizeChangeBanner && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-5 py-4 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={16} className="text-yellow-500 flex-shrink-0" />
-            <p className="text-sm text-yellow-800">Flock size has changed — recalculate feeding schedule?</p>
-          </div>
-          <button
-            onClick={handleRecalculate}
-            disabled={recalculating}
-            className="flex items-center gap-1.5 text-sm text-yellow-700 hover:text-yellow-900 border border-yellow-300 rounded-lg px-3 py-1.5 whitespace-nowrap disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={recalculating ? 'animate-spin' : ''} />
-            Recalculate
-          </button>
-        </div>
-      )}
 
       {/* Mortality Log */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

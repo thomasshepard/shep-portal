@@ -3,7 +3,13 @@
     "allow": [
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "mcp__Airtable_MCP_Server__describe_table",
+      "mcp__Airtable_MCP_Server__create_field",
+      "Bash(npm run *)",
+      "mcp__Airtable_MCP_Server__list_tables",
+      "Bash(git rm *)",
+      "Bash(git commit *)"
     ]
   }
 }
