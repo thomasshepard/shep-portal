@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useAlerts } from '../hooks/useAlerts'
 import LoadingSpinner from '../components/LoadingSpinner'
 import AlertsPanel from '../components/AlertsPanel'
+import PropertyPlaybook from '../components/PropertyPlaybook'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -40,6 +41,7 @@ export default function Properties() {
   const [loans, setLoans] = useState([])
   const [rentRollOpen, setRentRollOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
+  const [view, setView] = useState('overview') // 'overview' | 'playbook'
 
   const userName = profile?.full_name || profile?.email || 'Unknown'
   const { alerts, dismiss, restore } = useAlerts(
@@ -166,14 +168,33 @@ export default function Properties() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Properties</h1>
-        <button
-          onClick={() => setShowAll(v => !v)}
-          className="text-sm text-gray-500 hover:text-gray-800 border border-gray-300 rounded-lg px-3 py-1.5"
-        >
-          {showAll ? 'Hide archived' : 'Show all properties'}
-        </button>
+        {view === 'overview' && (
+          <button
+            onClick={() => setShowAll(v => !v)}
+            className="text-sm text-gray-500 hover:text-gray-800 border border-gray-300 rounded-lg px-3 py-1.5"
+          >
+            {showAll ? 'Hide archived' : 'Show all properties'}
+          </button>
+        )}
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-6 border-b border-gray-200 -mt-2">
+        {['overview', 'playbook'].map(t => (
+          <button
+            key={t}
+            onClick={() => setView(t)}
+            className={`pb-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
+              view === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {view === 'playbook' ? <PropertyPlaybook /> : (
+      <>
       {/* Portfolio Summary */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {isAdmin ? (
@@ -429,6 +450,8 @@ export default function Properties() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   )
 }
