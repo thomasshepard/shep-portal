@@ -65,8 +65,9 @@ export function AuthProvider({ children }) {
     can_view_tools:    !!profile?.can_view_tools,
     can_view_files:    !!profile?.can_view_files,
     can_view_listings: !!profile?.can_view_listings,
-    can_view_triage:   isAdmin || isVA || !!profile?.can_view_triage,
-    can_view_backlog:  isAdmin || !!profile?.can_view_backlog,
+    can_view_triage:     isAdmin || isVA || !!profile?.can_view_triage,
+    can_view_backlog:    isAdmin || !!profile?.can_view_backlog,
+    can_view_happy_cuts: isAdmin || !!profile?.can_view_happy_cuts,
   }
 
   return (

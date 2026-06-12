@@ -79,9 +79,9 @@ export default function App() {
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
             <Route path="listings" element={<ProtectedRoute><PropertyListings /></ProtectedRoute>} />
             <Route path="listings/benwick" element={<ProtectedRoute><CrossvilleDashboard /></ProtectedRoute>} />
-            <Route path="happy-cuts" element={<AdminRoute><HappyCuts /></AdminRoute>} />
-            <Route path="happy-cuts/client/:id" element={<AdminRoute><HappyCutsClientDetail /></AdminRoute>} />
-            <Route path="happy-cuts/guide" element={<AdminRoute><HappyCutsGuide /></AdminRoute>} />
+            <Route path="happy-cuts" element={<PermRoute permission="can_view_happy_cuts"><HappyCuts /></PermRoute>} />
+            <Route path="happy-cuts/client/:id" element={<PermRoute permission="can_view_happy_cuts"><HappyCutsClientDetail /></PermRoute>} />
+            <Route path="happy-cuts/guide" element={<PermRoute permission="can_view_happy_cuts"><HappyCutsGuide /></PermRoute>} />
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="notifications/settings" element={<ProtectedRoute><NotificationSettings /></ProtectedRoute>} />
             <Route path="notifications/digest-guide" element={<ProtectedRoute><DigestGuide /></ProtectedRoute>} />

@@ -21,6 +21,7 @@ const emptyForm = {
   can_view_files: false,
   can_view_listings: false,
   can_view_triage: false,
+  can_view_happy_cuts: false,
   allowed_tags: '',
 }
 
@@ -95,6 +96,7 @@ export default function AdminUsers() {
           can_view_files: form.can_view_files,
           can_view_listings: form.can_view_listings,
           can_view_triage: form.can_view_triage,
+          can_view_happy_cuts: form.can_view_happy_cuts,
           allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         })
         .eq('id', newUserId)
@@ -195,6 +197,7 @@ export default function AdminUsers() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Files</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Listings</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Triage</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Happy Cuts</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -302,6 +305,13 @@ export default function AdminUsers() {
                         enabled={isAdmin || u.can_view_triage}
                         locked={isAdmin}
                         onChange={() => togglePerm(u, 'can_view_triage')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_happy_cuts}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_happy_cuts')}
                       />
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -516,6 +526,15 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Triage</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_happy_cuts}
+                        onChange={e => setField('can_view_happy_cuts', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Happy Cuts</span>
                     </label>
                   </div>
                 </div>
