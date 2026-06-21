@@ -68,6 +68,7 @@ export function AuthProvider({ children }) {
     can_view_triage:     isAdmin || isVA || !!profile?.can_view_triage,
     can_view_backlog:    isAdmin || !!profile?.can_view_backlog,
     can_view_happy_cuts: isAdmin || !!profile?.can_view_happy_cuts,
+    can_view_finances:   isAdmin || !!profile?.can_view_finances,
   }
 
   return (

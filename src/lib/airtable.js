@@ -74,6 +74,31 @@ export async function createRecord(tableName, fields, baseId = BASE_ID, { typeca
   }
 }
 
+/** Create up to many records, chunked into Airtable's 10-per-request limit.
+ *  Returns { data: createdRecords[], error } — stops and reports on first failed chunk. */
+export async function createRecords(tableName, records, baseId = BASE_ID) {
+  if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }
+  const created = []
+  try {
+    for (let i = 0; i < records.length; i += 10) {
+      const chunk = records.slice(i, i + 10).map((fields) => ({ fields }))
+      const res = await fetch(buildUrl(tableName, baseId), {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ records: chunk, typecast: true }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        return { data: created, error: json?.error?.message || `HTTP ${res.status}` }
+      }
+      created.push(...(json.records || []))
+    }
+    return { data: created, error: null }
+  } catch (e) {
+    return { data: created, error: e.message }
+  }
+}
+
 /** Update an existing record by ID. typecast is always true to auto-create select options. */
 export async function updateRecord(tableName, recordId, fields, baseId = BASE_ID, { typecast = true } = {}) {
   if (!PAT) return { data: null, error: 'Airtable PAT is not configured.' }

@@ -63,6 +63,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 | FB Marketplace Monitor | Hardcoded as `FBM_BASE_ID` in `airtable.js` | FB Marketplace deal listings |
 | Happy Cuts | `VITE_AIRTABLE_HAPPY_CUTS_BASE_ID` | Lawn care CRM — contacts, mow schedule |
 | Bitcoin Transactions | `VITE_AIRTABLE_BTC_BASE_ID` (`appLvE5luEWaM5dWe`) | BTC purchase log, wallet transfers, ACH records |
+| Credit Card Management | Hardcoded `CC_BASE_ID` in `statements.js` (`appEzmb0zR7DIPiG4`) | Card registry (`Credit Cards` `tbl4XWrVyCBqphUNQ`) + consolidated `Transactions` (`tblw9bSntvMZnycrL`) |
 
 > The Chicken Farm base ID (`apppIiT84EaowkQVR`) uses a capital **I** in position 4 — easy to misread as lowercase l.
 
@@ -94,6 +95,7 @@ Documents have an additional visibility layer: non-admin users only see docs who
 | `/notifications` | Notifications | ProtectedRoute | In-app notification inbox |
 | `/tasks` | Tasks | ProtectedRoute | Personal task manager (all authenticated users) |
 | `/bitcoin` | Bitcoin | AdminRoute | BTC purchase + wallet transfer workflow with edit/delete history |
+| `/finances` | Finances | PermRoute(can_view_finances) | Credit-card statement importer + spending dashboard |
 | `/admin/*` | AdminUsers/Logs/Content | AdminRoute | User mgmt, access logs, content |
 | `/maintenance-request` | MaintenanceSubmit | **None (public)** | Tenant-facing maintenance request form |
 
@@ -164,6 +166,8 @@ A `pg_net` trigger fires the `send-notification-email` Supabase edge function on
 - `src/lib/supabase.js` — Supabase client initialization
 - `src/lib/airtable.js` — Airtable wrapper (fetchAllRecords, createRecord, updateRecord, deleteRecord) + formatters (`fmtCurrency`, `fmtPercent`, `fmtDate`, `fmtField`) + base ID exports (`PM_BASE_ID`, `CHICKENS_BASE_ID`, `DOCS_BASE_ID`, `FBM_BASE_ID`, `BTC_BASE_ID`)
 - `src/pages/Bitcoin.jsx` — Bitcoin tracker (admin-only). All field ID constants (`RHF`, `BPF`, `LCJF`, `LCRHF`, `RHPF`) are for writes only. Separate `*_READ` objects use field name strings for reading `record.fields`. Contains `RecentActivityPanel` (collapsible on mobile, sticky on desktop) and `EditModal` (edit/delete past transactions).
+- `src/pages/Finances.jsx` — Credit-card statement importer + spending dashboard (`can_view_finances`). Three tabs: export checklist (deep links per card from the `Download URL` field), CSV import (drag/drop → preview → dedup → write), and dashboard (category trends, recurring/subscription detection, AI "where to cut" nudges fed **aggregates only**). Writes to the `Transactions` table by field **name** with `createRecords` (batched). Has local `safeStr/safeNum/arr` helpers.
+- `src/lib/statements.js` — CSV parsing engine for Finances. Exports `CC_BASE_ID`/`TX_TABLE`/`CARDS_TABLE`, `ISSUERS` (per-bank checklist steps), `parseCSV` (self-contained RFC-4180; no external lib), per-issuer adapters (`processStatement(text, issuerHint)` → normalized rows or `{needsMapping}`), `applyManualMapping`, `detectIssuerFromCardName`, `cardTail`, `makeDedupKey`, `categorize`. **Amount sign: negative = spending, positive = payment/credit** — each adapter flips its bank's convention to match. Dedup key = `last4|date|amount|merchantKey`. No transaction data leaves the browser (parsing is local; only aggregates go to the Claude API).
 - `src/lib/incubation.js` — Species config for the incubator (`SPECIES` map: chicken/duck cycle length, lockdown day, phase targets) + `getSpecies(fields)`, `phaseForDay`, `targetsForDay`, `phaseName`. Shared by `ChickenIncubator.jsx`, `ChickenBatchDetail.jsx`, and `ChickenIncubatorGuide.jsx`.
 - `src/lib/tasks.js` — Tasks CRUD (fetchTasks, createTask, updateTask, deleteTask, taskExistsForSourceKey) + `FIELDS` constants for the Tasks Airtable base (`appYVLCn1NVLevdry`, table `tbl3Di18kSLwEj1vN`)
 - `src/lib/notifications.js` — `notify()` helper (inserts to Supabase `notifications` table with dedup via `sourceKey`), `getAdminUserIds()`, `getUserIdsWithPermission(flag)`. Call these from feature code to push in-app alerts.

@@ -43,6 +43,7 @@ import Backlog from './pages/Backlog'
 import PropertyListings from './pages/PropertyListings.jsx'
 import CrossvilleDashboard from './pages/CrossvilleDashboard.jsx'
 import Bitcoin from './pages/Bitcoin'
+import Finances from './pages/Finances'
 
 export default function App() {
   return (
@@ -94,6 +95,7 @@ export default function App() {
             <Route path="triage/guide" element={<PermRoute permission="can_view_triage"><TriageGuide /></PermRoute>} />
             <Route path="backlog" element={<PermRoute permission="can_view_backlog"><Backlog /></PermRoute>} />
             <Route path="bitcoin" element={<AdminRoute><Bitcoin /></AdminRoute>} />
+            <Route path="finances" element={<PermRoute permission="can_view_finances"><ErrorBoundary><Finances /></ErrorBoundary></PermRoute>} />
             <Route
               path="admin"
               element={
