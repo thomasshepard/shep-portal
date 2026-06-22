@@ -2265,6 +2265,7 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
   const [addOpen, setAddOpen] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
   const [scheduleView, setScheduleView] = useState('list')
+  const [hideCancelled, setHideCancelled] = useState(true)
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
   const weekStr = weekStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
@@ -2322,11 +2323,23 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
         </button>
       </div>
 
+      {/* Hide cancelled toggle */}
+      <label className="flex items-center gap-2 mb-3 text-xs font-medium text-gray-500 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={hideCancelled}
+          onChange={e => setHideCancelled(e.target.checked)}
+          className="rounded border-gray-300"
+        />
+        Hide cancelled mows
+      </label>
+
       {scheduleView === 'map' ? (
         <ScheduleMapView
           weekMows={schedules.filter(m => {
             const end = addDays(weekStart, 7)
             return m.date >= dateToStr(weekStart) && m.date < dateToStr(end)
+              && (!hideCancelled || m.status !== 'Cancelled')
           })}
           contactsById={contactsById}
           contacts={contacts}
@@ -2334,7 +2347,7 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
       ) : days.map(day => {
         const dayStr = dateToStr(day)
         const dayMows = schedules
-          .filter(m => m.date === dayStr)
+          .filter(m => m.date === dayStr && (!hideCancelled || m.status !== 'Cancelled'))
           .sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999))
         const isToday = dayStr === todayStr()
         const label = day.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
