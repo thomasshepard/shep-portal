@@ -1420,11 +1420,13 @@ function NudgesPanel({ contacts, schedules, nudges, nudgesFetched, setNudges, se
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [dismissed, setDismissed] = useState([])
+  const [error, setError] = useState(false)
 
   async function fetchNudges() {
-    if (nudgesFetched) return
-    if (!ANTH_KEY) { setNudgesFetched(true); return }
+    if (nudgesFetched || loading) return
+    if (!ANTH_KEY) return
     setLoading(true)
+    setError(false)
     try {
       const contextStr = JSON.stringify({
         clients: contacts.slice(0, 20).map(c => ({ name: c.name, status: c.status, lastContact: c.lastContact, rate: c.rate })),
@@ -1451,22 +1453,24 @@ function NudgesPanel({ contacts, schedules, nudges, nudgesFetched, setNudges, se
       const match = raw.match(/\[[\s\S]*\]/)
       const parsed = JSON.parse(match ? match[0] : '[]')
       setNudges(Array.isArray(parsed) ? parsed : [])
+      setNudgesFetched(true)
     } catch (e) {
       console.error('[HappyCuts nudges]', e)
+      setError(true)
     } finally {
       setLoading(false)
-      setNudgesFetched(true)
     }
   }
 
   function handleToggle() {
     const next = !expanded
     setExpanded(next)
-    if (next && !nudgesFetched) fetchNudges()
+    if (next && !nudgesFetched && !loading) fetchNudges()
   }
 
   const visible = nudges.filter((_, i) => !dismissed.includes(i))
-  if (nudgesFetched && visible.length === 0 && !loading) return null
+  // Only hide after a successful fetch that returned nothing — never hide on error or mid-load
+  if (nudgesFetched && !error && visible.length === 0 && !loading) return null
 
   const borderColor = { high: 'border-red-400', medium: 'border-yellow-400', low: 'border-gray-300' }
 
@@ -1486,7 +1490,18 @@ function NudgesPanel({ contacts, schedules, nudges, nudgesFetched, setNudges, se
               <span className="ml-2 text-sm text-gray-500">Thinking…</span>
             </div>
           )}
-          {!loading && nudges.map((n, i) => dismissed.includes(i) ? null : (
+          {!loading && error && (
+            <div className="flex items-center justify-between px-3 py-3 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-sm text-gray-500">Couldn't load nudges</p>
+              <button
+                onClick={() => { setError(false); fetchNudges() }}
+                className="text-sm text-green-600 font-medium"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {!loading && !error && nudges.map((n, i) => dismissed.includes(i) ? null : (
             <div
               key={i}
               className={`bg-white border-l-4 ${borderColor[n.priority] || 'border-gray-300'} border border-gray-100 rounded-r-xl p-3 flex items-start gap-2`}
