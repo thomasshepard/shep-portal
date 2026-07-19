@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import { notify, getAdminUserIds } from '../lib/notifications'
 import {
   Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
-  CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen,
+  CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen, TreePine,
 } from 'lucide-react'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -19,6 +19,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
+const PROJECTS_TABLE = 'tblP7yDgETBBbgLpb'
 
 // Contacts field IDs
 const CF = {
@@ -149,6 +150,26 @@ function parseMow(r) {
   }
 }
 
+function parseProject(r) {
+  const f = r.fields || {}
+  return {
+    id: r.id,
+    title:          safeStr(f[PF.title]),
+    category:       safeStr(f[PF.category]),
+    status:         safeStr(f[PF.status]),
+    scope:          safeStr(f[PF.scope]),
+    quotedPrice:    safeNum(f[PF.quotedPrice]),
+    materialsCost:  safeNum(f[PF.materialsCost]),
+    scheduledDate:  safeStr(f[PF.scheduledDate]),
+    reasonLost:     safeStr(f[PF.reasonLost]),
+    notes:          safeStr(f[PF.notes]),
+    stripeInvoiceId:  safeStr(f[PF.stripeInvoiceId]),
+    stripeInvoiceUrl: safeStr(f[PF.stripeInvoiceUrl]),
+    invoiceStatus:    safeStr(f[PF.invoiceStatus]),
+    clientIds:      arr(f[PF.client]),
+  }
+}
+
 // ─── Date / format helpers ────────────────────────────────────────────────────
 function todayStr() {
   const d = new Date()
@@ -232,6 +253,63 @@ const INV_STATUS = {
   Paid: 'bg-green-100 text-green-700',
   Waived: 'bg-purple-100 text-purple-600',
 }
+
+// Projects field IDs
+const PF = {
+  title:          'fldaxKyhnfOqdV9Ae',
+  client:         'fldgZXZ9y5tnkuwXm',
+  category:       'fld1WXmCcSksy1U8I',
+  status:         'fldrujp8KU3hpmD8D',
+  scope:          'flddMyeP8NhSn9RkF',
+  quotedPrice:    'fld3yYhAe1SaTShhT',
+  materialsCost:  'fldiTHjeEXZkKarXR',
+  scheduledDate:  'fldVOXBQuqUrZrLmh',
+  reasonLost:     'fld99IUneGxadHhO6',
+  notes:          'fldN8Uktj2w4gpR5W',
+  stripeInvoiceId:  'fldIJ03PLv0oytLjK',
+  stripeInvoiceUrl: 'fldVvc6G17vGKXiID',
+  invoiceStatus:    'fldrA8Jw7VziWmEIX',
+}
+
+const PROJECT_STATUS_STYLE = {
+  Estimate:     'bg-yellow-100 text-yellow-800',
+  Scheduled:    'bg-blue-100 text-blue-700',
+  'In Progress':'bg-indigo-100 text-indigo-700',
+  Completed:    'bg-teal-100 text-teal-700',
+  Invoiced:     'bg-purple-100 text-purple-700',
+  Paid:         'bg-green-100 text-green-700',
+  Lost:         'bg-gray-100 text-gray-500',
+}
+
+const CATEGORY_BORDER = {
+  'Tree trimming / pruning': '#16a34a',
+  'Bush / shrub pruning':    '#84cc16',
+  'Brush clearing':          '#f59e0b',
+  'Tree removal':            '#ef4444',
+  'Stump removal':           '#78716c',
+  'Debris hauling':          '#6b7280',
+  'Other':                   '#9ca3af',
+}
+
+const PROJECT_CATEGORIES = [
+  'Tree trimming / pruning',
+  'Bush / shrub pruning',
+  'Brush clearing',
+  'Tree removal',
+  'Stump removal',
+  'Debris hauling',
+  'Other',
+]
+
+const PROJECT_STATUSES = ['Estimate', 'Scheduled', 'In Progress', 'Completed', 'Invoiced', 'Paid', 'Lost']
+
+const REASON_LOST_OPTIONS = [
+  'Client went with someone else',
+  'Client did it themselves',
+  'No longer needed',
+  'Price too high',
+  'Other',
+]
 
 // ─── Weather helpers ──────────────────────────────────────────────────────────
 function weatherIcon(code) {
@@ -2742,6 +2820,520 @@ function RevenueTab({ onOpenJob }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInvoice }) {
+  const [statusLoading, setStatusLoading] = useState(false)
+  const isLost = p.status === 'Lost'
+  const borderColor = CATEGORY_BORDER[p.category] || '#9ca3af'
+  const canInvoice = ['Scheduled', 'In Progress', 'Completed'].includes(p.status) && !p.stripeInvoiceId
+  const net = p.quotedPrice != null && p.materialsCost != null ? p.quotedPrice - p.materialsCost : null
+  const margin = p.quotedPrice && p.materialsCost ? Math.round(((p.quotedPrice - p.materialsCost) / p.quotedPrice) * 100) : null
+
+  async function setStatus(newStatus) {
+    setStatusLoading(true)
+    try {
+      await atPatch(PROJECTS_TABLE, p.id, { [PF.status]: newStatus })
+      toast.success('Status updated')
+      onRefresh()
+    } catch {
+      toast.error('Failed to update status')
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
+  return (
+    <div
+      className={`bg-white rounded-xl border border-gray-100 overflow-hidden transition-opacity ${isLost ? 'opacity-60 hover:opacity-100' : ''}`}
+      style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
+    >
+      <div className="flex items-center px-4 py-3 gap-3 cursor-pointer" onClick={onToggle}>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate">{contact?.name || 'Unknown client'}</p>
+          <p className="text-xs text-gray-400 truncate">{p.category || p.scope || '—'}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className={`text-sm font-semibold ${isLost ? 'text-gray-400' : 'text-gray-800'}`}>
+            {p.quotedPrice != null ? fmtCurrency(p.quotedPrice) : '—'}
+          </span>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${PROJECT_STATUS_STYLE[p.status] || 'bg-gray-100 text-gray-500'}`}>
+            {p.status || '—'}
+          </span>
+        </div>
+        <ChevronDown size={16} className={`text-gray-300 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </div>
+
+      {expanded && (
+        <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 space-y-3">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div>
+              <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Category</p>
+              <p className="text-gray-700">{p.category || '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Date</p>
+              <p className="text-gray-700">{p.scheduledDate ? fmtDateShort(p.scheduledDate) : 'No date'}</p>
+            </div>
+            <div>
+              <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Quoted</p>
+              <p className="text-gray-700">{p.quotedPrice != null ? fmtCurrency(p.quotedPrice) : '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Materials</p>
+              <p className="text-gray-700">{p.materialsCost != null ? fmtCurrency(p.materialsCost) : '—'}</p>
+            </div>
+          </div>
+
+          {net != null && (
+            <div className="flex gap-4 bg-white rounded-lg px-3 py-2 text-xs border border-gray-100">
+              <div>
+                <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Net</p>
+                <p className="font-semibold text-gray-800">{fmtCurrency(net)}</p>
+              </div>
+              {margin != null && (
+                <div>
+                  <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Margin</p>
+                  <p className={`font-semibold ${margin >= 70 ? 'text-green-600' : margin >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>{margin}%</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isLost && p.reasonLost && (
+            <div className="bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-xs text-stone-600">
+              <span className="font-semibold">Reason lost:</span> {p.reasonLost}
+            </div>
+          )}
+
+          {p.scope && (
+            <div>
+              <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Scope</p>
+              <p className="text-xs text-gray-700 leading-relaxed">{p.scope}</p>
+            </div>
+          )}
+
+          {p.notes && (
+            <div>
+              <p className="text-gray-400 uppercase tracking-wide text-[10px] mb-0.5">Notes</p>
+              <p className="text-xs text-gray-500 leading-relaxed">{p.notes}</p>
+            </div>
+          )}
+
+          {p.stripeInvoiceUrl && (
+            <a href={p.stripeInvoiceUrl} target="_blank" rel="noreferrer" className="block text-xs text-blue-600 font-medium">
+              View invoice →
+            </a>
+          )}
+
+          <div className="flex gap-2 flex-wrap pt-1">
+            {!isLost && (
+              <select
+                className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-white"
+                value={p.status}
+                onChange={e => setStatus(e.target.value)}
+                disabled={statusLoading}
+              >
+                {PROJECT_STATUSES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            )}
+            {isLost && (
+              <button
+                onClick={() => setStatus('Estimate')}
+                disabled={statusLoading}
+                className="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg"
+              >
+                Reopen as estimate
+              </button>
+            )}
+            {canInvoice && (
+              <button
+                onClick={onInvoice}
+                className="flex-1 text-xs bg-green-600 text-white rounded-lg px-3 py-1.5 font-semibold flex items-center justify-center gap-1"
+              >
+                <DollarSign size={12} />
+                Create invoice
+              </button>
+            )}
+            {p.status === 'Invoiced' && (
+              <button
+                onClick={() => setStatus('Paid')}
+                disabled={statusLoading}
+                className="text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-semibold"
+              >
+                Mark paid
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AddProjectModal({ contacts, onClose, onSaved }) {
+  const [form, setForm] = useState({ clientId: '', category: '', scope: '', quotedPrice: '', materialsCost: '', scheduledDate: '', status: 'Estimate', reasonLost: '', notes: '' })
+  const [loading, setLoading] = useState(false)
+  const set = (key, val) => setForm(p => ({ ...p, [key]: val }))
+
+  async function handleSave() {
+    if (!form.clientId) { toast.error('Select a client'); return }
+    if (!form.category) { toast.error('Select a category'); return }
+    if (!form.quotedPrice) { toast.error('Enter a quoted price'); return }
+    setLoading(true)
+    try {
+      const clientName = contacts.find(c => c.id === form.clientId)?.name || 'Project'
+      const fields = {
+        [PF.title]:         `${clientName} — ${form.category}`,
+        [PF.client]:        [form.clientId],
+        [PF.category]:      form.category,
+        [PF.status]:        form.status,
+        [PF.quotedPrice]:   parseFloat(form.quotedPrice),
+      }
+      if (form.scope)         fields[PF.scope]         = form.scope
+      if (form.materialsCost) fields[PF.materialsCost] = parseFloat(form.materialsCost)
+      if (form.scheduledDate) fields[PF.scheduledDate] = form.scheduledDate
+      if (form.reasonLost)    fields[PF.reasonLost]    = form.reasonLost
+      if (form.notes)         fields[PF.notes]         = form.notes
+      await atPost(PROJECTS_TABLE, { records: [{ fields }], typecast: true })
+      toast.success('Project created')
+      onSaved()
+    } catch {
+      toast.error('Failed to create project')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const field = (label, children, hint) => (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1">
+        {label}{hint && <span className="font-normal text-gray-400"> ({hint})</span>}
+      </label>
+      {children}
+    </div>
+  )
+  const cls = 'w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800">Add project</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+        <div className="space-y-3">
+          {field('Client',
+            <select className={cls} value={form.clientId} onChange={e => set('clientId', e.target.value)}>
+              <option value="">Select a client…</option>
+              {contacts.filter(c => c.status !== 'Lost').sort((a, b) => a.name.localeCompare(b.name)).map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+          {field('Category',
+            <select className={cls} value={form.category} onChange={e => set('category', e.target.value)}>
+              <option value="">Select a category…</option>
+              {PROJECT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          )}
+          {field('Scope',
+            <textarea rows={3} className={cls + ' resize-none'} placeholder="Describe the work…" value={form.scope} onChange={e => set('scope', e.target.value)} />
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            {field('Quoted price',
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input type="number" className={cls + ' pl-6'} placeholder="0.00" step="0.01" min="0" value={form.quotedPrice} onChange={e => set('quotedPrice', e.target.value)} />
+              </div>
+            )}
+            {field('Materials cost', (
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input type="number" className={cls + ' pl-6'} placeholder="0.00" step="0.01" min="0" value={form.materialsCost} onChange={e => set('materialsCost', e.target.value)} />
+              </div>
+            ), 'optional')}
+          </div>
+          {field('Scheduled date',
+            <input type="date" className={cls} value={form.scheduledDate} onChange={e => set('scheduledDate', e.target.value)} />,
+            'optional'
+          )}
+          {field('Status',
+            <select className={cls} value={form.status} onChange={e => { set('status', e.target.value); set('reasonLost', '') }}>
+              {PROJECT_STATUSES.filter(s => !['Invoiced', 'Paid'].includes(s)).map(s => <option key={s}>{s}</option>)}
+            </select>
+          )}
+          {form.status === 'Lost' && field('Reason lost',
+            <select className={cls} value={form.reasonLost} onChange={e => set('reasonLost', e.target.value)}>
+              <option value="">Select a reason…</option>
+              {REASON_LOST_OPTIONS.map(r => <option key={r}>{r}</option>)}
+            </select>,
+            'optional'
+          )}
+          {field('Notes',
+            <textarea rows={2} className={cls + ' resize-none'} placeholder="Access notes, follow-ups, competing quotes…" value={form.notes} onChange={e => set('notes', e.target.value)} />,
+            'internal'
+          )}
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+          <button onClick={handleSave} disabled={loading} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            Create project
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProjectInvoiceModal({ project: p, contact, onClose, onConfirm }) {
+  const [step, setStep] = useState('preview')
+  const [emailInput, setEmailInput] = useState(contact?.email || '')
+  const [invoiceUrl, setInvoiceUrl] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [invoiceError, setInvoiceError] = useState(null)
+
+  const clientName = contact?.name || 'Happy Cuts Client'
+  const firstName = clientName.split(' ')[0]
+  const phone = contact?.phone || ''
+  const description = `Happy Cuts – ${p.category || 'Special Project'}${p.scheduledDate ? ` – ${fmtDateShort(p.scheduledDate)}` : ''}`
+  const message = `Hey ${firstName}! Here's your invoice for ${p.category ? p.category.toLowerCase() : 'the project'} — ${fmtCurrency(p.quotedPrice)}:\n${invoiceUrl}\n\nThanks! – Thomas, Happy Cuts\n(931) 284-3503`
+  const smsLink = phone ? `sms:${phone.replace(/\D/g, '')}&body=${encodeURIComponent(message)}` : ''
+
+  async function sendInvoice() {
+    setStep('loading')
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/create-stripe-invoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({
+          mowRecordId: p.id,
+          tableId: PROJECTS_TABLE,
+          contactRecordId: contact?.id || null,
+          clientName,
+          clientEmail: emailInput.trim() || null,
+          amount: p.quotedPrice,
+          description,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.hostedUrl) {
+        setInvoiceUrl(data.hostedUrl)
+        await atPatch(PROJECTS_TABLE, p.id, { [PF.status]: 'Invoiced' })
+        if (emailInput.trim() && contact?.id) {
+          atPatch(CONTACTS_TABLE, contact.id, { [CF.email]: emailInput.trim() }).catch(() => {})
+        }
+        setStep('success')
+      } else {
+        setInvoiceError(data)
+        setStep('error')
+      }
+    } catch (err) {
+      setInvoiceError({ error: err?.message })
+      setStep('error')
+    }
+  }
+
+  async function copyText() {
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopied(true)
+      toast.success('Copied!')
+      setTimeout(() => setCopied(false), 2000)
+    } catch { toast.error('Failed to copy') }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={step === 'preview' ? onClose : undefined}>
+      <div className="bg-white rounded-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        {step === 'preview' && (
+          <>
+            <div className="px-5 pt-5 pb-4 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">Invoice Preview</h3>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm">
+              <div className="text-gray-500 text-xs font-semibold uppercase tracking-wide">Happy Cuts Lawn Care · (931) 284-3503</div>
+              <div className="space-y-1">
+                <div><span className="text-gray-500">Bill to:</span> <span className="font-medium text-gray-800">{clientName}</span></div>
+                <div><span className="text-gray-500">For:</span> <span className="text-gray-800">{description}</span></div>
+                <div><span className="text-gray-500">Amount:</span> <span className="font-semibold text-gray-800">{fmtCurrency(p.quotedPrice)}</span></div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Client email <span className="font-normal text-gray-400">(optional)</span></label>
+                <input type="email" value={emailInput} onChange={e => setEmailInput(e.target.value)} placeholder="client@email.com" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400" />
+              </div>
+            </div>
+            <div className="px-5 pb-5 flex gap-3">
+              <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+              <button onClick={sendInvoice} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-semibold text-sm">Create Invoice →</button>
+            </div>
+          </>
+        )}
+        {step === 'loading' && (
+          <div className="px-5 py-10 flex flex-col items-center gap-3">
+            <Loader2 size={32} className="animate-spin text-green-600" />
+            <p className="text-gray-600 text-sm font-medium">Creating invoice…</p>
+          </div>
+        )}
+        {step === 'success' && (
+          <>
+            <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">Invoice Created</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Copy link below to send to client</p>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm">
+              <p className="text-gray-700 font-medium">{clientName} · {fmtCurrency(p.quotedPrice)}</p>
+              <p className="text-gray-500 text-xs">{p.category}</p>
+              <a href={invoiceUrl} target="_blank" rel="noreferrer" className="block w-full text-center py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700">View Invoice</a>
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Text payment link</p>
+                <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-700 whitespace-pre-wrap break-words leading-relaxed">{message}</div>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={copyText} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700">{copied ? 'Copied!' : 'Copy Text'}</button>
+                  {smsLink && <a href={smsLink} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium text-center">Open SMS</a>}
+                </div>
+              </div>
+            </div>
+            <div className="px-5 pb-5">
+              <button onClick={onConfirm} className="w-full py-3 bg-green-600 text-white rounded-xl font-semibold text-sm">Done</button>
+            </div>
+          </>
+        )}
+        {step === 'error' && (
+          <>
+            <div className="px-5 pt-5 pb-3 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-800 text-lg">Something went wrong</h3>
+            </div>
+            <div className="px-5 py-4 space-y-2">
+              <p className="text-gray-600 text-sm">Invoice not created.</p>
+              {invoiceError?.error && <p className="text-xs text-red-500 font-mono bg-red-50 rounded px-2 py-1 break-words">{invoiceError.error}</p>}
+            </div>
+            <div className="px-5 pb-5 flex gap-3">
+              <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+              <button onClick={() => setStep('preview')} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-medium text-sm">Try Again</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ProjectsTab({ contacts, contactsById }) {
+  const [projects, setProjects] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState('all')
+  const [expandedId, setExpandedId] = useState(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [invoicingProject, setInvoicingProject] = useState(null)
+
+  async function load() {
+    setLoading(true)
+    try {
+      setProjects((await fetchAll(PROJECTS_TABLE)).map(parseProject))
+    } catch {
+      toast.error('Failed to load projects')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const activeProjects = projects.filter(p => p.status !== 'Lost')
+  const totalQuoted   = activeProjects.reduce((s, p) => s + (p.quotedPrice || 0), 0)
+  const invoicedAmt   = projects.filter(p => ['Invoiced', 'Paid'].includes(p.status)).reduce((s, p) => s + (p.quotedPrice || 0), 0)
+  const collectedAmt  = projects.filter(p => p.status === 'Paid').reduce((s, p) => s + (p.quotedPrice || 0), 0)
+
+  const filterPills = ['all', ...PROJECT_STATUSES.map(s => s.toLowerCase())]
+  const filtered = filter === 'all' ? projects : projects.filter(p => p.status.toLowerCase() === filter)
+  const sorted = [...filtered].sort((a, b) => {
+    const ord = PROJECT_STATUSES
+    const diff = ord.indexOf(a.status) - ord.indexOf(b.status)
+    if (diff !== 0) return diff
+    if (a.scheduledDate && b.scheduledDate) return a.scheduledDate.localeCompare(b.scheduledDate)
+    return a.scheduledDate ? -1 : b.scheduledDate ? 1 : 0
+  })
+
+  return (
+    <div className="p-4 space-y-4">
+      {loading ? (
+        <div className="flex justify-center py-10"><Loader2 className="animate-spin text-green-600" size={28} /></div>
+      ) : (
+        <>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { label: 'Active', value: activeProjects.length },
+              { label: 'Quoted', value: fmtCurrency(totalQuoted) },
+              { label: 'Invoiced', value: fmtCurrency(invoicedAmt) },
+              { label: 'Collected', value: fmtCurrency(collectedAmt) },
+            ].map(s => (
+              <div key={s.label} className="bg-white rounded-xl p-3 border border-gray-100">
+                <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide">{s.label}</p>
+                <p className="text-sm font-semibold text-gray-800 tabular-nums">{s.value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex gap-1.5 flex-wrap">
+              {filterPills.map(f => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filter === f ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200'}`}
+                >
+                  {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowAdd(true)} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-xl text-xs font-semibold shrink-0">
+              <Plus size={14} />
+              Add
+            </button>
+          </div>
+
+          {sorted.length === 0 ? (
+            <p className="text-center text-gray-400 py-8 text-sm">No projects{filter !== 'all' ? ' with this status' : ' yet'}</p>
+          ) : (
+            <div className="space-y-2">
+              {sorted.map(p => (
+                <ProjectCard
+                  key={p.id}
+                  project={p}
+                  contact={contactsById[p.clientIds?.[0]]}
+                  expanded={expandedId === p.id}
+                  onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                  onRefresh={load}
+                  onInvoice={() => setInvoicingProject(p)}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {showAdd && (
+        <AddProjectModal
+          contacts={contacts}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => { setShowAdd(false); load() }}
+        />
+      )}
+
+      {invoicingProject && (
+        <ProjectInvoiceModal
+          project={invoicingProject}
+          contact={contactsById[invoicingProject.clientIds?.[0]]}
+          onClose={() => setInvoicingProject(null)}
+          onConfirm={() => { setInvoicingProject(null); load() }}
+        />
+      )}
+    </div>
+  )
+}
+
 export default function HappyCuts() {
   const { profile } = useAuth()
   const navigate = useNavigate()
@@ -2803,10 +3395,11 @@ export default function HappyCuts() {
   }, [])
 
   const TABS = [
-    { id: 'today', label: 'Today', icon: Leaf },
-    { id: 'clients', label: 'Clients', icon: Users },
+    { id: 'today',    label: 'Today',    icon: Leaf },
+    { id: 'clients',  label: 'Clients',  icon: Users },
     { id: 'schedule', label: 'Schedule', icon: Calendar },
-    { id: 'revenue', label: 'Revenue', icon: BarChart2 },
+    { id: 'projects', label: 'Projects', icon: TreePine },
+    { id: 'revenue',  label: 'Revenue',  icon: BarChart2 },
   ]
 
   if (loading) {
@@ -2882,6 +3475,9 @@ export default function HappyCuts() {
           onRefresh={load}
           contacts={contacts}
         />
+      )}
+      {activeTab === 'projects' && (
+        <ProjectsTab contacts={contacts} contactsById={contactsById} />
       )}
       {activeTab === 'revenue' && (
         <RevenueTab

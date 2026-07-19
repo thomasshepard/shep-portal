@@ -3,15 +3,27 @@ import { getStripeClientForAccount } from '../_shared/stripeAccounts.ts'
 
 const AIRTABLE_PAT = Deno.env.get('AIRTABLE_PAT') ?? ''
 const AIRTABLE_BASE = 'appZOi48qf8SzyOml'
-const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
-const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
+const SCHEDULE_TABLE  = 'tbli7OArESf2SHL10'
+const PROJECTS_TABLE  = 'tblP7yDgETBBbgLpb'
+const CONTACTS_TABLE  = 'tbl1Y1siC5qV2fX8J'
+
+// Per-table field IDs for Stripe write-backs
+const TABLE_FIELDS: Record<string, { stripeInvoiceUrl: string; stripeInvoiceId: string; invoiceStatus: string }> = {
+  [SCHEDULE_TABLE]: {
+    stripeInvoiceUrl: 'fldoHweTNKKE7hjyy',
+    stripeInvoiceId:  'fldC06DE4htmBScNM',
+    invoiceStatus:    'fldhiIRXuRlvp3QXO',
+  },
+  [PROJECTS_TABLE]: {
+    stripeInvoiceUrl: 'fldVvc6G17vGKXiID',
+    stripeInvoiceId:  'fldIJ03PLv0oytLjK',
+    invoiceStatus:    'fldrA8Jw7VziWmEIX',
+  },
+}
 
 const FIELDS = {
-  stripeInvoiceUrl:    'fldoHweTNKKE7hjyy',
-  stripeInvoiceId:     'fldC06DE4htmBScNM',
-  stripeCustomerId:    'fld01FQpuNajt1eB3',
-  invoiceStatus:       'fldhiIRXuRlvp3QXO',
-  email:               'fldQyQqbLZFDYvNzL',
+  stripeCustomerId: 'fld01FQpuNajt1eB3',
+  email:            'fldQyQqbLZFDYvNzL',
 }
 
 const corsHeaders = {
@@ -22,6 +34,7 @@ const corsHeaders = {
 const InvoiceRequestSchema = z.object({
   account:         z.enum(['happy_cuts', 'east_meadow', 'shepard_holdings', 'virginia_holdings']).default('happy_cuts'),
   mowRecordId:     z.string().min(1),
+  tableId:         z.string().optional(),
   contactRecordId: z.string().optional(),
   clientName:      z.string().optional(),
   clientEmail:     z.string().optional(),
@@ -79,7 +92,9 @@ Deno.serve(async (req) => {
       )
     }
 
-    const { account, mowRecordId, contactRecordId, clientName, clientEmail, amount, description } = parseResult.data
+    const { account, mowRecordId, tableId, contactRecordId, clientName, clientEmail, amount, description } = parseResult.data
+    const targetTable = tableId || SCHEDULE_TABLE
+    const tFields = TABLE_FIELDS[targetTable] ?? TABLE_FIELDS[SCHEDULE_TABLE]
 
     let stripe
     try {
@@ -191,9 +206,9 @@ Deno.serve(async (req) => {
     // --- Step 4: Write invoice ID to Airtable BEFORE finalizing ---
     // Validates Airtable auth early so a broken PAT never orphans a finalized Stripe invoice.
     console.log('[Invoice] Step 4 — writing invoice ID to Airtable before finalize:', invoice.id)
-    await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
-      [FIELDS.stripeInvoiceId]:  invoice.id,
-      [FIELDS.invoiceStatus]:    'Processing',
+    await updateAirtable(targetTable, mowRecordId, {
+      [tFields.stripeInvoiceId]: invoice.id,
+      [tFields.invoiceStatus]:   'Processing',
     })
     console.log('[Invoice] Step 4 — Airtable pre-finalize write OK')
 
@@ -210,9 +225,9 @@ Deno.serve(async (req) => {
 
     // --- Step 6: Update Airtable with hosted URL and final status ---
     console.log('[Invoice] Step 6 — writing hosted URL back to Airtable')
-    await updateAirtable(SCHEDULE_TABLE, mowRecordId, {
-      [FIELDS.stripeInvoiceUrl]: hostedUrl,
-      [FIELDS.invoiceStatus]:    'Sent',
+    await updateAirtable(targetTable, mowRecordId, {
+      [tFields.stripeInvoiceUrl]: hostedUrl,
+      [tFields.invoiceStatus]:    'Sent',
     })
     console.log('[Invoice] Step 6 — Airtable post-finalize write OK')
 
