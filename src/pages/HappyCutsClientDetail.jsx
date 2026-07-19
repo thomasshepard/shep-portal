@@ -579,7 +579,7 @@ function EditMowModal({ mow, onClose, onSave }) {
     type: mow.type || '',
     status: mow.status || 'Scheduled',
     amount: mow.amount != null ? String(mow.amount) : '',
-    payMethod: mow.payMethod || '',
+    payMethod: mow.payMethod || 'Stripe',
     invStatus: mow.invStatus || 'Not Sent',
     duration: mow.duration != null ? String(mow.duration) : '',
   })
@@ -1027,6 +1027,7 @@ function ScheduleMowModal({ contact, onClose, onSave }) {
             [SF.status]: 'Scheduled',
             [SF.amount]: parseFloat(form.amount) || 0,
             [SF.invStatus]: 'Not Sent',
+            [SF.payMethod]: 'Stripe',
             [SF.timePreference]: form.timePreference,
             [SF.scheduledTime]: scheduledTime,
             [SF.scheduleDateTime]: scheduleDateTime,

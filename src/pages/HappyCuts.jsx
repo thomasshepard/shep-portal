@@ -439,6 +439,7 @@ async function createNextRecurringMow(completedMow, contact) {
         [SF.timePreference]: 'Morning',
         [SF.scheduledTime]: 'Morning',
         [SF.invStatus]: 'Not Sent',
+        [SF.payMethod]: 'Stripe',
         [SF.contacts]: [contact.id],
       },
     }],
@@ -788,7 +789,7 @@ function EditMowModal({ mow, onClose, onSave }) {
     type: mow.type || '',
     status: mow.status || 'Scheduled',
     amount: mow.amount != null ? String(mow.amount) : '',
-    payMethod: mow.payMethod || '',
+    payMethod: mow.payMethod || 'Stripe',
     invStatus: mow.invStatus || 'Not Sent',
     duration: mow.duration != null ? String(mow.duration) : '',
   })
