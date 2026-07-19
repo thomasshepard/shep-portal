@@ -1423,36 +1423,36 @@ function NudgesPanel({ contacts, schedules, nudges, nudgesFetched, setNudges, se
 
   async function fetchNudges() {
     if (nudgesFetched) return
+    if (!ANTH_KEY) { setNudgesFetched(true); return }
     setLoading(true)
     try {
       const contextStr = JSON.stringify({
         clients: contacts.slice(0, 20).map(c => ({ name: c.name, status: c.status, lastContact: c.lastContact, rate: c.rate })),
         recentMows: schedules.slice(0, 20).map(m => ({ clientName: m.clientName, date: m.date, status: m.status, amount: m.amount })),
       })
-      // NOTE: VITE_ env vars are baked into the JS bundle at build time.
-      // VITE_ANTHROPIC_API_KEY will be visible in the built JS. Use a server-side
-      // proxy (Supabase Edge Function) in production for better security.
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'x-api-key': ANTH_KEY,
           'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-allow-browser': 'true',
+          'anthropic-dangerous-direct-browser-access': 'true',
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-haiku-4-5-20251001',
           max_tokens: 600,
           system: `You are a business advisor for Happy Cuts, a small lawn mowing business in Cookeville, TN run by Thomas Shepard. Review the client and schedule data and return 2-4 short, actionable nudges. Each nudge must be 1-2 sentences, specific to the data, and directly actionable. Return ONLY a JSON array: [{"priority":"high|medium|low","icon":"emoji","text":"nudge text"}]. No preamble, no markdown, just the JSON array.`,
           messages: [{ role: 'user', content: contextStr }],
         }),
       })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       const raw = data.content?.[0]?.text || '[]'
-      const parsed = JSON.parse(raw)
+      const match = raw.match(/\[[\s\S]*\]/)
+      const parsed = JSON.parse(match ? match[0] : '[]')
       setNudges(Array.isArray(parsed) ? parsed : [])
-    } catch {
-      // fail silently
+    } catch (e) {
+      console.error('[HappyCuts nudges]', e)
     } finally {
       setLoading(false)
       setNudgesFetched(true)
