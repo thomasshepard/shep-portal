@@ -1953,15 +1953,23 @@ function AddContactModal({ onClose, onSave }) {
 }
 
 // ─── ClientCard ───────────────────────────────────────────────────────────────
-function ClientCard({ contact }) {
+function ClientCard({ contact, activeProjectCount = 0 }) {
   const navigate = useNavigate()
   return (
     <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-3 shadow-sm">
       <div className="flex items-center justify-between mb-1">
         <span className="font-semibold text-gray-800">{contact.name}</span>
-        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${CONTACT_STATUS[contact.status] || 'bg-gray-100 text-gray-500'}`}>
-          {contact.status || 'Unknown'}
-        </span>
+        <div className="flex items-center gap-2">
+          {activeProjectCount > 0 && (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-600 border border-indigo-100">
+              <TreePine size={10} />
+              {activeProjectCount}
+            </span>
+          )}
+          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${CONTACT_STATUS[contact.status] || 'bg-gray-100 text-gray-500'}`}>
+            {contact.status || 'Unknown'}
+          </span>
+        </div>
       </div>
       {contact.address && (
         <p className="text-sm text-gray-500 mb-1">{contact.address}{contact.city ? ` · ${contact.city}` : ''}</p>
@@ -1993,11 +2001,17 @@ function ClientCard({ contact }) {
 }
 
 // ─── ClientsTab ───────────────────────────────────────────────────────────────
-function ClientsTab({ contacts, onRefresh }) {
+function ClientsTab({ contacts, projects = [], onRefresh }) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('All')
   const [addOpen, setAddOpen] = useState(false)
   const statuses = ['All', 'Lead', 'Recurring', 'One-Time', 'Cold', 'Lost']
+
+  const activeProjectCountByContact = projects.reduce((acc, p) => {
+    if (p.status === 'Lost') return acc
+    for (const cid of (p.clientIds || [])) acc[cid] = (acc[cid] || 0) + 1
+    return acc
+  }, {})
 
   const filtered = contacts.filter(c => {
     const matchSearch = !search || `${c.name} ${c.address}`.toLowerCase().includes(search.toLowerCase())
@@ -2034,7 +2048,7 @@ function ClientsTab({ contacts, onRefresh }) {
           <p className="text-base font-medium">No contacts found</p>
         </div>
       ) : (
-        filtered.map(c => <ClientCard key={c.id} contact={c} />)
+        filtered.map(c => <ClientCard key={c.id} contact={c} activeProjectCount={activeProjectCountByContact[c.id] || 0} />)
       )}
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100">
@@ -3342,6 +3356,7 @@ export default function HappyCuts() {
 
   const [contacts, setContacts] = useState([])
   const [schedules, setSchedules] = useState([])
+  const [projects, setProjects] = useState([])
   const [contactsById, setContactsById] = useState({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('today')
@@ -3358,9 +3373,10 @@ export default function HappyCuts() {
     }
     setLoading(true)
     try {
-      const [rawContacts, rawSchedules] = await Promise.all([
+      const [rawContacts, rawSchedules, rawProjects] = await Promise.all([
         fetchAll(CONTACTS_TABLE),
         fetchAll(SCHEDULE_TABLE),
+        fetchAll(PROJECTS_TABLE),
       ])
       const parsedContacts = rawContacts
         .filter(r => !safeStr(r.fields[CF.name]).startsWith('DELETED'))
@@ -3370,6 +3386,7 @@ export default function HappyCuts() {
         .map(parseMow)
       setContacts(parsedContacts)
       setSchedules(parsedSchedules)
+      setProjects(rawProjects.map(parseProject))
       setContactsById(Object.fromEntries(parsedContacts.map(c => [c.id, c])))
     } catch (e) {
       console.error('Happy Cuts load error:', e)
@@ -3463,7 +3480,7 @@ export default function HappyCuts() {
         />
       )}
       {activeTab === 'clients' && (
-        <ClientsTab contacts={contacts} onRefresh={load} />
+        <ClientsTab contacts={contacts} projects={projects} onRefresh={load} />
       )}
       {activeTab === 'schedule' && (
         <ScheduleTab
