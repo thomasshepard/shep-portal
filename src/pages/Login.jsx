@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAccessLog } from '../hooks/useAccessLog'
 import toast from 'react-hot-toast'
@@ -9,6 +9,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
   const { log } = useAccessLog()
 
   async function handleSubmit(e) {
@@ -19,9 +20,12 @@ export default function Login() {
       toast.error(error.message)
       setLoading(false)
     } else {
-      await log('login', '/dashboard')
+      const dest = location.state?.from
+        ? `${location.state.from.pathname}${location.state.from.search || ''}`
+        : '/dashboard'
+      await log('login', dest)
       toast.success('Welcome back!')
-      navigate('/dashboard')
+      navigate(dest, { replace: true })
     }
   }
 
