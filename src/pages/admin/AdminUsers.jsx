@@ -23,6 +23,7 @@ const emptyForm = {
   can_view_triage: false,
   can_view_happy_cuts: false,
   can_view_finances: false,
+  can_view_bank_dashboard: false,
   allowed_tags: '',
 }
 
@@ -99,6 +100,7 @@ export default function AdminUsers() {
           can_view_triage: form.can_view_triage,
           can_view_happy_cuts: form.can_view_happy_cuts,
           can_view_finances: form.can_view_finances,
+          can_view_bank_dashboard: form.can_view_bank_dashboard,
           allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         })
         .eq('id', newUserId)
@@ -201,6 +203,7 @@ export default function AdminUsers() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Triage</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Happy Cuts</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Finances</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Bank Dashboard</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -322,6 +325,13 @@ export default function AdminUsers() {
                         enabled={isAdmin || u.can_view_finances}
                         locked={isAdmin}
                         onChange={() => togglePerm(u, 'can_view_finances')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_bank_dashboard}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_bank_dashboard')}
                       />
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -554,6 +564,15 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Finances</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_bank_dashboard}
+                        onChange={e => setField('can_view_bank_dashboard', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Bank Dashboard</span>
                     </label>
                   </div>
                 </div>

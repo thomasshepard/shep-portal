@@ -1,0 +1,282 @@
+/* Bank Dashboard — dark "private ledger" aesthetic, ported from the standalone
+   local app. Every class is bd-prefixed so it can't collide with the rest of
+   Shep Portal's Tailwind-based styling. Scoped to .bd-root. */
+
+.bd-root {
+  --bd-bg: #0e100f;
+  --bd-bg-panel: #141613;
+  --bd-bg-card: #181b18;
+  --bd-line: #2a2e29;
+  --bd-ink: #ece8dd;
+  --bd-ink-dim: #9a9d92;
+  --bd-ink-faint: #62655d;
+  --bd-accent: #c9a44c;
+  --bd-accent-soft: #6b8f71;
+  --bd-danger: #e08a72;
+  --bd-radius: 6px;
+  --bd-serif: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --bd-mono: "Space Mono", "SF Mono", monospace;
+
+  background: var(--bd-bg);
+  color: var(--bd-ink);
+  font-family: var(--bd-mono);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+}
+
+.bd-root * { box-sizing: border-box; }
+
+.bd-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 40px 40px 24px;
+  border-bottom: 1px solid var(--bd-line);
+}
+
+.bd-kicker {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--bd-ink-faint);
+  margin-bottom: 10px;
+}
+
+.bd-hero h1 {
+  font-family: var(--bd-serif);
+  font-weight: 500;
+  font-optical-sizing: auto;
+  font-size: 40px;
+  margin: 0;
+  letter-spacing: -0.01em;
+  color: var(--bd-ink);
+}
+
+.bd-hero-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.bd-ghost-btn {
+  background: transparent;
+  border: 1px solid var(--bd-line);
+  color: var(--bd-ink-dim);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.bd-ghost-btn:hover { border-color: var(--bd-accent); color: var(--bd-accent); }
+.bd-ghost-btn.bd-spinning svg { animation: bd-spin 0.8s linear infinite; }
+@keyframes bd-spin { to { transform: rotate(360deg); } }
+
+.bd-total-panel {
+  padding: 36px 40px;
+  background:
+    radial-gradient(ellipse 800px 300px at 15% 0%, rgba(201,164,76,0.07), transparent 60%),
+    var(--bd-bg-panel);
+  border-bottom: 1px solid var(--bd-line);
+}
+
+.bd-total-label {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--bd-ink-faint);
+  margin-bottom: 4px;
+}
+
+.bd-total-figure {
+  font-family: var(--bd-serif);
+  font-weight: 300;
+  font-size: 64px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--bd-ink);
+}
+
+.bd-total-figure .bd-currency {
+  font-size: 34px;
+  color: var(--bd-accent);
+  vertical-align: 8px;
+  margin-right: 4px;
+}
+
+.bd-total-sub {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--bd-ink-faint);
+}
+
+.bd-main { padding: 32px 40px 44px; }
+
+.bd-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bd-section-head h2 {
+  font-family: var(--bd-serif);
+  font-weight: 500;
+  font-size: 20px;
+  margin: 0;
+  color: var(--bd-ink-dim);
+}
+
+.bd-primary-btn {
+  background: var(--bd-accent);
+  color: #14150f;
+  border: none;
+  padding: 10px 18px;
+  border-radius: var(--bd-radius);
+  font-family: var(--bd-mono);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.bd-primary-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(201,164,76,0.25); }
+.bd-primary-btn:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+
+.bd-empty-state {
+  border: 1px dashed var(--bd-line);
+  border-radius: var(--bd-radius);
+  padding: 36px;
+  text-align: center;
+  color: var(--bd-ink-faint);
+  font-size: 14px;
+}
+
+.bd-account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bd-line);
+  border-radius: var(--bd-radius);
+  overflow: hidden;
+}
+
+.bd-institution-group { background: var(--bd-bg); }
+
+.bd-institution-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 18px;
+  background: var(--bd-bg-card);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bd-accent-soft);
+}
+
+.bd-institution-header .bd-group-total {
+  font-size: 13px;
+  color: var(--bd-ink-dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.bd-account-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 16px 18px;
+  border-top: 1px solid var(--bd-line);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.bd-account-row .bd-name-block { min-width: 0; }
+
+.bd-account-row .bd-name-block .bd-name {
+  font-family: var(--bd-serif);
+  font-size: 16px;
+  color: var(--bd-ink);
+}
+.bd-account-row .bd-name-block .bd-meta {
+  font-size: 11px;
+  color: var(--bd-ink-faint);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bd-unlink-inline {
+  background: transparent;
+  border: none;
+  color: var(--bd-ink-faint);
+  font-family: var(--bd-mono);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+}
+.bd-unlink-inline:hover { color: var(--bd-danger); }
+
+.bd-row-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.bd-owner-select {
+  background: var(--bd-bg-card);
+  border: 1px solid var(--bd-line);
+  color: var(--bd-ink-dim);
+  font-family: var(--bd-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: var(--bd-radius);
+  cursor: pointer;
+  max-width: 160px;
+}
+.bd-owner-select:hover { border-color: var(--bd-accent-soft); }
+.bd-owner-select:focus { outline: none; border-color: var(--bd-accent); }
+
+.bd-account-row .bd-amount {
+  font-size: 18px;
+  color: var(--bd-ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 100px;
+}
+.bd-account-row .bd-amount.bd-negative { color: var(--bd-danger); }
+.bd-account-row .bd-amount .bd-cents { color: var(--bd-ink-faint); font-size: 13px; }
+
+.bd-account-row.bd-error .bd-amount {
+  color: var(--bd-danger);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.bd-footer {
+  padding: 20px 40px 28px;
+  color: var(--bd-ink-faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border-top: 1px solid var(--bd-line);
+}
+
+@media (max-width: 640px) {
+  .bd-hero, .bd-total-panel, .bd-main, .bd-footer { padding-left: 20px; padding-right: 20px; }
+  .bd-total-figure { font-size: 42px; }
+  .bd-hero h1 { font-size: 30px; }
+}
