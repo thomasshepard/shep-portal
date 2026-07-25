@@ -2852,7 +2852,7 @@ function RevenueTab({ onOpenJob }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 // ─── Projects ─────────────────────────────────────────────────────────────────
 
-function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInvoice }) {
+function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInvoice, onEdit }) {
   const [statusLoading, setStatusLoading] = useState(false)
   const isLost = p.status === 'Lost'
   const borderColor = CATEGORY_BORDER[p.category] || '#9ca3af'
@@ -2994,9 +2994,124 @@ function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInv
                 Mark paid
               </button>
             )}
+            <button
+              onClick={onEdit}
+              className="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg"
+            >
+              Edit
+            </button>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function EditProjectModal({ project: p, contact, onClose, onSave }) {
+  const [form, setForm] = useState({
+    category: p.category || '',
+    scope: p.scope || '',
+    quotedPrice: p.quotedPrice != null ? String(p.quotedPrice) : '',
+    materialsCost: p.materialsCost != null ? String(p.materialsCost) : '',
+    scheduledDate: p.scheduledDate || '',
+    status: p.status || 'Estimate',
+    reasonLost: p.reasonLost || '',
+    notes: p.notes || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }))
+  const cls = 'w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400'
+
+  async function handleSave() {
+    if (!form.category) { toast.error('Select a category'); return }
+    if (!form.quotedPrice) { toast.error('Enter a quoted price'); return }
+    setSaving(true)
+    try {
+      const updateFields = {
+        [PF.category]: form.category,
+        [PF.status]: form.status,
+        [PF.quotedPrice]: parseFloat(form.quotedPrice),
+        [PF.scope]: form.scope || null,
+        [PF.materialsCost]: form.materialsCost ? parseFloat(form.materialsCost) : null,
+        [PF.scheduledDate]: form.scheduledDate || null,
+        [PF.notes]: form.notes || null,
+        [PF.reasonLost]: form.status === 'Lost' ? (form.reasonLost || null) : null,
+      }
+      const clientName = contact?.name || (p.title || '').split(' — ')[0] || ''
+      if (clientName) updateFields[PF.title] = `${clientName} — ${form.category}`
+      await atPatch(PROJECTS_TABLE, p.id, updateFields)
+      toast.success('Project updated')
+      onSave()
+    } catch { toast.error('Failed to update') } finally { setSaving(false) }
+  }
+
+  const fld = (label, children, hint) => (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1">{label}{hint && <span className="font-normal text-gray-400"> ({hint})</span>}</label>
+      {children}
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800">Edit project</h3>
+          <button onClick={onClose} className="text-gray-400"><X size={20} /></button>
+        </div>
+        <div className="space-y-3">
+          {fld('Category',
+            <select className={cls} value={form.category} onChange={e => set('category', e.target.value)}>
+              <option value="">Select…</option>
+              {PROJECT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          )}
+          {fld('Scope',
+            <textarea rows={3} className={cls + ' resize-none'} placeholder="Describe the work…" value={form.scope} onChange={e => set('scope', e.target.value)} />
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            {fld('Quoted price',
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input type="number" className={cls + ' pl-6'} placeholder="0.00" step="0.01" min="0" value={form.quotedPrice} onChange={e => set('quotedPrice', e.target.value)} />
+              </div>
+            )}
+            {fld('Materials',
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input type="number" className={cls + ' pl-6'} placeholder="0.00" step="0.01" min="0" value={form.materialsCost} onChange={e => set('materialsCost', e.target.value)} />
+              </div>,
+              'optional'
+            )}
+          </div>
+          {fld('Scheduled date',
+            <input type="date" className={cls} value={form.scheduledDate} onChange={e => set('scheduledDate', e.target.value)} />,
+            'optional'
+          )}
+          {fld('Status',
+            <select className={cls} value={form.status} onChange={e => { set('status', e.target.value); set('reasonLost', '') }}>
+              {PROJECT_STATUSES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          )}
+          {form.status === 'Lost' && fld('Reason lost',
+            <select className={cls} value={form.reasonLost} onChange={e => set('reasonLost', e.target.value)}>
+              <option value="">Select…</option>
+              {REASON_LOST_OPTIONS.map(r => <option key={r}>{r}</option>)}
+            </select>,
+            'optional'
+          )}
+          {fld('Notes',
+            <textarea rows={2} className={cls + ' resize-none'} placeholder="Internal notes…" value={form.notes} onChange={e => set('notes', e.target.value)} />,
+            'internal'
+          )}
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+            {saving && <Loader2 size={14} className="animate-spin" />} Save
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -3257,6 +3372,7 @@ function ProjectsTab({ contacts, contactsById }) {
   const [expandedId, setExpandedId] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
   const [invoicingProject, setInvoicingProject] = useState(null)
+  const [editingProject, setEditingProject] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -3337,6 +3453,7 @@ function ProjectsTab({ contacts, contactsById }) {
                   onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
                   onRefresh={load}
                   onInvoice={() => setInvoicingProject(p)}
+                  onEdit={() => setEditingProject(p)}
                 />
               ))}
             </div>
@@ -3358,6 +3475,15 @@ function ProjectsTab({ contacts, contactsById }) {
           contact={contactsById[invoicingProject.clientIds?.[0]]}
           onClose={() => setInvoicingProject(null)}
           onConfirm={() => { setInvoicingProject(null); load() }}
+        />
+      )}
+
+      {editingProject && (
+        <EditProjectModal
+          project={editingProject}
+          contact={contactsById[editingProject.clientIds?.[0]]}
+          onClose={() => setEditingProject(null)}
+          onSave={() => { setEditingProject(null); load() }}
         />
       )}
     </div>

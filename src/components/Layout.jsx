@@ -25,6 +25,17 @@ export default function Layout() {
     log('page_view', location.pathname)
   }, [location.pathname])
 
+  // Remember the last page visited so reopening the app (PWA relaunch after
+  // the OS evicted it, tab restore, etc.) can pick up where you left off
+  // instead of always landing on Dashboard.
+  useEffect(() => {
+    if (location.pathname === '/dashboard') {
+      localStorage.removeItem('shep_last_route')
+    } else {
+      localStorage.setItem('shep_last_route', location.pathname + location.search)
+    }
+  }, [location.pathname, location.search])
+
   // Re-fetch paused_until on every navigation so the banner reflects latest prefs
   useEffect(() => {
     const userId = session?.user?.id

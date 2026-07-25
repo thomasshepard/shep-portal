@@ -64,7 +64,7 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route index element={<Navigate to={localStorage.getItem('shep_last_route') || '/dashboard'} replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="properties" element={<PermRoute permission="properties"><ErrorBoundary><Properties /></ErrorBoundary></PermRoute>} />
             <Route path="properties/:id" element={<PermRoute permission="properties"><ErrorBoundary><PropertyDetail /></ErrorBoundary></PermRoute>} />

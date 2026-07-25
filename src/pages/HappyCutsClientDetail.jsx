@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
-  ChevronLeft, MapPin, X, Loader2, CheckCircle, Trash2,
-  Plus, DollarSign, ChevronDown, TreePine,
+  ChevronLeft, ChevronRight, MapPin, X, Loader2, CheckCircle, Trash2,
+  Plus, DollarSign, TreePine,
 } from 'lucide-react'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1305,78 +1305,318 @@ function AddLogModal({ contact, onClose, onSave }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 // ─── Project components (client-scoped) ───────────────────────────────────────
 
-function ClientProjectCard({ project: p, onRefresh, onInvoice }) {
-  const [expanded, setExpanded] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const isLost = p.status === 'Lost'
+function ClientProjectCard({ project: p, onOpen }) {
   const borderColor = CATEGORY_BORDER[p.category] || '#9ca3af'
-  const canInvoice = ['Scheduled', 'In Progress', 'Completed'].includes(p.status) && !p.stripeInvoiceId
+  const isLost = p.status === 'Lost'
+  return (
+    <button
+      className={`w-full text-left bg-gray-50 rounded-xl border border-gray-100 overflow-hidden flex items-center px-3 py-3 gap-3 ${isLost ? 'opacity-60' : ''}`}
+      style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
+      onClick={onOpen}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-800 truncate">{p.category || 'Project'}</p>
+        {p.scope && <p className="text-xs text-gray-400 truncate mt-0.5">{p.scope}</p>}
+      </div>
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <span className="text-sm font-semibold text-gray-700">{p.quotedPrice != null ? fmtCurrency(p.quotedPrice) : '—'}</span>
+        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${PROJECT_STATUS_STYLE[p.status] || 'bg-gray-100 text-gray-500'}`}>{p.status}</span>
+      </div>
+      <ChevronRight size={14} className="text-gray-300 shrink-0" />
+    </button>
+  )
+}
+
+function EditProjectModal({ project: p, contactName, onClose, onSave }) {
+  const [form, setForm] = useState({
+    category: p.category || '',
+    scope: p.scope || '',
+    quotedPrice: p.quotedPrice != null ? String(p.quotedPrice) : '',
+    materialsCost: p.materialsCost != null ? String(p.materialsCost) : '',
+    scheduledDate: p.scheduledDate || '',
+    status: p.status || 'Estimate',
+    reasonLost: p.reasonLost || '',
+    notes: p.notes || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }))
+  const cls = 'w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400'
+
+  async function handleSave() {
+    if (!form.category) { toast.error('Select a category'); return }
+    if (!form.quotedPrice) { toast.error('Enter a quoted price'); return }
+    setSaving(true)
+    try {
+      const updateFields = {
+        [PF.category]: form.category,
+        [PF.status]: form.status,
+        [PF.quotedPrice]: parseFloat(form.quotedPrice),
+        [PF.scope]: form.scope || null,
+        [PF.materialsCost]: form.materialsCost ? parseFloat(form.materialsCost) : null,
+        [PF.scheduledDate]: form.scheduledDate || null,
+        [PF.notes]: form.notes || null,
+        [PF.reasonLost]: form.status === 'Lost' ? (form.reasonLost || null) : null,
+      }
+      if (contactName) updateFields[PF.title] = `${contactName} — ${form.category}`
+      await atPatch(PROJECTS_TABLE, p.id, updateFields)
+      toast.success('Project updated')
+      onSave({
+        category: form.category, scope: form.scope,
+        quotedPrice: parseFloat(form.quotedPrice) || null,
+        materialsCost: form.materialsCost ? parseFloat(form.materialsCost) : null,
+        scheduledDate: form.scheduledDate, status: form.status,
+        reasonLost: form.status === 'Lost' ? form.reasonLost : '',
+        notes: form.notes,
+      })
+    } catch { toast.error('Failed to update') } finally { setSaving(false) }
+  }
+
+  const fld = (label, children, hint) => (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1">{label}{hint && <span className="font-normal text-gray-400"> ({hint})</span>}</label>
+      {children}
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800">Edit project</h3>
+          <button onClick={onClose} className="text-gray-400"><X size={20} /></button>
+        </div>
+        <div className="space-y-3">
+          {fld('Category',
+            <select className={cls} value={form.category} onChange={e => set('category', e.target.value)}>
+              <option value="">Select…</option>
+              {PROJECT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          )}
+          {fld('Scope',
+            <textarea rows={3} className={cls + ' resize-none'} placeholder="Describe the work…" value={form.scope} onChange={e => set('scope', e.target.value)} />
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            {fld('Quoted price',
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input type="number" className={cls + ' pl-6'} placeholder="0.00" step="0.01" min="0" value={form.quotedPrice} onChange={e => set('quotedPrice', e.target.value)} />
+              </div>
+            )}
+            {fld('Materials',
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                <input type="number" className={cls + ' pl-6'} placeholder="0.00" step="0.01" min="0" value={form.materialsCost} onChange={e => set('materialsCost', e.target.value)} />
+              </div>,
+              'optional'
+            )}
+          </div>
+          {fld('Scheduled date',
+            <input type="date" className={cls} value={form.scheduledDate} onChange={e => set('scheduledDate', e.target.value)} />,
+            'optional'
+          )}
+          {fld('Status',
+            <select className={cls} value={form.status} onChange={e => { set('status', e.target.value); set('reasonLost', '') }}>
+              {PROJECT_STATUSES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          )}
+          {form.status === 'Lost' && fld('Reason lost',
+            <select className={cls} value={form.reasonLost} onChange={e => set('reasonLost', e.target.value)}>
+              <option value="">Select…</option>
+              {REASON_LOST_OPTIONS.map(r => <option key={r}>{r}</option>)}
+            </select>,
+            'optional'
+          )}
+          {fld('Notes',
+            <textarea rows={2} className={cls + ' resize-none'} placeholder="Internal notes…" value={form.notes} onChange={e => set('notes', e.target.value)} />,
+            'internal'
+          )}
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+            {saving && <Loader2 size={14} className="animate-spin" />} Save
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProjectDetail({ project: initP, contact, onBack, onRefresh }) {
+  const [p, setP] = useState(initP)
+  const [editOpen, setEditOpen] = useState(false)
+  const [invoicing, setInvoicing] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const borderColor = CATEGORY_BORDER[p.category] || '#9ca3af'
   const net = p.quotedPrice != null && p.materialsCost != null ? p.quotedPrice - p.materialsCost : null
   const margin = net != null && p.quotedPrice ? Math.round((net / p.quotedPrice) * 100) : null
+  const canInvoice = ['Scheduled', 'In Progress', 'Completed'].includes(p.status) && !p.stripeInvoiceId
+  const isLost = p.status === 'Lost'
 
   async function setStatus(newStatus) {
     setSaving(true)
     try {
-      await atPatch(PROJECTS_TABLE, p.id, { [PF.status]: newStatus })
+      const fields = { [PF.status]: newStatus }
+      if (newStatus !== 'Lost') fields[PF.reasonLost] = null
+      await atPatch(PROJECTS_TABLE, p.id, fields)
+      setP(prev => ({ ...prev, status: newStatus, reasonLost: newStatus !== 'Lost' ? '' : prev.reasonLost }))
       toast.success('Status updated')
       onRefresh()
     } catch { toast.error('Failed to update') } finally { setSaving(false) }
   }
 
   return (
-    <div
-      className={`bg-gray-50 rounded-xl border border-gray-100 overflow-hidden ${isLost ? 'opacity-60' : ''}`}
-      style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
-    >
-      <div className="flex items-center px-3 py-2.5 gap-3 cursor-pointer" onClick={() => setExpanded(e => !e)}>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-800 truncate">{p.category || 'Project'}</p>
-          {p.scope && <p className="text-xs text-gray-400 truncate">{p.scope}</p>}
-        </div>
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          <span className="text-sm font-semibold text-gray-700">{p.quotedPrice != null ? fmtCurrency(p.quotedPrice) : '—'}</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${PROJECT_STATUS_STYLE[p.status] || 'bg-gray-100 text-gray-500'}`}>{p.status}</span>
-        </div>
-        <ChevronDown size={14} className={`text-gray-300 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+    <div className="fixed inset-0 bg-white z-40 overflow-y-auto">
+      <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-4 flex items-center gap-3 z-10">
+        <button onClick={onBack} className="text-green-600 font-medium flex items-center gap-1 min-h-[48px] px-2">
+          <ChevronLeft size={20} /> Back
+        </button>
+        <h2 className="text-base font-bold text-gray-800 flex-1 truncate">{p.category || 'Project'}</h2>
+        <button onClick={() => setEditOpen(true)} className="text-indigo-600 font-medium text-sm px-2 min-h-[48px]">Edit</button>
       </div>
 
-      {expanded && (
-        <div className="border-t border-gray-100 px-3 py-3 bg-white space-y-2.5">
-          {p.scheduledDate && (
-            <p className="text-xs text-gray-500">📅 {fmtDateShort(p.scheduledDate)}</p>
+      <div className="px-4 pt-1 pb-36 space-y-4" style={{ borderTop: `3px solid ${borderColor}` }}>
+        {/* Status + date */}
+        <div className="pt-4 flex items-center gap-3 flex-wrap">
+          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${PROJECT_STATUS_STYLE[p.status] || 'bg-gray-100 text-gray-500'}`}>
+            {p.status}
+          </span>
+          {p.scheduledDate && <span className="text-sm text-gray-500">📅 {fmtDateShort(p.scheduledDate)}</span>}
+          {p.invoiceStatus && !['', 'Processing'].includes(p.invoiceStatus) && (
+            <span className="text-xs text-purple-600 font-medium bg-purple-50 px-2 py-0.5 rounded-full">Invoice: {p.invoiceStatus}</span>
           )}
-          {net != null && (
-            <div className="flex gap-3 text-xs">
-              <span className="text-gray-500">Net <span className="font-semibold text-gray-700">{fmtCurrency(net)}</span></span>
-              {margin != null && <span className={`font-semibold ${margin >= 70 ? 'text-green-600' : margin >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>{margin}% margin</span>}
+        </div>
+
+        {/* Pricing */}
+        <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">Quoted price</span>
+            <span className="font-semibold text-gray-800">{fmtCurrency(p.quotedPrice)}</span>
+          </div>
+          {p.materialsCost != null && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Materials cost</span>
+              <span className="text-gray-600">{fmtCurrency(p.materialsCost)}</span>
             </div>
           )}
-          {isLost && p.reasonLost && (
-            <p className="text-xs text-stone-500 bg-stone-50 rounded-lg px-2 py-1.5"><span className="font-semibold">Lost:</span> {p.reasonLost}</p>
+          {net != null && (
+            <>
+              <div className="border-t border-gray-200 pt-2 flex justify-between text-sm">
+                <span className="font-medium text-gray-700">Net</span>
+                <span className="font-semibold text-gray-800">{fmtCurrency(net)}</span>
+              </div>
+              {margin != null && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Margin</span>
+                  <span className={`font-semibold ${margin >= 70 ? 'text-green-600' : margin >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>{margin}%</span>
+                </div>
+              )}
+            </>
           )}
-          {p.notes && <p className="text-xs text-gray-500 leading-relaxed">{p.notes}</p>}
-          {p.stripeInvoiceUrl && (
-            <a href={p.stripeInvoiceUrl} target="_blank" rel="noreferrer" className="block text-xs text-blue-600 font-medium">View invoice →</a>
-          )}
-          <div className="flex gap-2 flex-wrap pt-0.5">
-            {!isLost && (
-              <select className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-white" value={p.status} onChange={e => setStatus(e.target.value)} disabled={saving}>
-                {PROJECT_STATUSES.map(s => <option key={s}>{s}</option>)}
-              </select>
-            )}
-            {isLost && (
-              <button onClick={() => setStatus('Estimate')} disabled={saving} className="text-xs px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg">Reopen</button>
-            )}
-            {canInvoice && (
-              <button onClick={onInvoice} className="flex-1 text-xs bg-green-600 text-white rounded-lg px-3 py-1.5 font-semibold flex items-center justify-center gap-1">
-                <DollarSign size={11} /> Create invoice
-              </button>
-            )}
-            {p.status === 'Invoiced' && (
-              <button onClick={() => setStatus('Paid')} disabled={saving} className="text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-semibold">Mark paid</button>
-            )}
-          </div>
         </div>
+
+        {/* Scope */}
+        {p.scope && (
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Scope</p>
+            <p className="text-sm text-gray-700 leading-relaxed">{p.scope}</p>
+          </div>
+        )}
+
+        {/* Notes */}
+        {p.notes && (
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Notes</p>
+            <p className="text-sm text-gray-600 leading-relaxed">{p.notes}</p>
+          </div>
+        )}
+
+        {/* Lost reason */}
+        {isLost && p.reasonLost && (
+          <div className="bg-stone-50 border border-stone-200 rounded-xl p-3">
+            <p className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-1">Reason lost</p>
+            <p className="text-sm text-stone-700">{p.reasonLost}</p>
+          </div>
+        )}
+
+        {/* Invoice link */}
+        {p.stripeInvoiceUrl && (
+          <a href={p.stripeInvoiceUrl} target="_blank" rel="noreferrer"
+             className="flex items-center gap-1.5 text-blue-600 font-medium text-sm py-1">
+            🔗 View invoice ↗
+          </a>
+        )}
+
+        {/* Status change (non-lost) */}
+        {!isLost && (
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Change status</p>
+            <select
+              className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-700 bg-white"
+              value={p.status}
+              onChange={e => setStatus(e.target.value)}
+              disabled={saving}
+            >
+              {PROJECT_STATUSES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom action bar */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100">
+        {isLost ? (
+          <button onClick={() => setStatus('Estimate')} disabled={saving}
+            className="w-full h-[52px] rounded-xl border border-indigo-200 text-indigo-600 font-semibold text-sm">
+            Reopen Project
+          </button>
+        ) : p.status === 'Paid' ? (
+          <div className="w-full h-[52px] flex items-center justify-center bg-green-50 rounded-xl border border-green-200">
+            <span className="text-green-700 font-semibold text-sm">Paid ✓</span>
+          </div>
+        ) : p.status === 'Invoiced' ? (
+          <div className="flex gap-2">
+            {p.stripeInvoiceUrl && (
+              <a href={p.stripeInvoiceUrl} target="_blank" rel="noreferrer"
+                 className="flex-1 h-[52px] rounded-xl border border-blue-200 text-blue-600 font-semibold text-sm flex items-center justify-center">
+                View Invoice ↗
+              </a>
+            )}
+            <button onClick={() => setStatus('Paid')} disabled={saving}
+              className="flex-1 h-[52px] bg-green-600 text-white rounded-xl font-semibold text-sm flex items-center justify-center gap-2">
+              <CheckCircle size={17} /> Mark Paid
+            </button>
+          </div>
+        ) : canInvoice ? (
+          <button onClick={() => setInvoicing(true)}
+            className="w-full h-[52px] bg-green-600 text-white rounded-xl font-semibold text-sm flex items-center justify-center gap-2">
+            <DollarSign size={17} /> Create Invoice
+          </button>
+        ) : (
+          <button onClick={() => setEditOpen(true)}
+            className="w-full h-[52px] rounded-xl border border-gray-200 text-gray-600 font-medium text-sm">
+            Edit Project
+          </button>
+        )}
+      </div>
+
+      {editOpen && (
+        <EditProjectModal
+          project={p}
+          contactName={contact?.name}
+          onClose={() => setEditOpen(false)}
+          onSave={(updated) => { setEditOpen(false); if (updated) setP(prev => ({ ...prev, ...updated })); onRefresh() }}
+        />
+      )}
+
+      {invoicing && (
+        <ClientProjectInvoiceModal
+          project={p}
+          contact={contact}
+          onClose={() => setInvoicing(false)}
+          onConfirm={() => { setInvoicing(false); onRefresh(); onBack() }}
+        />
       )}
     </div>
   )
@@ -1605,7 +1845,7 @@ export default function HappyCutsClientDetail() {
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [addLogOpen, setAddLogOpen] = useState(false)
   const [addProjectOpen, setAddProjectOpen] = useState(false)
-  const [invoicingProject, setInvoicingProject] = useState(null)
+  const [selectedProject, setSelectedProject] = useState(null)
   const [notes, setNotes] = useState('')
 
   const load = useCallback(async () => {
@@ -1843,8 +2083,7 @@ export default function HappyCutsClientDetail() {
                 <ClientProjectCard
                   key={p.id}
                   project={p}
-                  onRefresh={load}
-                  onInvoice={() => setInvoicingProject(p)}
+                  onOpen={() => setSelectedProject(p)}
                 />
               ))}
             </div>
@@ -1989,13 +2228,13 @@ export default function HappyCutsClientDetail() {
         />
       )}
 
-      {/* Project Invoice Modal */}
-      {invoicingProject && (
-        <ClientProjectInvoiceModal
-          project={invoicingProject}
+      {/* Project Detail overlay */}
+      {selectedProject && (
+        <ProjectDetail
+          project={selectedProject}
           contact={contact}
-          onClose={() => setInvoicingProject(null)}
-          onConfirm={() => { setInvoicingProject(null); load() }}
+          onBack={() => setSelectedProject(null)}
+          onRefresh={load}
         />
       )}
     </div>
