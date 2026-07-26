@@ -21,6 +21,7 @@ import FlockDetail from './pages/FlockDetail'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
+import AdminAgents from './pages/admin/AdminAgents'
 import MaintenanceSubmit from './pages/MaintenanceSubmit'
 import ErrorBoundary from './components/ErrorBoundary'
 import Documents from './pages/Documents'
@@ -127,6 +128,14 @@ export default function App() {
               element={
                 <AdminRoute>
                   <AdminContent />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="admin/agents"
+              element={
+                <AdminRoute>
+                  <AdminAgents />
                 </AdminRoute>
               }
             />
