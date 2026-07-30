@@ -678,20 +678,21 @@ export default function PropertyDetail() {
               const expanded = expandedMaint.has(m.id)
               const mStatus = safeRender(mf.Status, '')
               const ms = mStatus.toLowerCase()
-              const sc = ms.includes('complet') || ms.includes('resolved')
+              const resolved = ms === 'resolved'
+              const sc = resolved
                 ? 'bg-green-100 text-green-700'
-                : ms.includes('progress')
+                : ms === 'in progress'
                 ? 'bg-blue-100 text-blue-700'
-                : ms.includes('emergency') || ms.includes('urgent')
-                ? 'bg-red-100 text-red-700'
-                : 'bg-yellow-100 text-yellow-700'
+                : 'bg-gray-100 text-gray-600'
               const mAddr = safeRender(mf.Address, '')
               const mDate = safeRender(mf.Date, '')
               const mResEst = safeRender(mf['Resolution Estimate'], '')
+              const overdue = !resolved && mResEst && new Date(mResEst + 'T00:00:00') < new Date(new Date().toDateString())
               const mNotes = safeRender(mf['Request Notes'], '')
               const mResolution = safeRender(mf.Resolution, '')
               const mPhone = safeRender(mf['Contact Phone'], '')
               const mEmail = safeRender(mf['Contact Email'], '')
+              const mPhotos = Array.isArray(mf.Photos) ? mf.Photos : []
               return (
                 <div key={m.id} className="border border-gray-100 rounded-lg overflow-hidden">
                   <div
@@ -707,7 +708,8 @@ export default function PropertyDetail() {
                         {mDate && <span>{fmtDate(mDate)}</span>}
                         {mAddr && <span>{mAddr}</span>}
                         {safeNum(mf['Estimated Cost']) > 0 && <span>Est: {fmtCurrency(safeNum(mf['Estimated Cost']))}</span>}
-                        {mResEst && <span>Resolve by: {fmtDate(mResEst)}</span>}
+                        {mResEst && <span className={overdue ? 'text-red-600 font-medium' : ''}>{overdue ? 'Overdue: ' : 'Resolve by: '}{fmtDate(mResEst)}</span>}
+                        {mPhotos.length > 0 && <span>{mPhotos.length} photo{mPhotos.length !== 1 ? 's' : ''}</span>}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -997,6 +999,7 @@ export default function PropertyDetail() {
       {maintModal && (
         <MaintenanceForm
           record={maintModal}
+          tenantName={safeRender(tenantMap[arr(maintModal.fields?.['Tenant Requested'])[0]]?.fields?.Name, '')}
           onSave={handleMaintSave}
           onClose={() => setMaintModal(null)}
         />

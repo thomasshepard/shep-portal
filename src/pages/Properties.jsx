@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronUp } from 'lucide-react'
-import { fetchAllRecords, fmtCurrency, fmtDate, PM_BASE_ID } from '../lib/airtable'
+import { ChevronDown, ChevronUp, Wrench } from 'lucide-react'
+import { fetchAllRecords, updateRecord, fmtCurrency, fmtDate, PM_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import { useAlerts } from '../hooks/useAlerts'
 import LoadingSpinner from '../components/LoadingSpinner'
 import AlertsPanel from '../components/AlertsPanel'
 import PropertyPlaybook from '../components/PropertyPlaybook'
+import MaintenanceForm from '../components/MaintenanceForm'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -41,7 +42,10 @@ export default function Properties() {
   const [loans, setLoans] = useState([])
   const [rentRollOpen, setRentRollOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
-  const [view, setView] = useState('overview') // 'overview' | 'playbook'
+  const [view, setView] = useState('overview') // 'overview' | 'maintenance' | 'playbook'
+  const [maintModal, setMaintModal] = useState(null)
+  const [maintFilter, setMaintFilter] = useState('open') // 'open' | 'all' | 'resolved'
+  const [maintPropertyFilter, setMaintPropertyFilter] = useState('all')
 
   const userName = profile?.full_name || profile?.email || 'Unknown'
   const { alerts, dismiss, restore } = useAlerts(
@@ -77,6 +81,14 @@ export default function Properties() {
     }
     load()
   }, [])
+
+  async function handleMaintSave(fields, recordId) {
+    const { error } = await updateRecord('Maintenance Requests', recordId, fields, PM_BASE_ID)
+    if (error) { toast.error('Failed to update: ' + error); return }
+    toast.success('Maintenance updated')
+    setMaintenance(prev => prev.map(m => m.id === recordId ? { ...m, fields: { ...m.fields, ...fields } } : m))
+    setMaintModal(null)
+  }
 
   if (loading) return <LoadingSpinner />
 
@@ -180,7 +192,7 @@ export default function Properties() {
 
       {/* Tabs */}
       <div className="flex gap-6 border-b border-gray-200 -mt-2">
-        {['overview', 'playbook'].map(t => (
+        {['overview', 'maintenance', 'playbook'].map(t => (
           <button
             key={t}
             onClick={() => setView(t)}
@@ -193,7 +205,19 @@ export default function Properties() {
         ))}
       </div>
 
-      {view === 'playbook' ? <PropertyPlaybook /> : (
+      {view === 'playbook' ? <PropertyPlaybook /> : view === 'maintenance' ? (
+        <MaintenanceQueue
+          maintenance={maintenance}
+          propMap={propMap}
+          tenantMap={tenantMap}
+          filter={maintFilter}
+          setFilter={setMaintFilter}
+          propertyFilter={maintPropertyFilter}
+          setPropertyFilter={setMaintPropertyFilter}
+          properties={ownedProperties}
+          onOpen={setMaintModal}
+        />
+      ) : (
       <>
       {/* Portfolio Summary */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -452,6 +476,15 @@ export default function Properties() {
       </div>
       </>
       )}
+
+      {maintModal && (
+        <MaintenanceForm
+          record={maintModal}
+          tenantName={tenantMap[arr(maintModal.fields?.['Tenant Requested'])[0]]?.fields?.Name || ''}
+          onSave={handleMaintSave}
+          onClose={() => setMaintModal(null)}
+        />
+      )}
     </div>
   )
 }
@@ -470,6 +503,113 @@ function buildIndexByField(records, linkedField) {
 
 // Unused overload kept for compatibility — properties don't use the old buildIndex
 function buildIndex() { return {} }
+
+const MAINT_STATUS_STYLE = {
+  'todo':        'bg-gray-100 text-gray-600',
+  'in progress': 'bg-blue-100 text-blue-700',
+  'resolved':    'bg-green-100 text-green-700',
+}
+
+function MaintenanceQueue({ maintenance, propMap, tenantMap, filter, setFilter, propertyFilter, setPropertyFilter, properties, onOpen }) {
+  const today = new Date(new Date().toDateString())
+
+  const rows = maintenance
+    .map(m => {
+      const mf = m.fields || {}
+      const status = (mf.Status || 'Todo')
+      const s = status.toLowerCase()
+      const resEst = mf['Resolution Estimate'] || ''
+      const overdue = s !== 'resolved' && resEst && new Date(resEst + 'T00:00:00') < today
+      const propId = arr(mf.Property)[0]
+      return { record: m, fields: mf, status: s, overdue, propId, resEst }
+    })
+    .filter(r => {
+      if (filter === 'open') return r.status !== 'resolved'
+      if (filter === 'resolved') return r.status === 'resolved'
+      return true
+    })
+    .filter(r => propertyFilter === 'all' || r.propId === propertyFilter)
+    .sort((a, b) => {
+      if (a.overdue !== b.overdue) return a.overdue ? -1 : 1
+      return (b.fields.Date || '').localeCompare(a.fields.Date || '')
+    })
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-1.5">
+          {[['open', 'Open'], ['all', 'All'], ['resolved', 'Resolved']].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                filter === key ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <select
+          value={propertyFilter}
+          onChange={e => setPropertyFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">All properties</option>
+          {properties.map(p => (
+            <option key={p.id} value={p.id}>{p.fields?.Address || 'Untitled'}</option>
+          ))}
+        </select>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+          <Wrench className="mx-auto text-gray-300 mb-2" size={28} />
+          <p className="text-sm text-gray-500">
+            {filter === 'open' ? 'Nothing open — everything is resolved.' : 'No maintenance requests here.'}
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+          {rows.map(({ record, fields: mf, status, overdue, propId, resEst }) => {
+            const address = propMap[propId]?.fields?.Address || mf.Address || 'Unknown property'
+            const tenantName = tenantMap[arr(mf['Tenant Requested'])[0]]?.fields?.Name
+            const photos = Array.isArray(mf.Photos) ? mf.Photos : []
+            return (
+              <button
+                key={record.id}
+                onClick={() => onOpen(record)}
+                className="w-full flex items-start justify-between gap-4 p-4 text-left hover:bg-gray-50 transition-colors"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-gray-900 text-sm">{mf.Name || 'Maintenance request'}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-xs ${MAINT_STATUS_STYLE[status] || 'bg-gray-100 text-gray-600'}`}>
+                      {mf.Status || 'Todo'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {address}{tenantName ? ` · ${tenantName}` : ''}
+                  </p>
+                  {mf['Request Notes'] && (
+                    <p className="text-sm text-gray-600 mt-1.5 line-clamp-1">{mf['Request Notes']}</p>
+                  )}
+                </div>
+                <div className="flex-shrink-0 text-right text-xs text-gray-500 space-y-1">
+                  {safeNum(mf['Estimated Cost']) > 0 && <p className="text-gray-700 font-medium">{fmtCurrency(safeNum(mf['Estimated Cost']))}</p>}
+                  {resEst && (
+                    <p className={overdue ? 'text-red-600 font-medium' : ''}>{overdue ? 'Overdue' : fmtDate(resEst)}</p>
+                  )}
+                  {photos.length > 0 && <p>{photos.length} photo{photos.length !== 1 ? 's' : ''}</p>}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SummaryCard({ label, value, highlight }) {
   const colors = { green: 'text-green-600', red: 'text-red-600', yellow: 'text-amber-600' }
