@@ -8,6 +8,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import AlertsPanel from '../components/AlertsPanel'
 import PropertyPlaybook from '../components/PropertyPlaybook'
 import MaintenanceForm from '../components/MaintenanceForm'
+import ProjectsPanel from '../components/ProjectsPanel'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -40,9 +41,13 @@ export default function Properties() {
   const [invoicePayments, setInvoicePayments] = useState([])
   const [maintenance, setMaintenance] = useState([])
   const [loans, setLoans] = useState([])
+  const [projects, setProjects] = useState([])
+  const [jobs, setJobs] = useState([])
+  const [bids, setBids] = useState([])
+  const [vendors, setVendors] = useState([])
   const [rentRollOpen, setRentRollOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
-  const [view, setView] = useState('overview') // 'overview' | 'maintenance' | 'playbook'
+  const [view, setView] = useState('overview') // 'overview' | 'maintenance' | 'projects' | 'playbook'
   const [maintModal, setMaintModal] = useState(null)
   const [maintFilter, setMaintFilter] = useState('open') // 'open' | 'all' | 'resolved'
   const [maintPropertyFilter, setMaintPropertyFilter] = useState('all')
@@ -56,7 +61,7 @@ export default function Properties() {
   useEffect(() => {
     async function load() {
       try {
-        const [propRes, unitsRes, leasesRes, tenantsRes, invRes, maintRes, loansRes] = await Promise.all([
+        const [propRes, unitsRes, leasesRes, tenantsRes, invRes, maintRes, loansRes, projRes, jobsRes, bidsRes, vendorsRes] = await Promise.all([
           fetchAllRecords('Property', {}, PM_BASE_ID),
           fetchAllRecords('Rental Units', {}, PM_BASE_ID),
           fetchAllRecords('Lease Agreements', {}, PM_BASE_ID),
@@ -64,6 +69,10 @@ export default function Properties() {
           fetchAllRecords('Invoices Payments', {}, PM_BASE_ID),
           fetchAllRecords('Maintenance Requests', {}, PM_BASE_ID),
           fetchAllRecords('Current Loans', {}, PM_BASE_ID),
+          fetchAllRecords('Project', {}, PM_BASE_ID),
+          fetchAllRecords('Jobs', {}, PM_BASE_ID),
+          fetchAllRecords('Quote', {}, PM_BASE_ID),
+          fetchAllRecords('Maintenance and Vendor Mgmt', {}, PM_BASE_ID),
         ])
         if (propRes.error) throw new Error(propRes.error)
         setProperties(propRes.data || [])
@@ -73,6 +82,10 @@ export default function Properties() {
         setInvoicePayments(invRes.data || [])
         setMaintenance(maintRes.data || [])
         setLoans(loansRes.data || [])
+        setProjects(projRes.data || [])
+        setJobs(jobsRes.data || [])
+        setBids(bidsRes.data || [])
+        setVendors(vendorsRes.data || [])
       } catch (e) {
         toast.error('Failed to load properties: ' + e.message)
       } finally {
@@ -192,7 +205,7 @@ export default function Properties() {
 
       {/* Tabs */}
       <div className="flex gap-6 border-b border-gray-200 -mt-2">
-        {['overview', 'maintenance', 'playbook'].map(t => (
+        {['overview', 'maintenance', 'projects', 'playbook'].map(t => (
           <button
             key={t}
             onClick={() => setView(t)}
@@ -216,6 +229,20 @@ export default function Properties() {
           setPropertyFilter={setMaintPropertyFilter}
           properties={ownedProperties}
           onOpen={setMaintModal}
+        />
+      ) : view === 'projects' ? (
+        <ProjectsPanel
+          projects={projects}
+          jobs={jobs}
+          bids={bids}
+          vendors={vendors}
+          rentalUnits={rentalUnits}
+          properties={properties}
+          maintenance={maintenance}
+          setProjects={setProjects}
+          setJobs={setJobs}
+          setBids={setBids}
+          setVendors={setVendors}
         />
       ) : (
       <>

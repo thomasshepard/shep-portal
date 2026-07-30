@@ -239,6 +239,17 @@ The main Hermes instance (Hostinger VPS `srv962330.hstgr.cloud`) is reachable on
 
 `src/pages/admin/AdminAgents.jsx` is a simple, manually-maintained directory of the Hermes/Claude Code agents in play — name, purpose, status (active/stale/offline, set by hand — no live heartbeat yet), host, model provider, and Message/Repo links. Backed by the `agents` table (migration `20260721060000_create_agents_table.sql`), RLS-locked to `is_admin()` — no separate `can_view_*` flag, just `AdminRoute`. This is the intentionally-simple v1; see the "Suggested next slices" discussion around Hermes integration for the fuller fleet-control-panel idea (heartbeat-based status, provisioning new agents from the dashboard) if that gets picked back up.
 
+### Projects & Subcontractors (Properties > Projects tab)
+
+Capital-improvement project tracking (renovations, flooring, windows, etc. — distinct from day-to-day Maintenance Requests), built on top of Airtable tables that already existed in the PM base rather than duplicating them: `Project`, `Quote` (used as the **bid** entity), and `Maintenance and Vendor Mgmt` (used as the **subcontractor** directory). Only additive schema changes were made:
+
+- **`Jobs`** (new table) sits between Project and Quote — a Project (e.g. "46 S Harris St renovation") contains multiple Jobs (e.g. "LVP flooring install", "vinyl window replacement"), each bid out independently. `Quote` gained a `Job` link field so each bid attaches to one specific job, not just the whole project.
+- **`Project`** gained `Budget` (currency) and `Maintenance Request` (link to Maintenance Requests) — the latter for the "sometimes a project traces back to a maintenance request" case the user described as not the norm.
+- **`Maintenance and Vendor Mgmt`** gained `Rating` (Preferred/Good/Fair/Avoid) for tracking sub quality across repeat bids.
+- **Quirk to know about**: `Project.Property` links to the `Rental Units` table, not `Property` directly (existing convention, not something this feature introduced) — every property needs a Rental Unit record to have a Project attached, but fix-and-flip properties don't always have one (no leaseable "unit"). `ProjectsPanel.jsx`'s create-project flow creates a minimal Rental Unit record on the fly if the selected property doesn't have one, so the user never has to deal with this modeling detail directly.
+
+Frontend: `src/components/ProjectsPanel.jsx` (list + create, plus the Projects/Subcontractors toggle), `ProjectDetailModal.jsx` (project fields + nested Jobs + nested Bids, inline add-job/add-bid), `SubcontractorsPanel.jsx` (searchable directory with trade/rating filters and per-vendor bid history). Shared status vocab lives in `src/lib/projectStatus.js` (not the usual per-page copy-paste helper pattern, since three components need the identical status options/colors). Jobs show a nudge once bids are below 3, matching the "look for at least 3 bids" workflow.
+
 ### Bank Dashboard (Plaid)
 
 `/bank-dashboard` (`src/pages/BankDashboard.jsx`, `PermRoute(can_view_bank_dashboard)`) is a consolidated balance view across personal + LLC bank accounts, ported from a standalone local Express app (`bank-dashboard`, outside this repo) into real Shep Portal infrastructure so it's reachable from anywhere, not just one PC.
