@@ -1,12 +1,55 @@
 import { useState } from 'react'
-import { X, Plus, ChevronDown, ChevronUp, Link2 } from 'lucide-react'
+import { X, Plus, ChevronDown, ChevronUp, Link2, Copy, AlertTriangle } from 'lucide-react'
 import { createRecord, updateRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
 import toast from 'react-hot-toast'
-import { JOB_STATUS_STYLE, PROJECT_STATUSES, JOB_STATUSES, BID_STATUSES } from '../lib/projectStatus'
+import { JOB_STATUS_STYLE, PROJECT_STATUSES, JOB_STATUSES, BID_STATUSES, SCOPE_STANDARDS } from '../lib/projectStatus'
 
 const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 const arr = v => Array.isArray(v) ? v : []
 const safeNum = v => (v == null ? 0 : Number(v) || 0)
+
+// Assembles a clean, shareable summary from a bid so the terms are explicit
+// and identical for every bidder — David Greene's "same itemized list to
+// everyone, broken down by materials and labor" plus the bonus/penalty/
+// buffer/accountability terms he writes into the signed bid.
+function buildBidSummary({ job, bid, vendor, address, projectName }) {
+  const jf = job.fields || {}
+  const bf = bid.fields || {}
+  const labor = safeNum(bf['Labor Cost'])
+  const materials = safeNum(bf['Materials Cost'])
+  const total = safeNum(bf.Amount) || (labor + materials)
+  const timeline = safeNum(bf['Timeline (days)'])
+  const buffer = safeNum(bf['Buffer Added (days)'])
+  const bonus = bf['Bonus % (early)']
+  const penalty = bf['Penalty % per week late']
+
+  const lines = [
+    `BID SUMMARY — ${vendor?.fields?.Name || 'Subcontractor'}`,
+    `${address}${projectName ? ` — ${projectName}` : ''}`,
+    `Job: ${jf.Name || ''}${jf['Scope Standard'] ? ` (${jf['Scope Standard']})` : ''}`,
+    '',
+  ]
+  if (jf.Description) lines.push('Scope:', jf.Description, '')
+  lines.push('Cost breakdown:')
+  if (labor || materials) {
+    lines.push(`  Labor:      ${fmtCurrency(labor)}`)
+    lines.push(`  Materials:  ${fmtCurrency(materials)}`)
+    lines.push(`  ------------------`)
+  }
+  lines.push(`  Total:      ${fmtCurrency(total)}`)
+  lines.push('')
+  if (timeline) {
+    lines.push(`Timeline: ${timeline} days${buffer ? ` + ${buffer}-day buffer = ${timeline + buffer} days total` : ''}`)
+  }
+  if (bonus) lines.push(`Bonus: ${bonus}% if completed early`)
+  if (penalty) lines.push(`Penalty: ${penalty}% per week late`)
+  lines.push(`Materials handled by: ${bf['Materials Handled By Owner'] ? 'Owner (billed separately)' : 'Contractor (included above)'}`)
+  lines.push('')
+  lines.push('Owner retains final approval on quality of work. Photos of this job may')
+  lines.push('be shared publicly and referrals may be requested from this work.')
+
+  return lines.join('\n')
+}
 
 export default function ProjectDetailModal({
   project, jobs, bidsByJob, vendors, maintenance, address, onClose,
@@ -21,7 +64,7 @@ export default function ProjectDetailModal({
   })
   const [saving, setSaving] = useState(false)
   const [addingJob, setAddingJob] = useState(false)
-  const [jobForm, setJobForm] = useState({ name: '', description: '', targetBudget: '' })
+  const [jobForm, setJobForm] = useState({ name: '', description: '', targetBudget: '', scopeStandard: '' })
   const [expandedJobs, setExpandedJobs] = useState(new Set(jobs.map(j => j.id)))
   const [biddingJobId, setBiddingJobId] = useState(null)
 
@@ -59,11 +102,12 @@ export default function ProjectDetailModal({
     const fields = { Name: jobForm.name, Project: [project.id], Status: 'Needs Bids' }
     if (jobForm.description) fields.Description = jobForm.description
     if (jobForm.targetBudget !== '') fields['Target Budget'] = Number(jobForm.targetBudget)
+    if (jobForm.scopeStandard) fields['Scope Standard'] = jobForm.scopeStandard
     const { data, error } = await createRecord('Jobs', fields, PM_BASE_ID)
     if (error) return toast.error('Failed to add job: ' + error)
     setJobs(prev => [...prev, data])
     setExpandedJobs(prev => new Set(prev).add(data.id))
-    setJobForm({ name: '', description: '', targetBudget: '' })
+    setJobForm({ name: '', description: '', targetBudget: '', scopeStandard: '' })
     setAddingJob(false)
     toast.success('Job added')
   }
@@ -74,6 +118,27 @@ export default function ProjectDetailModal({
     setJobs(prev => prev.map(j => j.id === job.id ? { ...j, fields: { ...j.fields, Status: status } } : j))
   }
 
+  async function handleCopyProjectLink() {
+    const url = `${window.location.origin}${window.location.pathname}#/properties?tab=projects&project=${project.id}`
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('Link copied — opens straight to this project once pasted')
+    } catch {
+      toast.error('Could not copy — clipboard access blocked')
+    }
+  }
+
+  async function handleCopySummary(job, bid) {
+    const vendor = vendors.find(v => arr(bid.fields?.Vendor).includes(v.id))
+    const text = buildBidSummary({ job, bid, vendor, address, projectName: pf['Short Scope'] })
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success('Bid summary copied')
+    } catch {
+      toast.error('Could not copy — clipboard access blocked')
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl">
@@ -82,7 +147,12 @@ export default function ProjectDetailModal({
             <h2 className="font-semibold text-gray-900">{pf['Short Scope'] || 'Project'}</h2>
             <p className="text-xs text-gray-500 mt-0.5">{address}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+          <div className="flex items-center gap-3">
+            <button onClick={handleCopyProjectLink} title="Copy a link that opens straight to this project" className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800">
+              <Link2 size={13} /> Copy link
+            </button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+          </div>
         </div>
 
         <form onSubmit={handleSaveProject} className="p-6 space-y-4 border-b border-gray-100">
@@ -140,10 +210,23 @@ export default function ProjectDetailModal({
                 className={inp}
                 autoFocus
               />
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Scope standard <span className="font-normal text-gray-400">— tell every bidder the same target upfront</span>
+                </label>
+                <select
+                  value={jobForm.scopeStandard}
+                  onChange={e => setJobForm(f => ({ ...f, scopeStandard: e.target.value }))}
+                  className={inp}
+                >
+                  <option value="">Not set</option>
+                  {SCOPE_STANDARDS.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
               <textarea
                 value={jobForm.description}
                 onChange={e => setJobForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="Description (optional)"
+                placeholder="Description — same wording goes to every bidder (optional)"
                 rows={2}
                 className={inp}
               />
@@ -173,11 +256,15 @@ export default function ProjectDetailModal({
             const jobBids = bidsByJob[job.id] || []
             const expanded = expandedJobs.has(job.id)
             const needsMoreBids = jobBids.length < 3 && !['completed', 'cancelled'].includes(status)
+            const highestAmount = jobBids.length >= 3 ? Math.max(...jobBids.map(b => safeNum(b.fields?.Amount))) : null
             return (
               <div key={job.id} className="border border-gray-200 rounded-lg overflow-hidden">
                 <div className="flex items-center justify-between gap-3 p-3 bg-white cursor-pointer" onClick={() => toggleJob(job.id)}>
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-medium text-gray-800 text-sm truncate">{jf.Name}</span>
+                    {jf['Scope Standard'] && (
+                      <span className="px-1.5 py-0.5 rounded-full text-xs flex-shrink-0 bg-indigo-50 text-indigo-600">{jf['Scope Standard']}</span>
+                    )}
                     <span className={`px-1.5 py-0.5 rounded-full text-xs flex-shrink-0 ${JOB_STATUS_STYLE[status] || 'bg-gray-100 text-gray-600'}`}>{jf.Status}</span>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-gray-500 flex-shrink-0">
@@ -211,13 +298,32 @@ export default function ProjectDetailModal({
                           const bf = bid.fields || {}
                           const vendor = vendors.find(v => arr(bf.Vendor).includes(v.id))
                           const awarded = bf.Select === 'Quote/Project Awarded'
+                          const isOutlier = highestAmount != null && safeNum(bf.Amount) === highestAmount && highestAmount > 0
+                          const labor = safeNum(bf['Labor Cost'])
+                          const materials = safeNum(bf['Materials Cost'])
                           return (
-                            <div key={bid.id} className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs ${awarded ? 'bg-green-50 border border-green-200' : 'bg-white border border-gray-200'}`}>
-                              <div className="min-w-0">
-                                <p className="font-medium text-gray-800 truncate">{vendor?.fields?.Name || 'Unknown vendor'}</p>
-                                <p className="text-gray-400">{bf.Select}</p>
+                            <div key={bid.id} className={`rounded-lg px-3 py-2 text-xs ${awarded ? 'bg-green-50 border border-green-200' : isOutlier ? 'bg-amber-50 border border-amber-200' : 'bg-white border border-gray-200'}`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex items-center gap-1.5">
+                                  <p className="font-medium text-gray-800 truncate">{vendor?.fields?.Name || 'Unknown vendor'}</p>
+                                  {isOutlier && (
+                                    <span className="flex items-center gap-0.5 text-amber-700 flex-shrink-0" title="Highest of 3+ bids — consider as an outlier">
+                                      <AlertTriangle size={11} /> highest
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <span className="font-medium text-gray-700">{safeNum(bf.Amount) > 0 ? fmtCurrency(safeNum(bf.Amount)) : '—'}</span>
+                                  <button onClick={() => handleCopySummary(job, bid)} title="Copy bid summary" className="text-gray-400 hover:text-blue-600">
+                                    <Copy size={12} />
+                                  </button>
+                                </div>
                               </div>
-                              <span className="font-medium text-gray-700 flex-shrink-0">{safeNum(bf.Amount) > 0 ? fmtCurrency(safeNum(bf.Amount)) : '—'}</span>
+                              <div className="flex items-center gap-3 text-gray-400 mt-0.5 flex-wrap">
+                                <span>{bf.Select}</span>
+                                {(labor > 0 || materials > 0) && <span>Labor {fmtCurrency(labor)} · Materials {fmtCurrency(materials)}</span>}
+                                {bf['Materials Handled By Owner'] && <span>Materials by owner</span>}
+                              </div>
                             </div>
                           )
                         })}
@@ -250,8 +356,15 @@ export default function ProjectDetailModal({
 function BidForm({ job, vendors, setBids, onDone }) {
   const [vendorId, setVendorId] = useState('')
   const [amount, setAmount] = useState('')
+  const [laborCost, setLaborCost] = useState('')
+  const [materialsCost, setMaterialsCost] = useState('')
+  const [materialsByOwner, setMaterialsByOwner] = useState(false)
   const [status, setStatus] = useState('Pending Quote Schedule')
   const [details, setDetails] = useState('')
+  const [timeline, setTimeline] = useState('')
+  const [buffer, setBuffer] = useState('7')
+  const [bonus, setBonus] = useState('5')
+  const [penalty, setPenalty] = useState('5')
   const [saving, setSaving] = useState(false)
 
   const sorted = [...vendors].sort((a, b) => (a.fields?.Name || '').localeCompare(b.fields?.Name || ''))
@@ -265,9 +378,19 @@ function BidForm({ job, vendors, setBids, onDone }) {
       Job: [job.id],
       Project: arr(job.fields?.Project),
       Select: status,
+      'Materials Handled By Owner': materialsByOwner,
     }
+    const labor = laborCost !== '' ? Number(laborCost) : 0
+    const materials = materialsCost !== '' ? Number(materialsCost) : 0
     if (amount !== '') fields.Amount = Number(amount)
+    else if (labor || materials) fields.Amount = labor + materials
+    if (laborCost !== '') fields['Labor Cost'] = labor
+    if (materialsCost !== '') fields['Materials Cost'] = materials
     if (details) fields['Quote Details'] = details
+    if (timeline !== '') fields['Timeline (days)'] = Number(timeline)
+    if (buffer !== '') fields['Buffer Added (days)'] = Number(buffer)
+    if (bonus !== '') fields['Bonus % (early)'] = Number(bonus)
+    if (penalty !== '') fields['Penalty % per week late'] = Number(penalty)
     const { data, error } = await createRecord('Quote', fields, PM_BASE_ID)
     setSaving(false)
     if (error) return toast.error('Failed to add bid: ' + error)
@@ -282,15 +405,31 @@ function BidForm({ job, vendors, setBids, onDone }) {
         <option value="">Select subcontractor...</option>
         {sorted.map(v => <option key={v.id} value={v.id}>{v.fields?.Name || 'Unnamed'}</option>)}
       </select>
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
-          <input type="number" step="0.01" min="0" placeholder="Amount" value={amount} onChange={e => setAmount(e.target.value)} className="w-full text-xs border border-gray-300 rounded pl-5 pr-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <select value={status} onChange={e => setStatus(e.target.value)} className="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+
+      <div className="grid grid-cols-3 gap-2">
+        <MiniMoney placeholder="Labor" value={laborCost} onChange={setLaborCost} />
+        <MiniMoney placeholder="Materials" value={materialsCost} onChange={setMaterialsCost} />
+        <MiniMoney placeholder="Total (auto if blank)" value={amount} onChange={setAmount} />
+      </div>
+
+      <label className="flex items-center gap-1.5 text-xs text-gray-600">
+        <input type="checkbox" checked={materialsByOwner} onChange={e => setMaterialsByOwner(e.target.checked)} className="rounded" />
+        Owner pays for materials separately (until this sub is trusted)
+      </label>
+
+      <div className="grid grid-cols-2 gap-2">
+        <select value={status} onChange={e => setStatus(e.target.value)} className="text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
           {BID_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <input type="number" min="0" placeholder="Timeline (days)" value={timeline} onChange={e => setTimeline(e.target.value)} className="text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <MiniNumber label="Buffer (days)" value={buffer} onChange={setBuffer} />
+        <MiniNumber label="Bonus %" value={bonus} onChange={setBonus} />
+        <MiniNumber label="Penalty %/wk" value={penalty} onChange={setPenalty} />
+      </div>
+
       <textarea value={details} onChange={e => setDetails(e.target.value)} placeholder="Notes (optional)" rows={2} className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onDone} className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900">Cancel</button>
@@ -299,5 +438,30 @@ function BidForm({ job, vendors, setBids, onDone }) {
         </button>
       </div>
     </form>
+  )
+}
+
+function MiniMoney({ placeholder, value, onChange }) {
+  return (
+    <div className="relative">
+      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+      <input
+        type="number" step="0.01" min="0" placeholder={placeholder}
+        value={value} onChange={e => onChange(e.target.value)}
+        className="w-full text-xs border border-gray-300 rounded pl-5 pr-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+    </div>
+  )
+}
+
+function MiniNumber({ label, value, onChange }) {
+  return (
+    <div>
+      <label className="block text-[10px] text-gray-400 mb-0.5">{label}</label>
+      <input
+        type="number" step="0.1" min="0" value={value} onChange={e => onChange(e.target.value)}
+        className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+    </div>
   )
 }

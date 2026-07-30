@@ -242,6 +242,13 @@ export default function PropertyDetail() {
   if (loading) return <LoadingSpinner />
   if (!property) return <div className="p-8 text-center text-gray-500">Property not found.</div>
 
+  // Per-user property visibility restriction (e.g. a partner scoped to one
+  // LLC). Blocks direct/bookmarked/shared-link access to a property outside
+  // that scope, same restriction Properties.jsx applies to the list itself.
+  if (!isAdmin && profile?.property_owner_filter && (property.fields?.Owner || '') !== profile.property_owner_filter) {
+    return <div className="p-8 text-center text-gray-500">Property not found.</div>
+  }
+
   const f = property.fields || {}
   const isPrimaryResidence = f['Investment Type'] === 'Primary Residence'
   const isFixAndFlip = f['Investment Type'] === 'Fix & Flip'

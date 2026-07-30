@@ -3,6 +3,7 @@
 // these three components all need the exact same status options and colors.
 
 export const PROJECT_STATUSES = ['Idea', 'Gather Quotes', 'In Progress', 'Done', 'Cancelled']
+export const SCOPE_STANDARDS = ['Bare-bones rental', 'Standard rental', 'HUD-ready', 'Full modern rehab', 'Custom']
 export const JOB_STATUSES = ['Needs Bids', 'Bidding', 'Bid Selected', 'Scheduled', 'In Progress', 'Completed', 'Cancelled']
 export const BID_STATUSES = ['Pending Quote Schedule', 'Quote Schedule Confirmed', 'Review Quote', 'Quote/Project Awarded', 'Dispositioned']
 

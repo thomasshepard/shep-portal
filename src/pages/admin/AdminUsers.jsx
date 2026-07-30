@@ -338,7 +338,7 @@ export default function AdminUsers() {
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={() => setEditingUser(u)}
-                          title="Edit allowed tags"
+                          title="Edit access settings (document tags, property visibility)"
                           className="text-gray-300 hover:text-blue-500 transition-colors"
                         >
                           <Edit2 size={15} />
@@ -367,15 +367,18 @@ export default function AdminUsers() {
         <p>• <strong>Delete</strong> permanently removes the account. Requires the <code>delete-user</code> edge function to be deployed.</p>
       </div>
 
-      {/* Edit Allowed Tags Modal */}
+      {/* Edit Access Settings Modal (document tags + property visibility) */}
       {editingUser && (
         <EditTagsModal
           user={editingUser}
           onClose={() => setEditingUser(null)}
-          onSave={async (userId, tags) => {
+          onSave={async (userId, { tags, propertyOwnerFilter }) => {
             const tagArray = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : null
-            const ok = await updateUser(userId, { allowed_tags: tagArray })
-            if (ok) { toast.success('Allowed tags updated'); setEditingUser(null) }
+            const ok = await updateUser(userId, {
+              allowed_tags: tagArray,
+              property_owner_filter: propertyOwnerFilter.trim() || null,
+            })
+            if (ok) { toast.success('Access settings updated'); setEditingUser(null) }
           }}
         />
       )}
@@ -608,12 +611,13 @@ function EditTagsModal({ user, onClose, onSave }) {
       ? user.allowed_tags.join(', ')
       : (user.allowed_tags || '')
   )
+  const [propertyOwnerFilter, setPropertyOwnerFilter] = useState(user.property_owner_filter || '')
   const [saving, setSaving] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
-    await onSave(user.id, tags.trim() || null)
+    await onSave(user.id, { tags: tags.trim() || null, propertyOwnerFilter })
     setSaving(false)
   }
 
@@ -622,7 +626,7 @@ function EditTagsModal({ user, onClose, onSave }) {
       <div className="bg-white rounded-xl w-full max-w-sm shadow-xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <div>
-            <h2 className="font-semibold text-gray-900">Edit Allowed Tags</h2>
+            <h2 className="font-semibold text-gray-900">Edit Access Settings</h2>
             <p className="text-xs text-gray-400 mt-0.5">{user.full_name || user.email}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
@@ -636,6 +640,17 @@ function EditTagsModal({ user, onClose, onSave }) {
               placeholder="Ridge & Anchor, Virginia Holdings"
             />
             <p className="text-xs text-gray-400 mt-1">Comma-separated. This user will only see documents tagged with at least one of these values.</p>
+          </Field>
+          <Field label="Property Owner Filter">
+            <input
+              value={propertyOwnerFilter}
+              onChange={e => setPropertyOwnerFilter(e.target.value)}
+              className={inp}
+              placeholder="Ridge & Anchor LLC"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Must match a property's "Owner" value in Airtable exactly. When set, this user (unless admin) only sees properties — and their maintenance/leases/projects — owned by this value. Leave blank for no restriction.
+            </p>
           </Field>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>

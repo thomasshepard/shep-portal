@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Plus, Phone, Mail, ExternalLink, ChevronDown, ChevronUp, Star } from 'lucide-react'
+import { Plus, Phone, Mail, ExternalLink, ChevronDown, ChevronUp, Star, ShieldCheck, Briefcase } from 'lucide-react'
 import { createRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
 import toast from 'react-hot-toast'
 
@@ -18,7 +18,26 @@ const RATING_STYLE = {
   Avoid: 'bg-red-100 text-red-700',
 }
 
-const emptyForm = { name: '', number: '', email: '', website: '', location: '', market: '', platform: '', services: [], notes: '', rating: '' }
+// Priority order for "who to call first": rated tiers first, unrated in the
+// middle (unknown, not necessarily bad), Avoid always last regardless of how
+// the rest of the list is filtered.
+const RATING_ORDER = ['Preferred', 'Good', 'Fair', '', 'Avoid']
+const RATING_SECTION_LABEL = {
+  Preferred: 'Preferred — reach out first',
+  Good: 'Good',
+  Fair: 'Fair',
+  '': 'Not yet rated',
+  Avoid: 'Avoid',
+}
+const RATING_SECTION_STYLE = {
+  Preferred: 'text-green-700',
+  Good: 'text-blue-700',
+  Fair: 'text-amber-700',
+  '': 'text-gray-400',
+  Avoid: 'text-red-700',
+}
+
+const emptyForm = { name: '', number: '', email: '', website: '', location: '', market: '', platform: '', services: [], notes: '', rating: '', referencesChecked: false, worksWithInvestors: false }
 
 export default function SubcontractorsPanel({ vendors, bids, jobs, projects, setVendors, addressForProject }) {
   const [search, setSearch] = useState('')
@@ -53,6 +72,14 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
     })
     .sort((a, b) => (a.fields?.Name || '').localeCompare(b.fields?.Name || ''))
 
+  const grouped = RATING_ORDER
+    .map(tier => ({
+      tier,
+      label: RATING_SECTION_LABEL[tier],
+      vendors: filtered.filter(v => (v.fields?.Rating || '') === tier),
+    }))
+    .filter(g => g.vendors.length > 0)
+
   function toggle(id) {
     setExpanded(prev => {
       const next = new Set(prev)
@@ -79,6 +106,8 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
     if (form.services.length) fields.Service = form.services
     if (form.notes) fields.Notes = form.notes
     if (form.rating) fields.Rating = form.rating
+    fields['References Checked'] = form.referencesChecked
+    fields['Works With Investors'] = form.worksWithInvestors
     const { data, error } = await createRecord('Maintenance and Vendor Mgmt', fields, PM_BASE_ID)
     setSaving(false)
     if (error) return toast.error('Failed to add subcontractor: ' + error)
@@ -118,85 +147,28 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
           No subcontractors match.
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-          {filtered.map(v => {
-            const vf = v.fields || {}
-            const vendorBids = bidsByVendor[v.id] || []
-            const totalValue = vendorBids.reduce((sum, b) => sum + safeNum(b.fields?.Amount), 0)
-            const isExpanded = expanded.has(v.id)
-            return (
-              <div key={v.id}>
-                <div className="flex items-start justify-between gap-3 p-4 cursor-pointer hover:bg-gray-50" onClick={() => toggle(v.id)}>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-gray-900 text-sm">{vf.Name || 'Unnamed'}</span>
-                      {vf.Rating && (
-                        <span className={`px-1.5 py-0.5 rounded-full text-xs flex items-center gap-0.5 ${RATING_STYLE[vf.Rating] || 'bg-gray-100 text-gray-600'}`}>
-                          <Star size={10} /> {vf.Rating}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                      {arr(vf.Service).map(s => (
-                        <span key={s} className="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{s}</span>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-gray-500 mt-1.5 flex-wrap">
-                      {vf.Number && (
-                        <a href={`tel:${vf.Number}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-blue-600 hover:underline">
-                          <Phone size={11} />{vf.Number}
-                        </a>
-                      )}
-                      {vf.Email && (
-                        <a href={`mailto:${vf.Email}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-blue-600 hover:underline">
-                          <Mail size={11} />{vf.Email}
-                        </a>
-                      )}
-                      {vf.Website && (
-                        <a href={vf.Website} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-blue-600 hover:underline">
-                          <ExternalLink size={11} />Website
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right text-xs text-gray-500 flex-shrink-0 flex items-center gap-2">
-                    <div>
-                      <p>{vendorBids.length} bid{vendorBids.length !== 1 ? 's' : ''}</p>
-                      {totalValue > 0 && <p className="font-medium text-gray-700">{fmtCurrency(totalValue)}</p>}
-                    </div>
-                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  </div>
-                </div>
-                {isExpanded && (
-                  <div className="bg-gray-50 border-t border-gray-100 px-4 py-3">
-                    {vf.Notes && <p className="text-xs text-gray-600 mb-2 whitespace-pre-wrap">{vf.Notes}</p>}
-                    {vendorBids.length === 0 ? (
-                      <p className="text-xs text-gray-400">No bids logged yet.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {vendorBids.map(b => {
-                          const bf = b.fields || {}
-                          const job = jobMap[arr(bf.Job)[0]]
-                          const project = job ? projectMap[arr(job.fields?.Project)[0]] : null
-                          return (
-                            <div key={b.id} className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs">
-                              <div className="min-w-0">
-                                <p className="font-medium text-gray-800 truncate">{job?.fields?.Name || 'Job'}</p>
-                                <p className="text-gray-400 truncate">
-                                  {project ? `${addressForProject(project)} · ` : ''}{bf.Select}
-                                </p>
-                              </div>
-                              <span className="font-medium text-gray-700 flex-shrink-0">{safeNum(bf.Amount) > 0 ? fmtCurrency(safeNum(bf.Amount)) : '—'}</span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
+        <div className="space-y-5">
+          {grouped.map(g => (
+            <div key={g.tier || 'unrated'}>
+              <h3 className={`text-xs font-semibold uppercase tracking-wide mb-2 ${RATING_SECTION_STYLE[g.tier]}`}>
+                {g.label} <span className="text-gray-400 font-normal normal-case">({g.vendors.length})</span>
+              </h3>
+              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+                {g.vendors.map(v => (
+                  <VendorCard
+                    key={v.id}
+                    vendor={v}
+                    bids={bidsByVendor[v.id] || []}
+                    jobMap={jobMap}
+                    projectMap={projectMap}
+                    addressForProject={addressForProject}
+                    expanded={expanded.has(v.id)}
+                    onToggle={() => toggle(v.id)}
+                  />
+                ))}
               </div>
-            )
-          })}
+            </div>
+          ))}
         </div>
       )}
 
@@ -256,6 +228,16 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
               <Field label="Notes">
                 <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </Field>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.referencesChecked} onChange={e => setForm(f => ({ ...f, referencesChecked: e.target.checked }))} className="rounded" />
+                  References/reviews checked
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.worksWithInvestors} onChange={e => setForm(f => ({ ...f, worksWithInvestors: e.target.checked }))} className="rounded" />
+                  Works with investors (has investor client references)
+                </label>
+              </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setCreating(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
                 <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60">
@@ -275,6 +257,93 @@ function Field({ label, children }) {
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       {children}
+    </div>
+  )
+}
+
+function VendorCard({ vendor, bids, jobMap, projectMap, addressForProject, expanded, onToggle }) {
+  const vf = vendor.fields || {}
+  const totalValue = bids.reduce((sum, b) => sum + safeNum(b.fields?.Amount), 0)
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-3 p-4 cursor-pointer hover:bg-gray-50" onClick={onToggle}>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-gray-900 text-sm">{vf.Name || 'Unnamed'}</span>
+            {vf.Rating && (
+              <span className={`px-1.5 py-0.5 rounded-full text-xs flex items-center gap-0.5 ${RATING_STYLE[vf.Rating] || 'bg-gray-100 text-gray-600'}`}>
+                <Star size={10} /> {vf.Rating}
+              </span>
+            )}
+            {vf['References Checked'] && (
+              <span className="px-1.5 py-0.5 rounded-full text-xs flex items-center gap-0.5 bg-teal-50 text-teal-700" title="References/reviews checked">
+                <ShieldCheck size={10} /> Referenced
+              </span>
+            )}
+            {vf['Works With Investors'] && (
+              <span className="px-1.5 py-0.5 rounded-full text-xs flex items-center gap-0.5 bg-indigo-50 text-indigo-700" title="Has investor client references">
+                <Briefcase size={10} /> Investor-friendly
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+            {arr(vf.Service).map(s => (
+              <span key={s} className="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{s}</span>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 text-xs text-gray-500 mt-1.5 flex-wrap">
+            {vf.Number && (
+              <a href={`tel:${vf.Number}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-blue-600 hover:underline">
+                <Phone size={11} />{vf.Number}
+              </a>
+            )}
+            {vf.Email && (
+              <a href={`mailto:${vf.Email}`} onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-blue-600 hover:underline">
+                <Mail size={11} />{vf.Email}
+              </a>
+            )}
+            {vf.Website && (
+              <a href={vf.Website} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-1 text-blue-600 hover:underline">
+                <ExternalLink size={11} />Website
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="text-right text-xs text-gray-500 flex-shrink-0 flex items-center gap-2">
+          <div>
+            <p>{bids.length} bid{bids.length !== 1 ? 's' : ''}</p>
+            {totalValue > 0 && <p className="font-medium text-gray-700">{fmtCurrency(totalValue)}</p>}
+          </div>
+          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </div>
+      </div>
+      {expanded && (
+        <div className="bg-gray-50 border-t border-gray-100 px-4 py-3">
+          {vf.Notes && <p className="text-xs text-gray-600 mb-2 whitespace-pre-wrap">{vf.Notes}</p>}
+          {bids.length === 0 ? (
+            <p className="text-xs text-gray-400">No bids logged yet.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {bids.map(b => {
+                const bf = b.fields || {}
+                const job = jobMap[arr(bf.Job)[0]]
+                const project = job ? projectMap[arr(job.fields?.Project)[0]] : null
+                return (
+                  <div key={b.id} className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-800 truncate">{job?.fields?.Name || 'Job'}</p>
+                      <p className="text-gray-400 truncate">
+                        {project ? `${addressForProject(project)} · ` : ''}{bf.Select}
+                      </p>
+                    </div>
+                    <span className="font-medium text-gray-700 flex-shrink-0">{safeNum(bf.Amount) > 0 ? fmtCurrency(safeNum(bf.Amount)) : '—'}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

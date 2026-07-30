@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Plus, Wrench, Hammer, ClipboardList } from 'lucide-react'
 import { createRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
 import { PROJECT_STATUS_STYLE, PROJECT_STATUS_ORDER } from '../lib/projectStatus'
@@ -11,7 +11,7 @@ const safeNum = v => (v == null ? 0 : Number(v) || 0)
 
 export default function ProjectsPanel({
   projects, jobs, bids, vendors, rentalUnits, properties, maintenance,
-  setProjects, setJobs, setBids, setVendors,
+  setProjects, setJobs, setBids, setVendors, initialProjectId,
 }) {
   const [tab, setTab] = useState('projects') // 'projects' | 'subs'
   const [statusFilter, setStatusFilter] = useState('active') // 'active' | 'all' | 'done'
@@ -19,6 +19,19 @@ export default function ProjectsPanel({
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({ propertyId: '', shortScope: '', scopeOfWork: '', budget: '' })
   const [saving, setSaving] = useState(false)
+  const [deepLinkOpened, setDeepLinkOpened] = useState(false)
+
+  // Shared project link — once the project data has actually loaded, open its
+  // detail modal automatically and make sure the status filter can't hide it.
+  useEffect(() => {
+    if (!initialProjectId || deepLinkOpened) return
+    const match = projects.find(p => p.id === initialProjectId)
+    if (match) {
+      setStatusFilter('all')
+      setDetailProject(match)
+      setDeepLinkOpened(true)
+    }
+  }, [initialProjectId, deepLinkOpened, projects])
 
   const unitMap = useMemo(() => {
     const m = {}; rentalUnits.forEach(u => { m[u.id] = u }); return m

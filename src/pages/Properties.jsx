@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronUp, Wrench } from 'lucide-react'
 import { fetchAllRecords, updateRecord, fmtCurrency, fmtDate, PM_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
@@ -33,6 +33,8 @@ function isSold(prop) {
 
 export default function Properties() {
   const { isAdmin, isVA, profile } = useAuth()
+  const [searchParams] = useSearchParams()
+  const deepLinkProjectId = searchParams.get('project')
   const [loading, setLoading] = useState(true)
   const [properties, setProperties] = useState([])
   const [rentalUnits, setRentalUnits] = useState([])
@@ -47,14 +49,42 @@ export default function Properties() {
   const [vendors, setVendors] = useState([])
   const [rentRollOpen, setRentRollOpen] = useState(false)
   const [showAll, setShowAll] = useState(false)
-  const [view, setView] = useState('overview') // 'overview' | 'maintenance' | 'projects' | 'playbook'
+  // Deep-link support: a shared project link looks like
+  // /#/properties?tab=projects&project=recXXX — jump straight to that tab
+  // (and ProjectsPanel opens the specific project once its data loads).
+  const [view, setView] = useState(() => (searchParams.get('tab') === 'projects' ? 'projects' : 'overview')) // 'overview' | 'maintenance' | 'projects' | 'playbook'
   const [maintModal, setMaintModal] = useState(null)
   const [maintFilter, setMaintFilter] = useState('open') // 'open' | 'all' | 'resolved'
   const [maintPropertyFilter, setMaintPropertyFilter] = useState('all')
 
   const userName = profile?.full_name || profile?.email || 'Unknown'
+
+  // Per-user property visibility (e.g. a partner should only see the LLC
+  // they're actually in, not the whole portfolio). Admins are never
+  // restricted. Everything downstream — maintenance, leases, payments,
+  // projects — hangs off Rental Units, so the restriction is computed once
+  // as an allowed-unit-id set and applied to every collection here rather
+  // than only filtering the property list itself.
+  const ownerFilter = !isAdmin && profile?.property_owner_filter ? profile.property_owner_filter : null
+  const allowedUnitIds = ownerFilter
+    ? new Set(
+        rentalUnits
+          .filter(u => {
+            const propId = arr(u.fields?.Property)[0]
+            const prop = properties.find(p => p.id === propId)
+            return prop && (prop.fields?.Owner || '') === ownerFilter
+          })
+          .map(u => u.id)
+      )
+    : null
+  const visibleProperties = ownerFilter ? properties.filter(p => (p.fields?.Owner || '') === ownerFilter) : properties
+  const visibleMaintenance = allowedUnitIds ? maintenance.filter(m => arr(m.fields?.Property).some(uid => allowedUnitIds.has(uid))) : maintenance
+  const visibleLeases = allowedUnitIds ? leases.filter(l => arr(l.fields?.Property).some(uid => allowedUnitIds.has(uid))) : leases
+  const visibleInvoicePayments = allowedUnitIds ? invoicePayments.filter(p => arr(p.fields?.Property).some(uid => allowedUnitIds.has(uid))) : invoicePayments
+  const visibleProjects = allowedUnitIds ? projects.filter(p => arr(p.fields?.Property).some(uid => allowedUnitIds.has(uid))) : projects
+
   const { alerts, dismiss, restore } = useAlerts(
-    { properties, rentalUnits, leases, tenants, invoicePayments, maintenance, loans },
+    { properties: visibleProperties, rentalUnits, leases: visibleLeases, tenants, invoicePayments: visibleInvoicePayments, maintenance: visibleMaintenance, loans },
     userName
   )
 
@@ -113,22 +143,22 @@ export default function Properties() {
   in90.setDate(in90.getDate() + 90)
 
   // Owned properties (exclude Sold)
-  const ownedProperties = properties.filter(p => !isSold(p))
-  const displayProperties = showAll ? properties : ownedProperties
+  const ownedProperties = visibleProperties.filter(p => !isSold(p))
+  const displayProperties = showAll ? visibleProperties : ownedProperties
 
   // Lease-centric occupancy: a unit is occupied if it has any non-Closed lease
   const occupiedUnitIds = new Set(
-    leases
+    visibleLeases
       .filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
       .flatMap(l => arr(l.fields?.Property))  // Lease "Property" field → Rental Unit IDs
   )
 
-  const openMaintenance = maintenance.filter(m => {
+  const openMaintenance = visibleMaintenance.filter(m => {
     const s = (m.fields?.Status || '').toLowerCase()
     return !['completed', 'resolved'].includes(s)
   })
 
-  const latePayments = invoicePayments.filter(p => {
+  const latePayments = visibleInvoicePayments.filter(p => {
     const s = p.fields?.Status || ''
     const due = p.fields?.['Due Date'] ? new Date(p.fields['Due Date']) : null
     if (!due) return false
@@ -149,7 +179,7 @@ export default function Properties() {
   const occupiedCount = rentalUnitsOnly.filter(u => occupiedUnitIds.has(u.id)).length
 
   // VA summary
-  const paymentsDue = invoicePayments.filter(p => {
+  const paymentsDue = visibleInvoicePayments.filter(p => {
     const s = p.fields?.Status || ''
     const due = p.fields?.['Due Date'] ? new Date(p.fields['Due Date']) : null
     if (!due) return false
@@ -158,11 +188,14 @@ export default function Properties() {
 
   // Per-property indexes
   const unitsByProperty = buildIndex(rentalUnits, null, ownedProperties)  // built differently below
-  const maintByProperty = buildIndexByField(maintenance, 'Property')
-  const paymentsByProperty = buildIndexByField(invoicePayments, 'Property')
-  const leasesByUnit = buildIndexByField(leases, 'Property')  // Lease.Property → unit IDs
+  const maintByProperty = buildIndexByField(visibleMaintenance, 'Property')
+  const paymentsByProperty = buildIndexByField(visibleInvoicePayments, 'Property')
+  const leasesByUnit = buildIndexByField(visibleLeases, 'Property')  // Lease.Property → unit IDs
 
-  // Map unit → property for rent roll
+  // Map unit → property for rent roll. Built from the full (unfiltered) sets —
+  // these are just id→object lookup dictionaries, not rendered as lists, so
+  // keeping them comprehensive avoids broken lookups; the actual visibility
+  // gate is which records make it into visibleLeases/visibleProperties above.
   const unitToPropertyId = {}
   properties.forEach(p => {
     arr(p.fields?.['Rental Units']).forEach(uid => { unitToPropertyId[uid] = p.id })
@@ -177,7 +210,7 @@ export default function Properties() {
 
   // Rent roll: non-Closed leases from Owned rental properties only
   // Excludes Fix & Flip, Primary Residence, and Sold/non-Owned properties
-  const rentRollLeases = leases.filter(l => {
+  const rentRollLeases = visibleLeases.filter(l => {
     const status = (l.fields?.Status || '').toLowerCase()
     if (status === 'closed') return false
     const unitId = arr(l.fields?.Property)[0]
@@ -220,7 +253,7 @@ export default function Properties() {
 
       {view === 'playbook' ? <PropertyPlaybook /> : view === 'maintenance' ? (
         <MaintenanceQueue
-          maintenance={maintenance}
+          maintenance={visibleMaintenance}
           propMap={propMap}
           tenantMap={tenantMap}
           filter={maintFilter}
@@ -232,17 +265,18 @@ export default function Properties() {
         />
       ) : view === 'projects' ? (
         <ProjectsPanel
-          projects={projects}
+          projects={visibleProjects}
           jobs={jobs}
           bids={bids}
           vendors={vendors}
           rentalUnits={rentalUnits}
-          properties={properties}
-          maintenance={maintenance}
+          properties={visibleProperties}
+          maintenance={visibleMaintenance}
           setProjects={setProjects}
           setJobs={setJobs}
           setBids={setBids}
           setVendors={setVendors}
+          initialProjectId={deepLinkProjectId}
         />
       ) : (
       <>
