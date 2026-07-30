@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Plus, Phone, Mail, ExternalLink, ChevronDown, ChevronUp, Star, ShieldCheck, Briefcase } from 'lucide-react'
-import { createRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
+import { Plus, Phone, Mail, ExternalLink, ChevronDown, ChevronUp, Star, ShieldCheck, Briefcase, Pencil, Archive, ArchiveRestore, Trash2, MapPin } from 'lucide-react'
+import { createRecord, updateRecord, deleteRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
 import toast from 'react-hot-toast'
 
 const arr = v => Array.isArray(v) ? v : []
@@ -10,6 +10,8 @@ const SERVICES = [
   'Cleaning', 'Handyman', 'Plumber', 'Contractor', 'Drywall and Paint', 'Flooring',
   'HVAC', 'Gardiner', 'Landscaping', 'Tree cutting', 'Lawncare', 'Bathroom Remodelling', 'remodeling',
 ]
+
+const REGIONS = ['Cookeville area', 'Bay Area, CA', 'Oak Ridge, TN', 'Lake Charles, LA', 'Unspecified']
 
 const RATING_STYLE = {
   Preferred: 'bg-green-100 text-green-700',
@@ -37,13 +39,61 @@ const RATING_SECTION_STYLE = {
   Avoid: 'text-red-700',
 }
 
-const emptyForm = { name: '', number: '', email: '', website: '', location: '', market: '', platform: '', services: [], notes: '', rating: '', referencesChecked: false, worksWithInvestors: false }
+const emptyForm = {
+  name: '', number: '', email: '', website: '', location: '', market: '', platform: '',
+  services: [], notes: '', rating: '', region: '', referencesChecked: false, worksWithInvestors: false,
+  favorite: false, archived: false,
+}
+
+function formFromVendor(v) {
+  const vf = v.fields || {}
+  return {
+    name: vf.Name || '',
+    number: vf.Number || '',
+    email: vf.Email || '',
+    website: vf.Website || '',
+    location: vf['Location / Address'] || '',
+    market: vf.Market || '',
+    platform: vf.Platform || '',
+    services: arr(vf.Service),
+    notes: vf.Notes || '',
+    rating: vf.Rating || '',
+    region: vf.Region || '',
+    referencesChecked: !!vf['References Checked'],
+    worksWithInvestors: !!vf['Works With Investors'],
+    favorite: !!vf.Favorite,
+    archived: !!vf.Archived,
+  }
+}
+
+function buildFields(form) {
+  return {
+    Name: form.name,
+    Number: form.number,
+    Email: form.email,
+    Website: form.website,
+    'Location / Address': form.location,
+    Market: form.market,
+    Platform: form.platform,
+    Service: form.services,
+    Notes: form.notes,
+    Rating: form.rating || null,
+    Region: form.region || null,
+    'References Checked': form.referencesChecked,
+    'Works With Investors': form.worksWithInvestors,
+    Favorite: form.favorite,
+    Archived: form.archived,
+  }
+}
 
 export default function SubcontractorsPanel({ vendors, bids, jobs, projects, setVendors, addressForProject }) {
   const [search, setSearch] = useState('')
   const [serviceFilter, setServiceFilter] = useState('all')
+  const [regionFilter, setRegionFilter] = useState('all')
+  const [showArchived, setShowArchived] = useState(false)
   const [expanded, setExpanded] = useState(new Set())
   const [creating, setCreating] = useState(false)
+  const [editingVendor, setEditingVendor] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
 
@@ -59,10 +109,14 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
     const m = {}; projects.forEach(p => { m[p.id] = p }); return m
   }, [projects])
 
+  const archivedCount = vendors.filter(v => v.fields?.Archived).length
+
   const filtered = vendors
     .filter(v => {
       const vf = v.fields || {}
+      if (!showArchived && vf.Archived) return false
       if (serviceFilter !== 'all' && !arr(vf.Service).includes(serviceFilter)) return false
+      if (regionFilter !== 'all' && (vf.Region || 'Unspecified') !== regionFilter) return false
       if (search) {
         const q = search.toLowerCase()
         const haystack = `${vf.Name || ''} ${arr(vf.Service).join(' ')}`.toLowerCase()
@@ -72,11 +126,16 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
     })
     .sort((a, b) => (a.fields?.Name || '').localeCompare(b.fields?.Name || ''))
 
+  const favorites = filtered
+    .filter(v => v.fields?.Favorite)
+    .sort((a, b) => (a.fields?.Name || '').localeCompare(b.fields?.Name || ''))
+  const nonFavorites = filtered.filter(v => !v.fields?.Favorite)
+
   const grouped = RATING_ORDER
     .map(tier => ({
       tier,
       label: RATING_SECTION_LABEL[tier],
-      vendors: filtered.filter(v => (v.fields?.Rating || '') === tier),
+      vendors: nonFavorites.filter(v => (v.fields?.Rating || '') === tier),
     }))
     .filter(g => g.vendors.length > 0)
 
@@ -92,30 +151,77 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
     setForm(f => ({ ...f, services: f.services.includes(s) ? f.services.filter(x => x !== s) : [...f.services, s] }))
   }
 
-  async function handleCreate(e) {
+  function openCreate() {
+    setForm(emptyForm)
+    setEditingVendor(null)
+    setCreating(true)
+  }
+
+  function openEdit(vendor) {
+    setForm(formFromVendor(vendor))
+    setEditingVendor(vendor)
+    setCreating(false)
+  }
+
+  function closeModal() {
+    setCreating(false)
+    setEditingVendor(null)
+    setForm(emptyForm)
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault()
     if (!form.name.trim()) return toast.error('Name is required')
     setSaving(true)
-    const fields = { Name: form.name }
-    if (form.number) fields.Number = form.number
-    if (form.email) fields.Email = form.email
-    if (form.website) fields.Website = form.website
-    if (form.location) fields['Location / Address'] = form.location
-    if (form.market) fields.Market = form.market
-    if (form.platform) fields.Platform = form.platform
-    if (form.services.length) fields.Service = form.services
-    if (form.notes) fields.Notes = form.notes
-    if (form.rating) fields.Rating = form.rating
-    fields['References Checked'] = form.referencesChecked
-    fields['Works With Investors'] = form.worksWithInvestors
-    const { data, error } = await createRecord('Maintenance and Vendor Mgmt', fields, PM_BASE_ID)
-    setSaving(false)
-    if (error) return toast.error('Failed to add subcontractor: ' + error)
-    setVendors(prev => [...prev, data])
-    toast.success('Subcontractor added')
-    setForm(emptyForm)
-    setCreating(false)
+    const fields = buildFields(form)
+    if (editingVendor) {
+      const { data, error } = await updateRecord('Maintenance and Vendor Mgmt', editingVendor.id, fields, PM_BASE_ID)
+      setSaving(false)
+      if (error) return toast.error('Failed to update subcontractor: ' + error)
+      setVendors(prev => prev.map(v => v.id === data.id ? data : v))
+      toast.success('Subcontractor updated')
+    } else {
+      const { data, error } = await createRecord('Maintenance and Vendor Mgmt', fields, PM_BASE_ID)
+      setSaving(false)
+      if (error) return toast.error('Failed to add subcontractor: ' + error)
+      setVendors(prev => [...prev, data])
+      toast.success('Subcontractor added')
+    }
+    closeModal()
   }
+
+  async function handleFavoriteToggle(vendor) {
+    const next = !vendor.fields?.Favorite
+    setVendors(prev => prev.map(v => v.id === vendor.id ? { ...v, fields: { ...v.fields, Favorite: next } } : v))
+    const { error } = await updateRecord('Maintenance and Vendor Mgmt', vendor.id, { Favorite: next }, PM_BASE_ID)
+    if (error) {
+      setVendors(prev => prev.map(v => v.id === vendor.id ? { ...v, fields: { ...v.fields, Favorite: !next } } : v))
+      toast.error('Failed to update favorite: ' + error)
+    }
+  }
+
+  async function handleArchiveToggle(vendor) {
+    const next = !vendor.fields?.Archived
+    setVendors(prev => prev.map(v => v.id === vendor.id ? { ...v, fields: { ...v.fields, Archived: next } } : v))
+    const { error } = await updateRecord('Maintenance and Vendor Mgmt', vendor.id, { Archived: next }, PM_BASE_ID)
+    if (error) {
+      setVendors(prev => prev.map(v => v.id === vendor.id ? { ...v, fields: { ...v.fields, Archived: !next } } : v))
+      toast.error('Failed to update: ' + error)
+    } else {
+      toast.success(next ? 'Subcontractor archived' : 'Subcontractor restored')
+    }
+  }
+
+  async function handleDelete(vendor) {
+    if (!confirm(`Permanently delete "${vendor.fields?.Name || 'this subcontractor'}"? This can't be undone.`)) return
+    const { error } = await deleteRecord('Maintenance and Vendor Mgmt', vendor.id, PM_BASE_ID)
+    if (error) return toast.error('Failed to delete: ' + error)
+    setVendors(prev => prev.filter(v => v.id !== vendor.id))
+    toast.success('Subcontractor deleted')
+    closeModal()
+  }
+
+  const modalOpen = creating || !!editingVendor
 
   return (
     <div className="space-y-4">
@@ -134,9 +240,21 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
           <option value="all">All trades</option>
           {SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <select
+          value={regionFilter}
+          onChange={e => setRegionFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">All areas</option>
+          {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <label className="flex items-center gap-1.5 text-xs text-gray-500">
+          <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} className="rounded" />
+          Show archived{archivedCount > 0 ? ` (${archivedCount})` : ''}
+        </label>
         <button
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          onClick={openCreate}
+          className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors ml-auto"
         >
           <Plus size={15} /> Add Subcontractor
         </button>
@@ -148,6 +266,29 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
         </div>
       ) : (
         <div className="space-y-5">
+          {favorites.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide mb-2 text-yellow-600">
+                Favorites <span className="text-gray-400 font-normal normal-case">({favorites.length})</span>
+              </h3>
+              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+                {favorites.map(v => (
+                  <VendorCard
+                    key={v.id}
+                    vendor={v}
+                    bids={bidsByVendor[v.id] || []}
+                    jobMap={jobMap}
+                    projectMap={projectMap}
+                    addressForProject={addressForProject}
+                    expanded={expanded.has(v.id)}
+                    onToggle={() => toggle(v.id)}
+                    onFavoriteToggle={() => handleFavoriteToggle(v)}
+                    onEdit={() => openEdit(v)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           {grouped.map(g => (
             <div key={g.tier || 'unrated'}>
               <h3 className={`text-xs font-semibold uppercase tracking-wide mb-2 ${RATING_SECTION_STYLE[g.tier]}`}>
@@ -164,6 +305,8 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
                     addressForProject={addressForProject}
                     expanded={expanded.has(v.id)}
                     onToggle={() => toggle(v.id)}
+                    onFavoriteToggle={() => handleFavoriteToggle(v)}
+                    onEdit={() => openEdit(v)}
                   />
                 ))}
               </div>
@@ -172,14 +315,14 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
         </div>
       )}
 
-      {creating && (
+      {modalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h2 className="font-semibold text-gray-900">Add Subcontractor</h2>
-              <button onClick={() => setCreating(false)} className="text-gray-400 hover:text-gray-700">&times;</button>
+              <h2 className="font-semibold text-gray-900">{editingVendor ? 'Edit Subcontractor' : 'Add Subcontractor'}</h2>
+              <button onClick={closeModal} className="text-gray-400 hover:text-gray-700">&times;</button>
             </div>
-            <form onSubmit={handleCreate} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Name">
                   <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" required />
@@ -215,13 +358,19 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Location / area">
-                  <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <Field label="Area">
+                  <select value={form.region} onChange={e => setForm(f => ({ ...f, region: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Unspecified</option>
+                    {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
                 </Field>
                 <Field label="Found via">
                   <input value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))} placeholder="Facebook, referral, ..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </Field>
               </div>
+              <Field label="Location / area detail">
+                <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} placeholder="e.g. Cookeville, TN" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </Field>
               <Field label="Website">
                 <input value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </Field>
@@ -237,12 +386,38 @@ export default function SubcontractorsPanel({ vendors, bids, jobs, projects, set
                   <input type="checkbox" checked={form.worksWithInvestors} onChange={e => setForm(f => ({ ...f, worksWithInvestors: e.target.checked }))} className="rounded" />
                   Works with investors (has investor client references)
                 </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.favorite} onChange={e => setForm(f => ({ ...f, favorite: e.target.checked }))} className="rounded" />
+                  Favorite
+                </label>
               </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setCreating(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
-                <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60">
-                  {saving ? 'Adding…' : 'Add Subcontractor'}
-                </button>
+              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                <div>
+                  {editingVendor && (
+                    <button
+                      type="button"
+                      onClick={() => handleArchiveToggle(editingVendor)}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 hover:text-gray-900"
+                    >
+                      {editingVendor.fields?.Archived ? <><ArchiveRestore size={14} /> Restore</> : <><Archive size={14} /> Archive</>}
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {editingVendor && (
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(editingVendor)}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 hover:text-red-800"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  )}
+                  <button type="button" onClick={closeModal} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+                  <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60">
+                    {saving ? 'Saving…' : editingVendor ? 'Save Changes' : 'Add Subcontractor'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -261,13 +436,20 @@ function Field({ label, children }) {
   )
 }
 
-function VendorCard({ vendor, bids, jobMap, projectMap, addressForProject, expanded, onToggle }) {
+function VendorCard({ vendor, bids, jobMap, projectMap, addressForProject, expanded, onToggle, onFavoriteToggle, onEdit }) {
   const vf = vendor.fields || {}
   const totalValue = bids.reduce((sum, b) => sum + safeNum(b.fields?.Amount), 0)
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 p-4 cursor-pointer hover:bg-gray-50" onClick={onToggle}>
-        <div className="min-w-0 flex-1">
+      <div className="flex items-start justify-between gap-3 p-4 hover:bg-gray-50">
+        <button
+          onClick={e => { e.stopPropagation(); onFavoriteToggle() }}
+          title={vf.Favorite ? 'Unfavorite' : 'Favorite'}
+          className="mt-0.5 flex-shrink-0 text-gray-300 hover:text-yellow-500"
+        >
+          <Star size={16} className={vf.Favorite ? 'fill-yellow-400 text-yellow-500' : ''} />
+        </button>
+        <div className="min-w-0 flex-1 cursor-pointer" onClick={onToggle}>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-gray-900 text-sm">{vf.Name || 'Unnamed'}</span>
             {vf.Rating && (
@@ -285,8 +467,16 @@ function VendorCard({ vendor, bids, jobMap, projectMap, addressForProject, expan
                 <Briefcase size={10} /> Investor-friendly
               </span>
             )}
+            {vf.Archived && (
+              <span className="px-1.5 py-0.5 rounded-full text-xs bg-gray-200 text-gray-600">Archived</span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap mt-1">
+            {vf.Region && (
+              <span className="text-xs px-1.5 py-0.5 rounded-full bg-gray-50 text-gray-500 border border-gray-200 flex items-center gap-1">
+                <MapPin size={10} /> {vf.Region}
+              </span>
+            )}
             {arr(vf.Service).map(s => (
               <span key={s} className="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{s}</span>
             ))}
@@ -310,11 +500,16 @@ function VendorCard({ vendor, bids, jobMap, projectMap, addressForProject, expan
           </div>
         </div>
         <div className="text-right text-xs text-gray-500 flex-shrink-0 flex items-center gap-2">
-          <div>
+          <div className="cursor-pointer" onClick={onToggle}>
             <p>{bids.length} bid{bids.length !== 1 ? 's' : ''}</p>
             {totalValue > 0 && <p className="font-medium text-gray-700">{fmtCurrency(totalValue)}</p>}
           </div>
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          <button onClick={e => { e.stopPropagation(); onEdit() }} title="Edit" className="text-gray-400 hover:text-blue-600 p-1">
+            <Pencil size={13} />
+          </button>
+          <div className="cursor-pointer" onClick={onToggle}>
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
         </div>
       </div>
       {expanded && (
