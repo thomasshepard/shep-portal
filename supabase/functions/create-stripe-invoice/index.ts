@@ -196,6 +196,9 @@ Deno.serve(async (req) => {
       collection_method: 'charge_automatically',
       pending_invoice_items_behavior: 'include',
       auto_advance: false,
+      payment_settings: {
+        payment_method_types: ['card'],
+      },
       metadata: {
         airtable_mow_id: mowRecordId,
         source: 'happy_cuts_portal',
