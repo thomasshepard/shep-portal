@@ -198,7 +198,6 @@ Deno.serve(async (req) => {
       auto_advance: false,
       payment_settings: {
         payment_method_types: ['card'],
-        save_default_payment_method: 'off',
       },
       metadata: {
         airtable_mow_id: mowRecordId,
