@@ -15,6 +15,20 @@ function fmtMoney(n) {
   return { whole: parts[0], cents: parts[1] }
 }
 
+function nextDueDate(dueDay) {
+  const now = new Date()
+  const daysThisMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  let candidate = new Date(now.getFullYear(), now.getMonth(), Math.min(dueDay, daysThisMonth))
+  candidate.setHours(0, 0, 0, 0)
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (candidate < today) {
+    const nextMonth = now.getMonth() + 1
+    const daysNextMonth = new Date(now.getFullYear(), nextMonth + 1, 0).getDate()
+    candidate = new Date(now.getFullYear(), nextMonth, Math.min(dueDay, daysNextMonth))
+  }
+  return candidate
+}
+
 function loadScriptOnce(src) {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) return resolve()
@@ -40,6 +54,9 @@ export default function BankDashboard() {
   const [accounts, setAccounts] = useState([])
   const [ownerOptions, setOwnerOptions] = useState(['Personal'])
   const [updatedAt, setUpdatedAt] = useState(null)
+  const [mortgages, setMortgages] = useState({})
+  const [editingMortgageId, setEditingMortgageId] = useState(null)
+  const [mortgageForm, setMortgageForm] = useState({ label: '', amount: '', dueDay: '' })
 
   useEffect(() => {
     if (!document.querySelector(`link[href="${FONT_HREF}"]`)) {
@@ -57,20 +74,31 @@ export default function BankDashboard() {
     } catch { /* non-fatal — dropdown just falls back to defaults */ }
   }, [])
 
+  const loadMortgages = useCallback(async () => {
+    try {
+      const data = await callGateway('list_mortgages')
+      const map = {}
+      for (const m of data.mortgages || []) {
+        map[m.account_id] = { label: m.label, amount: m.amount, dueDay: m.due_day }
+      }
+      setMortgages(map)
+    } catch { /* non-fatal — boxes just don't show until this loads */ }
+  }, [])
+
   const loadBalances = useCallback(async (live) => {
     if (live) setRefreshing(true)
     try {
       const data = await callGateway(live ? 'get_balances' : 'get_balances_cached')
       setAccounts(data.accounts || [])
       setUpdatedAt(data.updatedAt || null)
-      await loadOwnerOptions()
+      await Promise.all([loadOwnerOptions(), loadMortgages()])
     } catch (err) {
       toast.error(err.message || 'Failed to load balances')
     } finally {
       setRefreshing(false)
       setLoading(false)
     }
-  }, [loadOwnerOptions])
+  }, [loadOwnerOptions, loadMortgages])
 
   useEffect(() => { loadBalances(false) }, [loadBalances])
 
@@ -128,6 +156,44 @@ export default function BankDashboard() {
       await callGateway('set_owner', { accountId, owner: owner || null })
     } catch (err) {
       toast.error(err.message || 'Failed to save owner')
+    }
+  }
+
+  function openMortgageEdit(accountId) {
+    const existing = mortgages[accountId]
+    setMortgageForm({
+      label: existing?.label || '',
+      amount: existing?.amount != null ? String(existing.amount) : '',
+      dueDay: existing?.dueDay != null ? String(existing.dueDay) : '',
+    })
+    setEditingMortgageId(accountId)
+  }
+
+  async function saveMortgage(accountId) {
+    const label = mortgageForm.label.trim()
+    const amount = Number(mortgageForm.amount)
+    const dueDay = Number(mortgageForm.dueDay)
+    if (!label) return toast.error('Label is required')
+    if (!amount || amount <= 0) return toast.error('Enter a valid amount')
+    if (!dueDay || dueDay < 1 || dueDay > 31) return toast.error('Due day must be 1-31')
+    try {
+      await callGateway('set_mortgage', { accountId, label, amount, dueDay })
+      setMortgages(prev => ({ ...prev, [accountId]: { label, amount, dueDay } }))
+      setEditingMortgageId(null)
+      toast.success('Saved')
+    } catch (err) {
+      toast.error(err.message || 'Failed to save')
+    }
+  }
+
+  async function clearMortgage(accountId) {
+    try {
+      await callGateway('set_mortgage', { accountId, amount: null })
+      setMortgages(prev => { const next = { ...prev }; delete next[accountId]; return next })
+      setEditingMortgageId(null)
+      toast.success('Removed')
+    } catch (err) {
+      toast.error(err.message || 'Failed to remove')
     }
   }
 
@@ -252,6 +318,51 @@ export default function BankDashboard() {
                             ))}
                             <option value={NEW_OWNER}>+ New owner…</option>
                           </select>
+
+                          {editingMortgageId === acct.accountId ? (
+                            <div className="bd-mortgage-form">
+                              <input
+                                placeholder="e.g. 188 Virginia mortgage"
+                                value={mortgageForm.label}
+                                onChange={e => setMortgageForm(f => ({ ...f, label: e.target.value }))}
+                              />
+                              <div className="bd-mortgage-form-row">
+                                <input
+                                  type="number" step="0.01" placeholder="Amount"
+                                  value={mortgageForm.amount}
+                                  onChange={e => setMortgageForm(f => ({ ...f, amount: e.target.value }))}
+                                />
+                                <input
+                                  type="number" min="1" max="31" placeholder="Due day"
+                                  value={mortgageForm.dueDay}
+                                  onChange={e => setMortgageForm(f => ({ ...f, dueDay: e.target.value }))}
+                                />
+                              </div>
+                              <div className="bd-mortgage-form-actions">
+                                {mortgages[acct.accountId] && (
+                                  <button className="bd-mortgage-clear" onClick={() => clearMortgage(acct.accountId)}>remove</button>
+                                )}
+                                <button onClick={() => setEditingMortgageId(null)}>cancel</button>
+                                <button className="bd-mortgage-save" onClick={() => saveMortgage(acct.accountId)}>save</button>
+                              </div>
+                            </div>
+                          ) : mortgages[acct.accountId] ? (
+                            <div
+                              className={`bd-mortgage-box ${balance >= mortgages[acct.accountId].amount ? 'bd-mortgage-ok' : 'bd-mortgage-short'}`}
+                              onClick={() => openMortgageEdit(acct.accountId)}
+                              title="Click to edit"
+                            >
+                              <span className="bd-mortgage-label">{mortgages[acct.accountId].label}</span>
+                              <span className="bd-mortgage-due">
+                                due {nextDueDate(mortgages[acct.accountId].dueDay).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                {balance < mortgages[acct.accountId].amount ? ' · short' : ''}
+                              </span>
+                              <span className="bd-mortgage-amount">${fmtMoney(mortgages[acct.accountId].amount).whole}.{fmtMoney(mortgages[acct.accountId].amount).cents}</span>
+                            </div>
+                          ) : (
+                            <button className="bd-mortgage-add" onClick={() => openMortgageEdit(acct.accountId)}>+ mortgage</button>
+                          )}
+
                           <div className={`bd-amount${balance < 0 ? ' bd-negative' : ''}`}>
                             {balance < 0 ? '−' : ''}${aWhole}<span className="bd-cents">.{aCents}</span>
                           </div>

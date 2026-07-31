@@ -267,6 +267,99 @@
   font-style: italic;
 }
 
+.bd-mortgage-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: var(--bd-radius);
+  border: 1px solid var(--bd-line);
+  cursor: pointer;
+  min-width: 128px;
+  transition: border-color 0.15s;
+}
+.bd-mortgage-box:hover { border-color: var(--bd-accent); }
+.bd-mortgage-box.bd-mortgage-ok { border-color: rgba(107,143,113,0.55); }
+.bd-mortgage-box.bd-mortgage-short { border-color: rgba(224,138,114,0.7); }
+
+.bd-mortgage-label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bd-ink-faint);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bd-mortgage-due {
+  font-size: 11px;
+  color: var(--bd-ink-dim);
+}
+.bd-mortgage-amount {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--bd-ink);
+}
+.bd-mortgage-box.bd-mortgage-ok .bd-mortgage-due { color: var(--bd-accent-soft); }
+.bd-mortgage-box.bd-mortgage-short .bd-mortgage-due { color: var(--bd-danger); }
+
+.bd-mortgage-add {
+  background: transparent;
+  border: 1px dashed var(--bd-line);
+  color: var(--bd-ink-faint);
+  font-family: var(--bd-mono);
+  font-size: 10px;
+  padding: 7px 10px;
+  border-radius: var(--bd-radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.bd-mortgage-add:hover { border-color: var(--bd-accent-soft); color: var(--bd-accent-soft); }
+
+.bd-mortgage-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--bd-accent-soft);
+  border-radius: var(--bd-radius);
+  min-width: 190px;
+  background: var(--bd-bg-card);
+}
+.bd-mortgage-form input {
+  background: var(--bd-bg);
+  border: 1px solid var(--bd-line);
+  color: var(--bd-ink);
+  font-family: var(--bd-mono);
+  font-size: 12px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  width: 100%;
+}
+.bd-mortgage-form input:focus { outline: none; border-color: var(--bd-accent); }
+.bd-mortgage-form-row { display: flex; gap: 6px; }
+.bd-mortgage-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 2px;
+}
+.bd-mortgage-form-actions button {
+  background: transparent;
+  border: none;
+  color: var(--bd-ink-faint);
+  font-family: var(--bd-mono);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.bd-mortgage-form-actions .bd-mortgage-clear { color: var(--bd-danger); margin-right: auto; }
+.bd-mortgage-form-actions .bd-mortgage-save { color: var(--bd-accent); font-weight: 700; }
+
 .bd-footer {
   padding: 20px 40px 28px;
   color: var(--bd-ink-faint);

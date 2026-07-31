@@ -170,6 +170,36 @@ async function actionSetOwner(payload: any) {
   return { ok: true }
 }
 
+async function actionListMortgages() {
+  const { data } = await sb.from('bank_mortgage_reminders').select('account_id, label, amount, due_day')
+  return { ok: true, mortgages: data || [] }
+}
+
+async function actionSetMortgage(payload: any) {
+  const accountId = String(payload?.accountId || '')
+  if (!accountId) throw new Error('accountId is required')
+
+  const amountRaw = payload?.amount
+  if (amountRaw === null || amountRaw === undefined || amountRaw === '') {
+    await sb.from('bank_mortgage_reminders').delete().eq('account_id', accountId)
+    return { ok: true }
+  }
+
+  const label = String(payload?.label || '').trim()
+  if (!label) throw new Error('label is required')
+  const amount = Number(amountRaw)
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('amount must be a positive number')
+  const dueDay = Number(payload?.dueDay)
+  if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) throw new Error('dueDay must be between 1 and 31')
+
+  const { error } = await sb.from('bank_mortgage_reminders').upsert(
+    { account_id: accountId, label, amount, due_day: dueDay, updated_at: new Date().toISOString() },
+    { onConflict: 'account_id' }
+  )
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}
+
 async function actionListItems() {
   const { data } = await sb.from('bank_items').select('item_id, institution_name, added_at').order('added_at')
   return {
@@ -201,6 +231,8 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   remove_item:         actionRemoveItem,
   list_owners:         actionListOwners,
   set_owner:           actionSetOwner,
+  list_mortgages:      actionListMortgages,
+  set_mortgage:        actionSetMortgage,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
