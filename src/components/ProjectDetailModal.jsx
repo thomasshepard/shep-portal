@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Plus, ChevronDown, ChevronUp, Link2, Copy, AlertTriangle, TrendingDown, Award as AwardIcon, CheckCircle2, Phone, Mail, ExternalLink, Maximize2, Minimize2 } from 'lucide-react'
+import { X, Plus, ChevronDown, ChevronUp, Link2, Copy, AlertTriangle, TrendingDown, Award as AwardIcon, CheckCircle2, Phone, Mail, ExternalLink, Maximize2, Minimize2, Pencil } from 'lucide-react'
 import { createRecord, updateRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
 import toast from 'react-hot-toast'
 import { JOB_STATUS_STYLE, PROJECT_STATUSES, JOB_STATUSES, BID_STATUSES, SCOPE_STANDARDS } from '../lib/projectStatus'
@@ -75,6 +75,7 @@ export default function ProjectDetailModal({
   const [expandedJobs, setExpandedJobs] = useState(new Set(jobs.map(j => j.id)))
   const [biddingJobId, setBiddingJobId] = useState(null)
   const [expandedBidId, setExpandedBidId] = useState(null)
+  const [editingBidId, setEditingBidId] = useState(null)
   const [noteDrafts, setNoteDrafts] = useState({})
   const [savingNoteId, setSavingNoteId] = useState(null)
   const [wide, setWide] = useState(false)
@@ -382,6 +383,19 @@ export default function ProjectDetailModal({
                           const hasMaterials = bf['Materials Cost'] != null && bf['Materials Cost'] !== ''
                           const materialsByOwner = !!bf['Materials Handled By Owner']
 
+                          if (editingBidId === bid.id) {
+                            return (
+                              <BidForm
+                                key={bid.id}
+                                job={job}
+                                vendors={vendors}
+                                setBids={setBids}
+                                onDone={() => setEditingBidId(null)}
+                                initialBid={bid}
+                              />
+                            )
+                          }
+
                           return (
                             <div key={bid.id} className={`rounded-lg px-3 py-2 text-xs ${awarded ? 'bg-green-50 border border-green-200' : isOutlier ? 'bg-amber-50 border border-amber-200' : isLowest ? 'bg-blue-50 border border-blue-200' : 'bg-white border border-gray-200'}`}>
                               <div className="flex items-center justify-between gap-2">
@@ -415,6 +429,9 @@ export default function ProjectDetailModal({
                                       <AwardIcon size={13} />
                                     </button>
                                   )}
+                                  <button onClick={() => setEditingBidId(bid.id)} title="Edit bid" className="text-gray-400 hover:text-blue-600">
+                                    <Pencil size={12} />
+                                  </button>
                                   <button onClick={() => toggleBidExpand(bid)} title="Contact & notes" className="text-gray-400 hover:text-gray-700">
                                     {expandedBidId === bid.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                                   </button>
@@ -526,18 +543,19 @@ export default function ProjectDetailModal({
   )
 }
 
-function BidForm({ job, vendors, setBids, onDone }) {
-  const [vendorId, setVendorId] = useState('')
-  const [amount, setAmount] = useState('')
-  const [laborCost, setLaborCost] = useState('')
-  const [materialsCost, setMaterialsCost] = useState('')
-  const [materialsByOwner, setMaterialsByOwner] = useState(false)
-  const [status, setStatus] = useState('Pending Quote Schedule')
-  const [details, setDetails] = useState('')
-  const [timeline, setTimeline] = useState('')
-  const [buffer, setBuffer] = useState('7')
-  const [bonus, setBonus] = useState('5')
-  const [penalty, setPenalty] = useState('5')
+function BidForm({ job, vendors, setBids, onDone, initialBid }) {
+  const ibf = initialBid?.fields || {}
+  const [vendorId, setVendorId] = useState(arr(ibf.Vendor)[0] || '')
+  const [amount, setAmount] = useState(ibf.Amount != null ? String(ibf.Amount) : '')
+  const [laborCost, setLaborCost] = useState(ibf['Labor Cost'] != null ? String(ibf['Labor Cost']) : '')
+  const [materialsCost, setMaterialsCost] = useState(ibf['Materials Cost'] != null ? String(ibf['Materials Cost']) : '')
+  const [materialsByOwner, setMaterialsByOwner] = useState(!!ibf['Materials Handled By Owner'])
+  const [status, setStatus] = useState(ibf.Select || 'Pending Quote Schedule')
+  const [details, setDetails] = useState(ibf['Quote Details'] || '')
+  const [timeline, setTimeline] = useState(ibf['Timeline (days)'] != null ? String(ibf['Timeline (days)']) : '')
+  const [buffer, setBuffer] = useState(ibf['Buffer Added (days)'] != null ? String(ibf['Buffer Added (days)']) : '7')
+  const [bonus, setBonus] = useState(ibf['Bonus % (early)'] != null ? String(ibf['Bonus % (early)']) : '5')
+  const [penalty, setPenalty] = useState(ibf['Penalty % per week late'] != null ? String(ibf['Penalty % per week late']) : '5')
   const [saving, setSaving] = useState(false)
 
   const sorted = [...vendors].sort((a, b) => (a.fields?.Name || '').localeCompare(b.fields?.Name || ''))
@@ -546,29 +564,37 @@ function BidForm({ job, vendors, setBids, onDone }) {
     e.preventDefault()
     if (!vendorId) return toast.error('Pick a subcontractor')
     setSaving(true)
+    const labor = laborCost !== '' ? Number(laborCost) : 0
+    const materials = materialsCost !== '' ? Number(materialsCost) : 0
     const fields = {
       Vendor: [vendorId],
       Job: [job.id],
       Project: arr(job.fields?.Project),
       Select: status,
       'Materials Handled By Owner': materialsByOwner,
+      Amount: amount !== '' ? Number(amount) : (labor || materials ? labor + materials : null),
+      'Labor Cost': laborCost !== '' ? labor : null,
+      'Materials Cost': materialsCost !== '' ? materials : null,
+      'Quote Details': details,
+      'Timeline (days)': timeline !== '' ? Number(timeline) : null,
+      'Buffer Added (days)': buffer !== '' ? Number(buffer) : null,
+      'Bonus % (early)': bonus !== '' ? Number(bonus) : null,
+      'Penalty % per week late': penalty !== '' ? Number(penalty) : null,
     }
-    const labor = laborCost !== '' ? Number(laborCost) : 0
-    const materials = materialsCost !== '' ? Number(materialsCost) : 0
-    if (amount !== '') fields.Amount = Number(amount)
-    else if (labor || materials) fields.Amount = labor + materials
-    if (laborCost !== '') fields['Labor Cost'] = labor
-    if (materialsCost !== '') fields['Materials Cost'] = materials
-    if (details) fields['Quote Details'] = details
-    if (timeline !== '') fields['Timeline (days)'] = Number(timeline)
-    if (buffer !== '') fields['Buffer Added (days)'] = Number(buffer)
-    if (bonus !== '') fields['Bonus % (early)'] = Number(bonus)
-    if (penalty !== '') fields['Penalty % per week late'] = Number(penalty)
-    const { data, error } = await createRecord('Quote', fields, PM_BASE_ID)
-    setSaving(false)
-    if (error) return toast.error('Failed to add bid: ' + error)
-    setBids(prev => [...prev, data])
-    toast.success('Bid added')
+
+    if (initialBid) {
+      const { data, error } = await updateRecord('Quote', initialBid.id, fields, PM_BASE_ID)
+      setSaving(false)
+      if (error) return toast.error('Failed to save bid: ' + error)
+      setBids(prev => prev.map(b => b.id === initialBid.id ? data : b))
+      toast.success('Bid updated')
+    } else {
+      const { data, error } = await createRecord('Quote', fields, PM_BASE_ID)
+      setSaving(false)
+      if (error) return toast.error('Failed to add bid: ' + error)
+      setBids(prev => [...prev, data])
+      toast.success('Bid added')
+    }
     onDone()
   }
 
@@ -607,7 +633,7 @@ function BidForm({ job, vendors, setBids, onDone }) {
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onDone} className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900">Cancel</button>
         <button type="submit" disabled={saving} className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60">
-          {saving ? 'Adding…' : 'Add Bid'}
+          {saving ? (initialBid ? 'Saving…' : 'Adding…') : (initialBid ? 'Save Changes' : 'Add Bid')}
         </button>
       </div>
     </form>
