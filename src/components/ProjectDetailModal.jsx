@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Plus, ChevronDown, ChevronUp, Link2, Copy, AlertTriangle, TrendingDown, Award as AwardIcon, CheckCircle2 } from 'lucide-react'
+import { X, Plus, ChevronDown, ChevronUp, Link2, Copy, AlertTriangle, TrendingDown, Award as AwardIcon, CheckCircle2, Phone, Mail, ExternalLink, Maximize2, Minimize2 } from 'lucide-react'
 import { createRecord, updateRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
 import toast from 'react-hot-toast'
 import { JOB_STATUS_STYLE, PROJECT_STATUSES, JOB_STATUSES, BID_STATUSES, SCOPE_STANDARDS } from '../lib/projectStatus'
@@ -74,6 +74,10 @@ export default function ProjectDetailModal({
   const [jobForm, setJobForm] = useState({ name: '', description: '', targetBudget: '', scopeStandard: '' })
   const [expandedJobs, setExpandedJobs] = useState(new Set(jobs.map(j => j.id)))
   const [biddingJobId, setBiddingJobId] = useState(null)
+  const [expandedBidId, setExpandedBidId] = useState(null)
+  const [noteDrafts, setNoteDrafts] = useState({})
+  const [savingNoteId, setSavingNoteId] = useState(null)
+  const [wide, setWide] = useState(false)
 
   const linkedMaintenance = arr(pf['Maintenance Request'])
     .map(id => maintenance.find(m => m.id === id))
@@ -161,11 +165,45 @@ export default function ProjectDetailModal({
       }
     }
     toast.success(`${vendorName || 'Bid'} awarded`)
+    setExpandedBidId(bid.id)
+  }
+
+  function toggleBidExpand(bid) {
+    setExpandedBidId(prev => {
+      const next = prev === bid.id ? null : bid.id
+      if (next && noteDrafts[bid.id] === undefined) {
+        setNoteDrafts(d => ({ ...d, [bid.id]: bid.fields?.['Quote Details'] || '' }))
+      }
+      return next
+    })
+  }
+
+  async function handleSaveNote(bid) {
+    const text = noteDrafts[bid.id] ?? ''
+    setSavingNoteId(bid.id)
+    const { error } = await updateRecord('Quote', bid.id, { 'Quote Details': text }, PM_BASE_ID)
+    setSavingNoteId(null)
+    if (error) return toast.error('Failed to save note: ' + error)
+    setBids(prev => prev.map(b => b.id === bid.id ? { ...b, fields: { ...b.fields, 'Quote Details': text } } : b))
+    toast.success('Note saved')
+  }
+
+  async function handleInviteToJob(vendor, targetJob) {
+    const fields = {
+      Vendor: [vendor.id],
+      Job: [targetJob.id],
+      Project: arr(targetJob.fields?.Project),
+      Select: 'Pending Quote Schedule',
+    }
+    const { data, error } = await createRecord('Quote', fields, PM_BASE_ID)
+    if (error) return toast.error('Failed to invite: ' + error)
+    setBids(prev => [...prev, data])
+    toast.success(`Invited ${vendor?.fields?.Name || 'vendor'} to bid on ${targetJob.fields?.Name || 'job'}`)
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl">
+      <div className={`bg-white rounded-xl w-full ${wide ? 'max-w-6xl' : 'max-w-2xl'} max-h-[90vh] overflow-y-auto shadow-xl`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white rounded-t-xl">
           <div>
             <h2 className="font-semibold text-gray-900">{pf['Short Scope'] || 'Project'}</h2>
@@ -174,6 +212,9 @@ export default function ProjectDetailModal({
           <div className="flex items-center gap-3">
             <button onClick={handleCopyProjectLink} title="Copy a link that opens straight to this project" className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800">
               <Link2 size={13} /> Copy link
+            </button>
+            <button onClick={() => setWide(w => !w)} title={wide ? 'Shrink window' : 'Expand window'} className="text-gray-400 hover:text-gray-700">
+              {wide ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             </button>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
           </div>
@@ -374,6 +415,9 @@ export default function ProjectDetailModal({
                                       <AwardIcon size={13} />
                                     </button>
                                   )}
+                                  <button onClick={() => toggleBidExpand(bid)} title="Contact & notes" className="text-gray-400 hover:text-gray-700">
+                                    {expandedBidId === bid.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                                  </button>
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 text-gray-400 mt-0.5 flex-wrap">
@@ -385,6 +429,74 @@ export default function ProjectDetailModal({
                                 )}
                                 {materialsByOwner && hasMaterials && <span>Materials by owner</span>}
                               </div>
+
+                              {expandedBidId === bid.id && (
+                                <div className="mt-2 pt-2 border-t border-gray-100 space-y-2">
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    {vendor?.fields?.Number && (
+                                      <a href={`tel:${vendor.fields.Number}`} className="flex items-center gap-1 text-blue-600 hover:underline">
+                                        <Phone size={11} />{vendor.fields.Number}
+                                      </a>
+                                    )}
+                                    {vendor?.fields?.Email && (
+                                      <a href={`mailto:${vendor.fields.Email}`} className="flex items-center gap-1 text-blue-600 hover:underline">
+                                        <Mail size={11} />{vendor.fields.Email}
+                                      </a>
+                                    )}
+                                    {vendor?.fields?.Website && (
+                                      <a href={vendor.fields.Website} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline">
+                                        <ExternalLink size={11} />Website
+                                      </a>
+                                    )}
+                                    {!vendor?.fields?.Number && !vendor?.fields?.Email && !vendor?.fields?.Website && (
+                                      <span className="text-gray-400">No contact info on file for this vendor.</span>
+                                    )}
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-[10px] font-medium text-gray-500 mb-1">Notes — what they said</label>
+                                    <textarea
+                                      value={noteDrafts[bid.id] ?? ''}
+                                      onChange={e => setNoteDrafts(d => ({ ...d, [bid.id]: e.target.value }))}
+                                      rows={2}
+                                      className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                    <div className="flex justify-end mt-1">
+                                      <button
+                                        onClick={() => handleSaveNote(bid)}
+                                        disabled={savingNoteId === bid.id}
+                                        className="text-xs font-medium text-blue-600 hover:text-blue-800 disabled:opacity-60"
+                                      >
+                                        {savingNoteId === bid.id ? 'Saving…' : 'Save note'}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {awarded && vendor && (() => {
+                                    const otherJobs = jobs.filter(j =>
+                                      j.id !== job.id &&
+                                      !(bidsByJob[j.id] || []).some(b => arr(b.fields?.Vendor).includes(vendor.id))
+                                    )
+                                    if (otherJobs.length === 0) return null
+                                    return (
+                                      <div className="bg-green-50 border border-green-200 rounded-lg p-2">
+                                        <p className="text-[11px] font-medium text-green-800 mb-1.5">Awarded — ask them to bid on other jobs too?</p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {otherJobs.map(j => (
+                                            <button
+                                              key={j.id}
+                                              onClick={() => handleInviteToJob(vendor, j)}
+                                              className="text-[11px] px-2 py-1 rounded-full bg-white border border-green-300 text-green-700 hover:bg-green-100"
+                                            >
+                                              + Invite to &ldquo;{j.fields?.Name}&rdquo;
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )
+                                  })()}
+                                </div>
+                              )}
                             </div>
                           )
                         })}
