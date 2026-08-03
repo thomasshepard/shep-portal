@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Plus, ChevronDown, ChevronUp, Link2, Copy, AlertTriangle } from 'lucide-react'
+import { X, Plus, ChevronDown, ChevronUp, Link2, Copy, AlertTriangle, TrendingDown, Award as AwardIcon, CheckCircle2 } from 'lucide-react'
 import { createRecord, updateRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
 import toast from 'react-hot-toast'
 import { JOB_STATUS_STYLE, PROJECT_STATUSES, JOB_STATUSES, BID_STATUSES, SCOPE_STANDARDS } from '../lib/projectStatus'
@@ -7,6 +7,13 @@ import { JOB_STATUS_STYLE, PROJECT_STATUSES, JOB_STATUSES, BID_STATUSES, SCOPE_S
 const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 const arr = v => Array.isArray(v) ? v : []
 const safeNum = v => (v == null ? 0 : Number(v) || 0)
+
+const RATING_STYLE = {
+  Preferred: 'bg-green-100 text-green-700',
+  Good: 'bg-blue-100 text-blue-700',
+  Fair: 'bg-amber-100 text-amber-700',
+  Avoid: 'bg-red-100 text-red-700',
+}
 
 // Assembles a clean, shareable summary from a bid so the terms are explicit
 // and identical for every bidder — David Greene's "same itemized list to
@@ -139,6 +146,23 @@ export default function ProjectDetailModal({
     }
   }
 
+  async function handleAwardBid(job, bid, vendorName) {
+    const jobBids = bidsByJob[job.id] || []
+    const previousWinner = jobBids.find(b => b.id !== bid.id && b.fields?.Select === 'Quote/Project Awarded')
+
+    const { error } = await updateRecord('Quote', bid.id, { Select: 'Quote/Project Awarded' }, PM_BASE_ID)
+    if (error) return toast.error('Failed to award bid: ' + error)
+    setBids(prev => prev.map(b => b.id === bid.id ? { ...b, fields: { ...b.fields, Select: 'Quote/Project Awarded' } } : b))
+
+    if (previousWinner) {
+      const { error: unawardError } = await updateRecord('Quote', previousWinner.id, { Select: 'Dispositioned' }, PM_BASE_ID)
+      if (!unawardError) {
+        setBids(prev => prev.map(b => b.id === previousWinner.id ? { ...b, fields: { ...b.fields, Select: 'Dispositioned' } } : b))
+      }
+    }
+    toast.success(`${vendorName || 'Bid'} awarded`)
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl">
@@ -256,7 +280,17 @@ export default function ProjectDetailModal({
             const jobBids = bidsByJob[job.id] || []
             const expanded = expandedJobs.has(job.id)
             const needsMoreBids = jobBids.length < 3 && !['completed', 'cancelled'].includes(status)
-            const highestAmount = jobBids.length >= 3 ? Math.max(...jobBids.map(b => safeNum(b.fields?.Amount))) : null
+            const pricedBids = jobBids.filter(b => safeNum(b.fields?.Amount) > 0)
+            const highestAmount = jobBids.length >= 3 && pricedBids.length ? Math.max(...pricedBids.map(b => safeNum(b.fields?.Amount))) : null
+            const lowestAmount = jobBids.length >= 2 && pricedBids.length ? Math.min(...pricedBids.map(b => safeNum(b.fields?.Amount))) : null
+            const sortedBids = [...jobBids].sort((a, b) => {
+              const aAmt = safeNum(a.fields?.Amount)
+              const bAmt = safeNum(b.fields?.Amount)
+              if (aAmt <= 0 && bAmt <= 0) return 0
+              if (aAmt <= 0) return 1
+              if (bAmt <= 0) return -1
+              return aAmt - bAmt
+            })
             return (
               <div key={job.id} className="border border-gray-200 rounded-lg overflow-hidden">
                 <div className="flex items-center justify-between gap-3 p-3 bg-white cursor-pointer" onClick={() => toggleJob(job.id)}>
@@ -292,37 +326,64 @@ export default function ProjectDetailModal({
                       <p className="text-xs text-amber-600">Aim for at least 3 bids — {3 - jobBids.length} more recommended.</p>
                     )}
 
-                    {jobBids.length > 0 && (
+                    {sortedBids.length > 0 && (
                       <div className="space-y-1.5">
-                        {jobBids.map(bid => {
+                        {sortedBids.map(bid => {
                           const bf = bid.fields || {}
                           const vendor = vendors.find(v => arr(bf.Vendor).includes(v.id))
                           const awarded = bf.Select === 'Quote/Project Awarded'
-                          const isOutlier = highestAmount != null && safeNum(bf.Amount) === highestAmount && highestAmount > 0
-                          const labor = safeNum(bf['Labor Cost'])
-                          const materials = safeNum(bf['Materials Cost'])
+                          const amount = safeNum(bf.Amount)
+                          const isOutlier = highestAmount != null && amount === highestAmount && highestAmount > 0
+                          const isLowest = lowestAmount != null && amount === lowestAmount && lowestAmount > 0 && !isOutlier
+                          const rating = vendor?.fields?.Rating
+
+                          const hasLabor = bf['Labor Cost'] != null && bf['Labor Cost'] !== ''
+                          const hasMaterials = bf['Materials Cost'] != null && bf['Materials Cost'] !== ''
+                          const materialsByOwner = !!bf['Materials Handled By Owner']
+
                           return (
-                            <div key={bid.id} className={`rounded-lg px-3 py-2 text-xs ${awarded ? 'bg-green-50 border border-green-200' : isOutlier ? 'bg-amber-50 border border-amber-200' : 'bg-white border border-gray-200'}`}>
+                            <div key={bid.id} className={`rounded-lg px-3 py-2 text-xs ${awarded ? 'bg-green-50 border border-green-200' : isOutlier ? 'bg-amber-50 border border-amber-200' : isLowest ? 'bg-blue-50 border border-blue-200' : 'bg-white border border-gray-200'}`}>
                               <div className="flex items-center justify-between gap-2">
-                                <div className="min-w-0 flex items-center gap-1.5">
+                                <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
                                   <p className="font-medium text-gray-800 truncate">{vendor?.fields?.Name || 'Unknown vendor'}</p>
+                                  {rating && (
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0 ${RATING_STYLE[rating] || 'bg-gray-100 text-gray-600'}`}>{rating}</span>
+                                  )}
                                   {isOutlier && (
                                     <span className="flex items-center gap-0.5 text-amber-700 flex-shrink-0" title="Highest of 3+ bids — consider as an outlier">
                                       <AlertTriangle size={11} /> highest
                                     </span>
                                   )}
+                                  {isLowest && (
+                                    <span className="flex items-center gap-0.5 text-blue-700 flex-shrink-0" title="Lowest bid on this job">
+                                      <TrendingDown size={11} /> lowest
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="flex items-center gap-2 flex-shrink-0">
-                                  <span className="font-medium text-gray-700">{safeNum(bf.Amount) > 0 ? fmtCurrency(safeNum(bf.Amount)) : '—'}</span>
+                                  <span className="font-medium text-gray-700">{amount > 0 ? fmtCurrency(amount) : '—'}</span>
                                   <button onClick={() => handleCopySummary(job, bid)} title="Copy bid summary" className="text-gray-400 hover:text-blue-600">
                                     <Copy size={12} />
                                   </button>
+                                  {awarded ? (
+                                    <span className="flex items-center gap-0.5 text-green-700" title="Awarded">
+                                      <CheckCircle2 size={13} />
+                                    </span>
+                                  ) : (
+                                    <button onClick={() => handleAwardBid(job, bid, vendor?.fields?.Name)} title="Award this bid" className="text-gray-400 hover:text-green-600">
+                                      <AwardIcon size={13} />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 text-gray-400 mt-0.5 flex-wrap">
                                 <span>{bf.Select}</span>
-                                {(labor > 0 || materials > 0) && <span>Labor {fmtCurrency(labor)} · Materials {fmtCurrency(materials)}</span>}
-                                {bf['Materials Handled By Owner'] && <span>Materials by owner</span>}
+                                {(hasLabor || hasMaterials) && (
+                                  <span>
+                                    Labor {hasLabor ? fmtCurrency(safeNum(bf['Labor Cost'])) : 'not itemized'} · Materials {hasMaterials ? fmtCurrency(safeNum(bf['Materials Cost'])) : (materialsByOwner ? 'billed separately' : 'not itemized')}
+                                  </span>
+                                )}
+                                {materialsByOwner && hasMaterials && <span>Materials by owner</span>}
                               </div>
                             </div>
                           )
