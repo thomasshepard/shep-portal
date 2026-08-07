@@ -696,6 +696,35 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
   const fileInputRef = useRef(null)
   const activeCrew = crew.filter(c => c.status !== 'Inactive')
   const workedByPerson = crew.find(c => c.id === workedById) || null
+  const workModeOptions = [
+    { id: '', mode: '', label: 'Just me (Thomas)' },
+    ...activeCrew.flatMap(c => [
+      { id: c.id, mode: 'Solo', label: `${c.name} alone — Solo (${c.soloRate}%)` },
+      { id: c.id, mode: 'Joint', label: `${c.name} + Thomas together — Joint (${c.jointRate}%)` },
+    ]),
+  ]
+  function selectWorkMode(id, mode) { setWorkedById(id); setJobMode(mode || 'Solo') }
+  function WorkModePicker() {
+    return (
+      <div className="space-y-1.5">
+        {workModeOptions.map(opt => {
+          const active = workedById === opt.id && (opt.id === '' || jobMode === opt.mode)
+          return (
+            <button
+              key={`${opt.id}-${opt.mode}`}
+              type="button"
+              onClick={() => selectWorkMode(opt.id, opt.mode)}
+              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm border transition-colors ${
+                active ? 'bg-green-600 text-white border-green-600 font-semibold' : 'bg-white text-gray-700 border-gray-200'
+              }`}
+            >
+              {opt.label}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
 
   function handleComplete() {
     setConfirmOpen(false)
@@ -991,30 +1020,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
             {activeCrew.length > 0 && (
               <div className="mb-4 space-y-2">
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Who worked this?</label>
-                <select
-                  value={workedById}
-                  onChange={e => setWorkedById(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                >
-                  <option value="">Just me (Thomas)</option>
-                  {activeCrew.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                {workedByPerson && (
-                  <div className="flex gap-2">
-                    {['Solo', 'Joint'].map(m => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setJobMode(m)}
-                        className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${
-                          jobMode === m ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200'
-                        }`}
-                      >
-                        {m === 'Solo' ? `Solo — ${workedByPerson.name} alone` : `Joint — with Thomas`}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <WorkModePicker />
               </div>
             )}
 
