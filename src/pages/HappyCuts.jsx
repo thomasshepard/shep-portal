@@ -7,6 +7,7 @@ import { notify, getAdminUserIds } from '../lib/notifications'
 import {
   Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
   CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen, TreePine,
+  HardHat, Pencil, Printer,
 } from 'lucide-react'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
 const PROJECTS_TABLE = 'tblP7yDgETBBbgLpb'
+const CREW_TABLE = 'tblDqfsBT67Erlwwu'
 
 // Contacts field IDs
 const CF = {
@@ -51,6 +53,22 @@ const SF = {
   sortOrder: 'fldkJxYo2JQZ25lLi',          // number — drag order within day
   appointmentDateTime: 'fldyXThNomMSb9joa', // dateTime — kept for compat
   scheduleDateTime: 'fldcfkVEvuLciPD8z',    // dateTime — PRIMARY schedule field
+  workedBy: 'fldCO8pAWPypvHWDY',        // link to Crew
+  jobMode: 'fldug02yHgiJY30au',         // singleSelect: Solo/Joint
+  contractorPayout: 'fldXHs5HWVUdjGpFH', // currency — snapshotted at completion
+  payoutStatus: 'fld7YMwn3ozYB69QX',    // singleSelect: Unpaid/Paid
+  payoutDate: 'fldudVxM07IOaDpvI',      // date
+}
+
+// Crew field IDs
+const CRF = {
+  name: 'fldoR81EQ7j0NVq3F', businessName: 'fldMAKeyTf9iqu28L',
+  phone: 'fldQXN9o0yn06x7xj', email: 'fldShJVF4HfO8443O',
+  soloRate: 'fldPJM8qLFTv3EhFF', jointRate: 'flddPnxcvCxxMkmZc',
+  status: 'fldq9P1B4Gqbe1wOj',
+  agreementSigned: 'fldD3hPXQ1sHEtBhk', agreementDate: 'fldhYrIZKHU4pya5j',
+  insuranceOnFile: 'fldwhDOUjP7WpA0Kp', insuranceExpires: 'fldRGghnpOqVhxnxi',
+  w9OnFile: 'fldcBZwK2TGAWP4aS', notes: 'fldlAtv8w271Wjc5b',
 }
 
 // ─── Airtable helpers ─────────────────────────────────────────────────────────
@@ -147,6 +165,31 @@ function parseMow(r) {
     scheduleDateTime: safeStr(f[SF.scheduleDateTime]),
     contactIds: arr(f[SF.contacts]),
     stripeInvoiceUrl: safeStr(f[SF.stripeInvoiceUrl]),
+    workedByIds: arr(f[SF.workedBy]),
+    jobMode: safeStr(f[SF.jobMode]),
+    contractorPayout: safeNum(f[SF.contractorPayout]),
+    payoutStatus: safeStr(f[SF.payoutStatus]),
+    payoutDate: safeStr(f[SF.payoutDate]),
+  }
+}
+
+function parseCrew(r) {
+  const f = r.fields || {}
+  return {
+    id: r.id,
+    name: safeStr(f[CRF.name]),
+    businessName: safeStr(f[CRF.businessName]),
+    phone: safeStr(f[CRF.phone]),
+    email: safeStr(f[CRF.email]),
+    soloRate: safeNum(f[CRF.soloRate], 0),
+    jointRate: safeNum(f[CRF.jointRate], 0),
+    status: safeStr(f[CRF.status], 'Active'),
+    agreementSigned: f[CRF.agreementSigned] || false,
+    agreementDate: safeStr(f[CRF.agreementDate]),
+    insuranceOnFile: f[CRF.insuranceOnFile] || false,
+    insuranceExpires: safeStr(f[CRF.insuranceExpires]),
+    w9OnFile: f[CRF.w9OnFile] || false,
+    notes: safeStr(f[CRF.notes]),
   }
 }
 
@@ -886,7 +929,7 @@ function EditMowModal({ mow, onClose, onSave }) {
 }
 
 // ─── JobDetail ────────────────────────────────────────────────────────────────
-function JobDetail({ mow, contact, onBack, onRefresh }) {
+function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
   const navigate = useNavigate()
   const contactRecordId = contact?.id || mow.contactIds?.[0] || null
   const [editOpen, setEditOpen] = useState(false)
@@ -904,7 +947,11 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   const [cashLoading, setCashLoading] = useState(false)
   const [localInvStatus, setLocalInvStatus] = useState(mow.invStatus || '')
   const [localInvoiceUrl, setLocalInvoiceUrl] = useState(mow.stripeInvoiceUrl || '')
+  const [workedById, setWorkedById] = useState(mow.workedByIds?.[0] || '')
+  const [jobMode, setJobMode] = useState(mow.jobMode || 'Solo')
   const fileInputRef = useRef(null)
+  const activeCrew = crew.filter(c => c.status !== 'Inactive')
+  const workedByPerson = crew.find(c => c.id === workedById) || null
 
   function handleComplete() {
     setConfirmOpen(false)
@@ -976,7 +1023,15 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
     setMarkCompleting(true)
     // Step 1: Mark completion (must succeed)
     try {
-      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
+      const completionFields = { [SF.status]: 'Completed' }
+      if (workedById && workedByPerson) {
+        const rate = jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate
+        completionFields[SF.workedBy] = [workedById]
+        completionFields[SF.jobMode] = jobMode
+        completionFields[SF.contractorPayout] = Math.round((safeNum(mow.amount, 0) * rate) / 100 * 100) / 100
+        completionFields[SF.payoutStatus] = 'Unpaid'
+      }
+      await atPatch(SCHEDULE_TABLE, mow.id, completionFields)
       const contactId = mow.contactIds?.[0]
       if (contactId) {
         const newStatus = mow.type === 'Recurring' ? 'Recurring' : 'One-Time'
@@ -1015,6 +1070,32 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
       toast.success('Notes saved ✓')
     } catch {
       toast.error('Failed to save notes')
+    }
+  }
+
+  async function saveWorkedBy() {
+    try {
+      if (!workedById) {
+        await atPatch(SCHEDULE_TABLE, mow.id, {
+          [SF.workedBy]: [],
+          [SF.jobMode]: null,
+          [SF.contractorPayout]: null,
+          [SF.payoutStatus]: null,
+        })
+        toast.success('Cleared — back to Thomas solo')
+      } else if (workedByPerson) {
+        const rate = jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate
+        await atPatch(SCHEDULE_TABLE, mow.id, {
+          [SF.workedBy]: [workedById],
+          [SF.jobMode]: jobMode,
+          [SF.contractorPayout]: Math.round((safeNum(mow.amount, 0) * rate) / 100 * 100) / 100,
+          [SF.payoutStatus]: mow.payoutStatus || 'Unpaid',
+        })
+        toast.success(`Assigned to ${workedByPerson.name} ✓`)
+      }
+      onRefresh()
+    } catch {
+      toast.error('Failed to save')
     }
   }
 
@@ -1126,6 +1207,47 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
         >
           📅 Add to Google Calendar
         </a>
+
+        {/* Worked By */}
+        {activeCrew.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">👷 Worked By</p>
+            <select
+              value={workedById}
+              onChange={e => setWorkedById(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-400"
+            >
+              <option value="">Just me (Thomas)</option>
+              {activeCrew.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {workedByPerson && (
+              <div className="flex gap-2 mt-2">
+                {['Solo', 'Joint'].map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setJobMode(m)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${
+                      jobMode === m ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    {m === 'Solo' ? `Solo (${workedByPerson.soloRate}%)` : `Joint w/ Thomas (${workedByPerson.jointRate}%)`}
+                  </button>
+                ))}
+              </div>
+            )}
+            {(workedById !== (mow.workedByIds?.[0] || '') || (workedByPerson && jobMode !== (mow.jobMode || 'Solo'))) && (
+              <button onClick={saveWorkedBy} className="mt-2 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg">
+                Save
+              </button>
+            )}
+            {mow.contractorPayout != null && mow.workedByIds?.length > 0 && (
+              <p className="text-xs text-gray-500 mt-2">
+                Payout: <span className="font-semibold text-gray-700">{fmtCurrency(mow.contractorPayout)}</span> · {mow.payoutStatus || 'Unpaid'}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Visit Notes */}
         <div>
@@ -1266,6 +1388,45 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setMarkCompleteOpen(false)}>
           <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-gray-800 text-lg mb-3">Mark this mow as complete?</h3>
+
+            {activeCrew.length > 0 && (
+              <div className="mb-4 space-y-2">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Who worked this?</label>
+                <select
+                  value={workedById}
+                  onChange={e => setWorkedById(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Just me (Thomas)</option>
+                  {activeCrew.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {workedByPerson && (
+                  <>
+                    <div className="flex gap-2">
+                      {['Solo', 'Joint'].map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setJobMode(m)}
+                          className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${
+                            jobMode === m ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200'
+                          }`}
+                        >
+                          {m === 'Solo' ? `Solo — ${workedByPerson.name} alone` : `Joint — with Thomas`}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Payout: {fmtCurrency(mow.amount)} × {jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate}% ={' '}
+                      <span className="font-semibold text-gray-700">
+                        {fmtCurrency(Math.round((safeNum(mow.amount, 0) * (jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate)) / 100 * 100) / 100)}
+                      </span>
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button onClick={() => setMarkCompleteOpen(false)} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
               <button onClick={markComplete} disabled={markCompleting} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
@@ -3490,6 +3651,286 @@ function ProjectsTab({ contacts, contactsById }) {
   )
 }
 
+// ─── CrewTab ────────────────────────────────────────────────────────────────
+const emptyCrewForm = {
+  name: '', businessName: '', phone: '', email: '',
+  soloRate: '65', jointRate: '50', status: 'Active',
+  agreementSigned: false, insuranceOnFile: false, w9OnFile: false, notes: '',
+}
+
+function buildPayStatementHtml(crewMember, jobs) {
+  const total = jobs.reduce((sum, j) => sum + (j.contractorPayout || 0), 0)
+  const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+  const rows = jobs.map(j => `
+    <tr>
+      <td>${j.date}</td>
+      <td>${j.clientName}</td>
+      <td>${j.jobMode || ''}</td>
+      <td style="text-align:right">${fmtCurrency(j.amount)}</td>
+      <td style="text-align:right">${fmtCurrency(j.contractorPayout)}</td>
+    </tr>`).join('')
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Pay Statement — ${crewMember.name}</title>
+    <style>
+      body{font-family:Arial,sans-serif;color:#1f2937;padding:32px;max-width:700px;margin:0 auto}
+      h1{color:#16A34A;font-size:22px;margin-bottom:2px}
+      .sub{color:#6b7280;font-size:13px;margin-bottom:24px}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th{text-align:left;border-bottom:2px solid #16A34A;padding:8px 6px;color:#374151}
+      td{padding:8px 6px;border-bottom:1px solid #e5e7eb}
+      .total{font-size:16px;font-weight:700;text-align:right;margin-top:16px}
+      .foot{margin-top:32px;font-size:11px;color:#9ca3af}
+    </style></head><body>
+    <h1>Happy Cuts Lawn Care — Pay Statement</h1>
+    <div class="sub">${crewMember.name}${crewMember.businessName ? ` · ${crewMember.businessName}` : ''} — ${today}</div>
+    <table>
+      <thead><tr><th>Date</th><th>Client</th><th>Mode</th><th style="text-align:right">Job Total</th><th style="text-align:right">Payout</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="total">Total due: ${fmtCurrency(total)}</div>
+    <div class="foot">Happy Cuts LLC · Cookeville, TN · (931) 284-3503 · thomasatshepard@gmail.com</div>
+    </body></html>`
+}
+
+function CrewTab({ crew, schedules, onRefresh }) {
+  const [creating, setCreating] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
+  const [form, setForm] = useState(emptyCrewForm)
+  const [saving, setSaving] = useState(false)
+  const set = (key, val) => setForm(p => ({ ...p, [key]: val }))
+  const cls = 'w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400'
+
+  const jobsByCrew = {}
+  schedules.forEach(m => {
+    (m.workedByIds || []).forEach(cid => { (jobsByCrew[cid] = jobsByCrew[cid] || []).push(m) })
+  })
+
+  function openCreate() { setForm(emptyCrewForm); setEditingId(null); setCreating(true) }
+  function openEdit(c) {
+    setForm({
+      name: c.name, businessName: c.businessName, phone: c.phone, email: c.email,
+      soloRate: String(c.soloRate ?? ''), jointRate: String(c.jointRate ?? ''), status: c.status || 'Active',
+      agreementSigned: c.agreementSigned, insuranceOnFile: c.insuranceOnFile, w9OnFile: c.w9OnFile,
+      notes: c.notes,
+    })
+    setEditingId(c.id)
+    setCreating(true)
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!form.name.trim()) return toast.error('Name is required')
+    setSaving(true)
+    const fields = {
+      [CRF.name]: form.name,
+      [CRF.businessName]: form.businessName || undefined,
+      [CRF.phone]: form.phone || undefined,
+      [CRF.email]: form.email || undefined,
+      [CRF.soloRate]: form.soloRate !== '' ? Number(form.soloRate) : null,
+      [CRF.jointRate]: form.jointRate !== '' ? Number(form.jointRate) : null,
+      [CRF.status]: form.status || 'Active',
+      [CRF.agreementSigned]: !!form.agreementSigned,
+      [CRF.insuranceOnFile]: !!form.insuranceOnFile,
+      [CRF.w9OnFile]: !!form.w9OnFile,
+      [CRF.notes]: form.notes || undefined,
+    }
+    try {
+      if (editingId) {
+        await atPatch(CREW_TABLE, editingId, fields)
+        toast.success('Crew member updated')
+      } else {
+        await atPost(CREW_TABLE, { records: [{ fields }], typecast: true })
+        toast.success('Crew member added')
+      }
+      setCreating(false)
+      onRefresh()
+    } catch {
+      toast.error('Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function markJobsPaid(jobs) {
+    const today = todayStr()
+    try {
+      await Promise.all(jobs.map(j => atPatch(SCHEDULE_TABLE, j.id, { [SF.payoutStatus]: 'Paid', [SF.payoutDate]: today })))
+      toast.success(`Marked ${jobs.length} job${jobs.length !== 1 ? 's' : ''} paid`)
+      onRefresh()
+    } catch {
+      toast.error('Failed to update')
+    }
+  }
+
+  function printStatement(crewMember, jobs) {
+    const win = window.open('', '_blank')
+    if (!win) return toast.error('Pop-up blocked — allow pop-ups to print')
+    win.document.write(buildPayStatementHtml(crewMember, jobs))
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 300)
+  }
+
+  return (
+    <div className="p-4 space-y-4 pb-24">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-gray-800">Crew</h2>
+        <button onClick={openCreate} className="flex items-center gap-1.5 bg-green-600 text-white px-3 py-2 rounded-xl text-sm font-semibold">
+          <Plus size={15} /> Add Crew
+        </button>
+      </div>
+
+      {crew.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">
+          No crew members yet — add someone you're bringing on under a revenue-share agreement.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {crew.map(c => {
+            const jobs = (jobsByCrew[c.id] || []).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+            const unpaidJobs = jobs.filter(j => (j.payoutStatus || 'Unpaid') !== 'Paid')
+            const unpaidTotal = unpaidJobs.reduce((sum, j) => sum + (j.contractorPayout || 0), 0)
+            const expanded = expandedId === c.id
+            return (
+              <div key={c.id} className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                <div className="p-4 flex items-center justify-between gap-3 cursor-pointer" onClick={() => setExpandedId(expanded ? null : c.id)}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-800 truncate">{c.name}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${c.status === 'Inactive' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>
+                        {c.status || 'Active'}
+                      </span>
+                      {(!c.agreementSigned || !c.insuranceOnFile) && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">⚠ paperwork</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">Solo {c.soloRate}% · Joint {c.jointRate}%{c.phone ? ` · ${c.phone}` : ''}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    {unpaidTotal > 0 && <p className="text-sm font-semibold text-gray-800">{fmtCurrency(unpaidTotal)} due</p>}
+                    <p className="text-xs text-gray-400">{jobs.length} job{jobs.length !== 1 ? 's' : ''}</p>
+                  </div>
+                </div>
+
+                {expanded && (
+                  <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={() => openEdit(c)} className="flex items-center gap-1 text-xs font-semibold text-gray-600 bg-white border border-gray-200 px-3 py-1.5 rounded-lg">
+                        <Pencil size={12} /> Edit profile
+                      </button>
+                      {unpaidJobs.length > 0 && (
+                        <>
+                          <button onClick={() => printStatement(c, unpaidJobs)} className="flex items-center gap-1 text-xs font-semibold text-blue-700 bg-white border border-blue-200 px-3 py-1.5 rounded-lg">
+                            <Printer size={12} /> Print pay statement
+                          </button>
+                          <button onClick={() => markJobsPaid(unpaidJobs)} className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-white border border-green-200 px-3 py-1.5 rounded-lg">
+                            <CheckCircle size={12} /> Mark all paid
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {jobs.length === 0 ? (
+                      <p className="text-xs text-gray-400">No jobs logged yet.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {jobs.map(j => (
+                          <div key={j.id} className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs">
+                            <div className="min-w-0">
+                              <p className="font-medium text-gray-800 truncate">{j.clientName}</p>
+                              <p className="text-gray-400">{fmtDateShort(j.date)} · {j.jobMode || 'Solo'} · job {fmtCurrency(j.amount)}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="font-semibold text-gray-700">{fmtCurrency(j.contractorPayout)}</p>
+                              <p className={j.payoutStatus === 'Paid' ? 'text-green-600' : 'text-amber-600'}>{j.payoutStatus || 'Unpaid'}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {creating && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setCreating(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-800">{editingId ? 'Edit crew member' : 'Add crew member'}</h3>
+              <button onClick={() => setCreating(false)} className="text-gray-400"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Name</label>
+                <input className={cls} value={form.name} onChange={e => set('name', e.target.value)} required />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Business name <span className="font-normal text-gray-400">(optional)</span></label>
+                <input className={cls} value={form.businessName} onChange={e => set('businessName', e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Phone</label>
+                  <input className={cls} value={form.phone} onChange={e => set('phone', e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+                  <input type="email" className={cls} value={form.email} onChange={e => set('email', e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Solo rate %</label>
+                  <input type="number" min="0" max="100" className={cls} value={form.soloRate} onChange={e => set('soloRate', e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Joint rate %</label>
+                  <input type="number" min="0" max="100" className={cls} value={form.jointRate} onChange={e => set('jointRate', e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+                <select className={cls} value={form.status} onChange={e => set('status', e.target.value)}>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-2 pt-1">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.agreementSigned} onChange={e => set('agreementSigned', e.target.checked)} className="rounded" />
+                  Agreement signed
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.insuranceOnFile} onChange={e => set('insuranceOnFile', e.target.checked)} className="rounded" />
+                  Insurance on file
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={form.w9OnFile} onChange={e => set('w9OnFile', e.target.checked)} className="rounded" />
+                  W-9 on file
+                </label>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+                <textarea rows={2} className={cls + ' resize-none'} value={form.notes} onChange={e => set('notes', e.target.value)} />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setCreating(false)} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2">
+                  {saving && <Loader2 size={14} className="animate-spin" />} {editingId ? 'Save' : 'Add'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function HappyCuts() {
   const { profile } = useAuth()
   const navigate = useNavigate()
@@ -3499,6 +3940,7 @@ export default function HappyCuts() {
   const [contacts, setContacts] = useState([])
   const [schedules, setSchedules] = useState([])
   const [projects, setProjects] = useState([])
+  const [crew, setCrew] = useState([])
   const [contactsById, setContactsById] = useState({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('today')
@@ -3515,10 +3957,11 @@ export default function HappyCuts() {
     }
     setLoading(true)
     try {
-      const [rawContacts, rawSchedules, rawProjects] = await Promise.all([
+      const [rawContacts, rawSchedules, rawProjects, rawCrew] = await Promise.all([
         fetchAll(CONTACTS_TABLE),
         fetchAll(SCHEDULE_TABLE),
         fetchAll(PROJECTS_TABLE),
+        fetchAll(CREW_TABLE),
       ])
       const parsedContacts = rawContacts
         .filter(r => !safeStr(r.fields[CF.name]).startsWith('DELETED'))
@@ -3529,6 +3972,7 @@ export default function HappyCuts() {
       setContacts(parsedContacts)
       setSchedules(parsedSchedules)
       setProjects(rawProjects.map(parseProject))
+      setCrew(rawCrew.map(parseCrew))
       setContactsById(Object.fromEntries(parsedContacts.map(c => [c.id, c])))
     } catch (e) {
       console.error('Happy Cuts load error:', e)
@@ -3558,6 +4002,7 @@ export default function HappyCuts() {
     { id: 'clients',  label: 'Clients',  icon: Users },
     { id: 'schedule', label: 'Schedule', icon: Calendar },
     { id: 'projects', label: 'Projects', icon: TreePine },
+    { id: 'crew',     label: 'Crew',     icon: HardHat },
     { id: 'revenue',  label: 'Revenue',  icon: BarChart2 },
   ]
 
@@ -3638,6 +4083,9 @@ export default function HappyCuts() {
       {activeTab === 'projects' && (
         <ProjectsTab contacts={contacts} contactsById={contactsById} />
       )}
+      {activeTab === 'crew' && (
+        <CrewTab crew={crew} schedules={schedules} onRefresh={load} />
+      )}
       {activeTab === 'revenue' && (
         <RevenueTab
           onOpenJob={setJobDetail}
@@ -3649,6 +4097,7 @@ export default function HappyCuts() {
         <JobDetail
           mow={jobDetail}
           contact={contactsById[jobDetail.contactIds?.[0]]}
+          crew={crew}
           onBack={() => setJobDetail(null)}
           onRefresh={() => { load(); setJobDetail(null) }}
         />

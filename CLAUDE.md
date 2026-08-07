@@ -158,7 +158,8 @@ Properties has a parallel visibility layer for the same reason: non-admin users 
 - Linked record fields must be a string array: `["recXXXXXXXXXXXXXX"]`
 - For user creation, always UPDATE (not upsert/insert) the `profiles` row
 - Property records are **read-only** from the portal — never create or delete them
-- Happy Cuts uses its own field ID constants (`CF`, `SF`) defined at the top of `HappyCuts.jsx` and `HappyCutsClientDetail.jsx`
+- Happy Cuts uses its own field ID constants (`CF`, `SF`, `CRF`) defined at the top of `HappyCuts.jsx` and `HappyCutsClientDetail.jsx`
+- Happy Cuts **Crew** (Airtable `Crew` table, `HappyCuts.jsx`'s Crew tab) tracks independent contractors/helpers who work mows under a revenue-share agreement — each has editable Solo/Joint payout rates. Marking a mow's "Worked By" + "Job Mode" (Solo/Joint) at completion snapshots a `Contractor Payout` amount (Amount Charged × that person's rate) onto the Schedule record, independent of the client's own Invoice Status — payout timing and client-payment timing are unrelated. The Crew tab has a per-person unpaid-jobs report with a print-friendly pay statement and a "mark all paid" action. First crew member: Cameron (65% Solo / 50% Joint). Tony (the existing 40%-flat helper) is intentionally not in this table — his arrangement doesn't map onto the Solo/Joint model.
 
 ### Chicken Feed Math
 

@@ -17,6 +17,7 @@ const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
 const INTLOG_TABLE   = 'tblTnQsV4POQ5da1X'
 const PROJECTS_TABLE = 'tblP7yDgETBBbgLpb'
+const CREW_TABLE     = 'tblDqfsBT67Erlwwu'
 
 // Contacts field IDs
 const CF = {
@@ -48,6 +49,17 @@ const SF = {
   sortOrder: 'fldkJxYo2JQZ25lLi',
   appointmentDateTime: 'fldyXThNomMSb9joa',
   scheduleDateTime: 'fldcfkVEvuLciPD8z',
+  workedBy: 'fldCO8pAWPypvHWDY',
+  jobMode: 'fldug02yHgiJY30au',
+  contractorPayout: 'fldXHs5HWVUdjGpFH',
+  payoutStatus: 'fld7YMwn3ozYB69QX',
+  payoutDate: 'fldudVxM07IOaDpvI',
+}
+
+// Crew field IDs
+const CRF = {
+  name: 'fldoR81EQ7j0NVq3F', soloRate: 'fldPJM8qLFTv3EhFF',
+  jointRate: 'flddPnxcvCxxMkmZc', status: 'fldq9P1B4Gqbe1wOj',
 }
 
 // Interaction Log field IDs
@@ -193,6 +205,21 @@ function parseMow(r) {
     scheduleDateTime: safeStr(f[SF.scheduleDateTime]),
     contactIds: arr(f[SF.contacts]),
     stripeInvoiceUrl: safeStr(f[SF.stripeInvoiceUrl]),
+    workedByIds: arr(f[SF.workedBy]),
+    jobMode: safeStr(f[SF.jobMode]),
+    contractorPayout: safeNum(f[SF.contractorPayout]),
+    payoutStatus: safeStr(f[SF.payoutStatus]),
+  }
+}
+
+function parseCrew(r) {
+  const f = r.fields || {}
+  return {
+    id: r.id,
+    name: safeStr(f[CRF.name]),
+    soloRate: safeNum(f[CRF.soloRate], 0),
+    jointRate: safeNum(f[CRF.jointRate], 0),
+    status: safeStr(f[CRF.status], 'Active'),
   }
 }
 
@@ -649,7 +676,7 @@ function EditMowModal({ mow, onClose, onSave }) {
 }
 
 // ─── JobDetail overlay (inlined) ──────────────────────────────────────────────
-function JobDetail({ mow, contact, onBack, onRefresh }) {
+function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
   const [editOpen, setEditOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [visitNotes, setVisitNotes] = useState(mow.visitNotes || '')
@@ -664,7 +691,11 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
   const [cashLoading, setCashLoading] = useState(false)
   const [localInvStatus, setLocalInvStatus] = useState(mow.invStatus || '')
   const [localInvoiceUrl, setLocalInvoiceUrl] = useState(mow.stripeInvoiceUrl || '')
+  const [workedById, setWorkedById] = useState(mow.workedByIds?.[0] || '')
+  const [jobMode, setJobMode] = useState(mow.jobMode || 'Solo')
   const fileInputRef = useRef(null)
+  const activeCrew = crew.filter(c => c.status !== 'Inactive')
+  const workedByPerson = crew.find(c => c.id === workedById) || null
 
   function handleComplete() {
     setConfirmOpen(false)
@@ -723,7 +754,15 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
     setMarkCompleting(true)
     // Step 1: Mark completion (must succeed)
     try {
-      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.status]: 'Completed' })
+      const completionFields = { [SF.status]: 'Completed' }
+      if (workedById && workedByPerson) {
+        const rate = jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate
+        completionFields[SF.workedBy] = [workedById]
+        completionFields[SF.jobMode] = jobMode
+        completionFields[SF.contractorPayout] = Math.round((safeNum(mow.amount, 0) * rate) / 100 * 100) / 100
+        completionFields[SF.payoutStatus] = 'Unpaid'
+      }
+      await atPatch(SCHEDULE_TABLE, mow.id, completionFields)
       const contactId = mow.contactIds?.[0]
       if (contactId) {
         const newStatus = mow.type === 'Recurring' ? 'Recurring' : 'One-Time'
@@ -948,6 +987,37 @@ function JobDetail({ mow, contact, onBack, onRefresh }) {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setMarkCompleteOpen(false)}>
           <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-gray-800 text-lg mb-3">Mark this mow as complete?</h3>
+
+            {activeCrew.length > 0 && (
+              <div className="mb-4 space-y-2">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Who worked this?</label>
+                <select
+                  value={workedById}
+                  onChange={e => setWorkedById(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Just me (Thomas)</option>
+                  {activeCrew.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {workedByPerson && (
+                  <div className="flex gap-2">
+                    {['Solo', 'Joint'].map(m => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setJobMode(m)}
+                        className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${
+                          jobMode === m ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200'
+                        }`}
+                      >
+                        {m === 'Solo' ? `Solo — ${workedByPerson.name} alone` : `Joint — with Thomas`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button onClick={() => setMarkCompleteOpen(false)} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium text-sm">Cancel</button>
               <button onClick={markComplete} disabled={markCompleting} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-medium text-sm disabled:opacity-50 flex items-center justify-center gap-2">
@@ -1839,6 +1909,7 @@ export default function HappyCutsClientDetail() {
   const [mows, setMows] = useState([])
   const [logs, setLogs] = useState([])
   const [projects, setProjects] = useState([])
+  const [crew, setCrew] = useState([])
   const [loading, setLoading] = useState(true)
   const [jobDetail, setJobDetail] = useState(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -1886,6 +1957,10 @@ export default function HappyCutsClientDetail() {
           return ord.indexOf(a.status) - ord.indexOf(b.status)
         })
       setProjects(contactProjects)
+
+      // Fetch crew (for the Worked By picker on job completion)
+      const rawCrew = await fetchAll(CREW_TABLE)
+      setCrew(rawCrew.map(parseCrew))
     } catch (e) {
       toast.error('Failed to load client')
     } finally {
@@ -2187,6 +2262,7 @@ export default function HappyCutsClientDetail() {
         <JobDetail
           mow={jobDetail}
           contact={contact}
+          crew={crew}
           onBack={() => setJobDetail(null)}
           onRefresh={() => { setJobDetail(null); load() }}
         />
