@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail, TrendingUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail, TrendingUp, Shield, Landmark, AlertTriangle } from 'lucide-react'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtPercent, fmtDate, PM_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -61,6 +61,8 @@ export default function PropertyDetail() {
   const [pastAnalysesLoading, setPastAnalysesLoading] = useState(false)
   const [utilitiesOpen, setUtilitiesOpen] = useState(false)
   const [billsOpen, setBillsOpen] = useState(false)
+  const [insurance, setInsurance] = useState([])
+  const [insuranceOpen, setInsuranceOpen] = useState(true)
   const [paymentModal, setPaymentModal] = useState(null)
   const [maintModal, setMaintModal] = useState(null)
   const [expandedMaint, setExpandedMaint] = useState(new Set())
@@ -124,7 +126,7 @@ export default function PropertyDetail() {
       const invPayIds = arr(f['Invoices Payments'])
 
       // 2. Fetch Rental Units + other property-linked data in parallel
-      const [unitsRes, invPayRes, maintRes, utilRes, loansRes, billsRes] = await Promise.all([
+      const [unitsRes, invPayRes, maintRes, utilRes, loansRes, billsRes, insuranceRes] = await Promise.all([
         unitIds.length > 0
           ? fetchAllRecords('Rental Units', { filterByFormula: recordIdFilter(unitIds) }, PM_BASE_ID)
           : Promise.resolve({ data: [] }),
@@ -141,6 +143,9 @@ export default function PropertyDetail() {
         (isAdmin || isVA) && billIds.length > 0
           ? fetchAllRecords('Bills Payment', { filterByFormula: recordIdFilter(billIds) }, PM_BASE_ID)
           : Promise.resolve({ data: [] }),
+        permissions.can_view_insurance
+          ? fetchAllRecords('Insurance and Taxes', { filterByFormula: `FIND("${id}", ARRAYJOIN({Property}))` }, PM_BASE_ID)
+          : Promise.resolve({ data: [] }),
       ])
 
       const units = unitsRes.data || []
@@ -150,6 +155,7 @@ export default function PropertyDetail() {
       setUtilities(utilRes.data || [])
       setLoans(loansRes.data || [])
       setBills(billsRes.data || [])
+      setInsurance(insuranceRes.data || [])
 
       // 3. Fetch Lease Agreements for all units
       const leaseIds = [...new Set(units.flatMap(u => arr(u.fields?.['Lease Agreements'])))]
@@ -761,6 +767,101 @@ export default function PropertyDetail() {
           </div>
         )}
       </div>
+
+      {/* Insurance & Taxes — same records the Insurance module manages */}
+      {permissions.can_view_insurance && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <button
+            onClick={() => setInsuranceOpen(o => !o)}
+            className="w-full flex items-center justify-between px-5 py-3 text-left"
+          >
+            <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+              <Shield size={16} className="text-blue-600" />
+              Insurance &amp; Taxes ({insurance.length})
+            </h2>
+            {insuranceOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {insuranceOpen && (
+            <div className="border-t border-gray-100">
+              {(() => {
+                const inCity = !!property.fields?.['In City Limits']
+                const cityJur = safeRender(property.fields?.['City Jurisdiction'])
+                const hasInsurance = insurance.some(o => safeRender(o.fields?.Kind) === 'Insurance' && safeRender(o.fields?.Status) === 'Active')
+                const taxes = insurance.filter(o => safeRender(o.fields?.Kind) === 'Property Tax')
+                const hasCityTax = taxes.some(o => safeRender(o.fields?.['Jurisdiction Level']) === 'City')
+                const warnings = []
+                if (!hasInsurance) warnings.push('No active insurance policy on file.')
+                if (taxes.length === 0) warnings.push('No property tax records on file.')
+                else if (inCity && !hasCityTax) warnings.push(`In ${cityJur || 'city'} limits, but no city tax bill is recorded.`)
+                else if (/verify/i.test(cityJur)) warnings.push(`City limits not confirmed — ${cityJur}`)
+
+                return (
+                  <>
+                    {warnings.length > 0 && (
+                      <div className="px-5 py-3 bg-red-50 border-b border-red-100 space-y-1">
+                        {warnings.map(w => (
+                          <p key={w} className="text-sm text-red-700 flex items-start gap-2">
+                            <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" /> {w}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {insurance.length === 0 ? (
+                      <p className="px-5 py-3 text-sm text-gray-500">
+                        Nothing on file.{' '}
+                        <Link to="/insurance" className="text-blue-600 hover:underline">Add it in Insurance &amp; Taxes</Link>
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {insurance.map(o => {
+                          const f = o.fields || {}
+                          const isTax = safeRender(f.Kind) === 'Property Tax'
+                          return (
+                            <div key={o.id} className="px-5 py-3 flex items-center gap-3">
+                              <span className={`w-7 h-7 rounded-lg grid place-items-center flex-shrink-0 ${
+                                isTax ? 'bg-violet-50 text-violet-600' : 'bg-blue-50 text-blue-600'
+                              }`}>
+                                {isTax ? <Landmark size={14} /> : <Shield size={14} />}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-800 truncate">{safeRender(f.Name)}</p>
+                                <p className="text-xs text-gray-400 truncate">
+                                  {safeRender(f.Vendor) || '—'}
+                                  {isTax && f['Jurisdiction Level'] ? ` · ${safeRender(f['Jurisdiction Level'])}` : ''}
+                                  {f['Paid Through Escrow'] ? ' · escrow' : ''}
+                                  {safeRender(f.Status) === 'Needs Setup' ? ' · incomplete' : ''}
+                                </p>
+                              </div>
+                              {safeRender(f['Payment Portal Link']) && (
+                                <a
+                                  href={safeRender(f['Payment Portal Link'])}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1 flex-shrink-0"
+                                >
+                                  Pay <ExternalLink size={11} />
+                                </a>
+                              )}
+                              <span className="text-sm font-semibold text-gray-800 tabular-nums flex-shrink-0">
+                                {safeNum(f['Current Amount']) ? fmtCurrency(safeNum(f['Current Amount'])) : '—'}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                    <div className="px-5 py-2.5 border-t border-gray-100 bg-gray-50">
+                      <Link to="/insurance" className="text-xs font-medium text-blue-600 hover:text-blue-800">
+                        Manage in Insurance &amp; Taxes →
+                      </Link>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Utilities */}
       <div className="bg-white rounded-xl border border-gray-200">

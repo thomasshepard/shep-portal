@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
-  Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot,
+  Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
@@ -54,6 +54,7 @@ export default function Sidebar({ open, onClose }) {
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     (isAdmin || permissions.can_view_tasks) && { to: '/tasks', icon: ListTodo, label: 'Tasks' },
     permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },
+    permissions.can_view_insurance && { to: '/insurance', icon: Shield, label: 'Insurance & Taxes' },
     permissions.deals && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
     permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
     permissions.chickens && { to: '/chickens', icon: Egg, label: 'Chickens' },

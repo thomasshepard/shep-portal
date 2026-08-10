@@ -24,6 +24,8 @@ const emptyForm = {
   can_view_happy_cuts: false,
   can_view_finances: false,
   can_view_bank_dashboard: false,
+  can_view_insurance: false,
+  can_view_health_policies: false,
   allowed_tags: '',
 }
 
@@ -101,6 +103,8 @@ export default function AdminUsers() {
           can_view_happy_cuts: form.can_view_happy_cuts,
           can_view_finances: form.can_view_finances,
           can_view_bank_dashboard: form.can_view_bank_dashboard,
+          can_view_insurance: form.can_view_insurance,
+          can_view_health_policies: form.can_view_health_policies,
           allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         })
         .eq('id', newUserId)
@@ -576,6 +580,27 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Bank Dashboard</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_insurance}
+                        onChange={e => setField('can_view_insurance', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Insurance &amp; Taxes</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_health_policies}
+                        onChange={e => setField('can_view_health_policies', e.target.checked)}
+                        className="rounded"
+                        disabled={!form.can_view_insurance}
+                      />
+                      <span className={`text-sm ${form.can_view_insurance ? 'text-gray-700' : 'text-gray-400'}`}>
+                        …including health policies
+                      </span>
                     </label>
                   </div>
                 </div>
