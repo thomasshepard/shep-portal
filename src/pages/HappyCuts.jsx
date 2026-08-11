@@ -1108,6 +1108,30 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
     }
   }
 
+  // Pre-completion: writes ONLY Assigned To / Planned Job Mode — the same
+  // fields the Schedule tab's assign-crew dropdown writes. This is the
+  // planning signal the Crew Portal reads. It deliberately never touches
+  // Worked By / Contractor Payout / Payout Status — those used to get
+  // snapshotted here too (via saveWorkedBy, below), which put "Unpaid"
+  // payout data on jobs that hadn't happened yet — a real bug that showed
+  // up as a partner's earnings total including work they hadn't done.
+  // Worked By stays completion-only, written by markComplete().
+  async function saveAssignment() {
+    try {
+      await atPatch(SCHEDULE_TABLE, mow.id, {
+        [SF.assignedTo]: workedById ? [workedById] : [],
+        [SF.plannedJobMode]: workedById ? jobMode : null,
+      })
+      toast.success(workedById ? `Assigned to ${workedByPerson?.name} ✓` : 'Assignment cleared')
+      onRefresh()
+    } catch {
+      toast.error('Failed to save assignment')
+    }
+  }
+
+  // Post-completion only now (see isCompleted gate below) — corrects the
+  // historical record of who actually did a completed job, which does
+  // legitimately re-snapshot payout since the job is real and done.
   async function saveWorkedBy() {
     try {
       if (!workedById) {
@@ -1243,20 +1267,44 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
           📅 Add to Google Calendar
         </a>
 
-        {/* Worked By */}
+        {/* Assigned To (pre-completion) / Worked By (post-completion) — same
+            picker UI, different meaning and save target depending on whether
+            the job has actually happened yet. See saveAssignment/saveWorkedBy. */}
         {activeCrew.length > 0 && (
           <div>
-            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">👷 Worked By</p>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
+              {isCompleted ? '👷 Worked By' : '📋 Assigned To'}
+            </p>
             <WorkModePicker />
-            {(workedById !== (mow.workedByIds?.[0] || '') || (workedByPerson && jobMode !== (mow.jobMode || 'Solo'))) && (
-              <button onClick={saveWorkedBy} className="mt-2 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg">
-                Save
-              </button>
-            )}
-            {mow.contractorPayout != null && mow.workedByIds?.length > 0 && (
-              <p className="text-xs text-gray-500 mt-2">
-                Payout: <span className="font-semibold text-gray-700">{fmtCurrency(mow.contractorPayout)}</span> · {mow.payoutStatus || 'Unpaid'}
-              </p>
+            {isCompleted ? (
+              <>
+                {(workedById !== (mow.workedByIds?.[0] || '') || (workedByPerson && jobMode !== (mow.jobMode || 'Solo'))) && (
+                  <button onClick={saveWorkedBy} className="mt-2 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg">
+                    Save correction
+                  </button>
+                )}
+                {mow.contractorPayout != null && mow.workedByIds?.length > 0 && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Payout: <span className="font-semibold text-gray-700">{fmtCurrency(mow.contractorPayout)}</span> · {mow.payoutStatus || 'Unpaid'}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                {(workedById !== (mow.assignedToIds?.[0] || '') || (workedByPerson && jobMode !== (mow.plannedJobMode || 'Solo'))) && (
+                  <button onClick={saveAssignment} className="mt-2 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg">
+                    Save Assignment
+                  </button>
+                )}
+                {workedByPerson && mow.amount != null && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Estimated payout once completed:{' '}
+                    <span className="font-semibold text-gray-700">
+                      {fmtCurrency(Math.round((safeNum(mow.amount, 0) * (jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate)) / 100 * 100) / 100)}
+                    </span>
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}

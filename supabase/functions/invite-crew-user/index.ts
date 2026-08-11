@@ -16,27 +16,36 @@ const supabaseAdmin = createClient(
 // intended destination.
 const CREW_PORTAL_URL = Deno.env.get('CREW_PORTAL_URL') || 'https://thomasshepard.github.io/shep-portal/'
 
+// Called from the browser (AdminCrewAccess.jsx via supabase.functions.invoke),
+// so the CORS preflight (OPTIONS) needs an explicit response — without this,
+// the browser blocks the request before it ever reaches the code below and
+// supabase-js just reports a generic "Failed to send a request" fetch error.
+const corsHeaders = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+}
+
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 })
+    return json({ error: 'Method not allowed' }, 405)
   }
 
   let body: { email?: string; fullName?: string }
   try {
     body = await req.json()
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return json({ error: 'Invalid JSON' }, 400)
   }
 
   const { email, fullName } = body
   if (!email) {
-    return new Response(JSON.stringify({ error: 'email is required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return json({ error: 'email is required' }, 400)
   }
 
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
@@ -52,20 +61,11 @@ Deno.serve(async (req) => {
       const { data: list, error: listErr } = await supabaseAdmin.auth.admin.listUsers()
       const match = !listErr && list?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase())
       if (match) {
-        return new Response(JSON.stringify({ userId: match.id, alreadyExisted: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
+        return json({ userId: match.id, alreadyExisted: true })
       }
     }
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return json({ error: error.message }, 400)
   }
 
-  return new Response(JSON.stringify({ userId: data.user.id }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
+  return json({ userId: data.user.id })
 })
