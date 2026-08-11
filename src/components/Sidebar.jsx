@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
-  Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield,
+  Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield, UserCog,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
@@ -14,6 +14,7 @@ const adminItems = [
   { to: '/admin/users', icon: Users, label: 'Users' },
   { to: '/admin/logs', icon: ScrollText, label: 'Access Logs' },
   { to: '/admin/agents', icon: Bot, label: 'Agent Fleet' },
+  { to: '/admin/crew-access', icon: UserCog, label: 'Crew Access' },
 ]
 
 const linkClass = ({ isActive }) =>

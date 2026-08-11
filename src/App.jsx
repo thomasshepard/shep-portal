@@ -22,6 +22,7 @@ import AdminUsers from './pages/admin/AdminUsers'
 import AdminLogs from './pages/admin/AdminLogs'
 import AdminContent from './pages/admin/AdminContent'
 import AdminAgents from './pages/admin/AdminAgents'
+import AdminCrewAccess from './pages/admin/AdminCrewAccess'
 import MaintenanceSubmit from './pages/MaintenanceSubmit'
 import ErrorBoundary from './components/ErrorBoundary'
 import Documents from './pages/Documents'
@@ -138,6 +139,14 @@ export default function App() {
               element={
                 <AdminRoute>
                   <AdminAgents />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="admin/crew-access"
+              element={
+                <AdminRoute>
+                  <AdminCrewAccess />
                 </AdminRoute>
               }
             />

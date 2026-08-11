@@ -58,6 +58,8 @@ const SF = {
   contractorPayout: 'fldXHs5HWVUdjGpFH', // currency — snapshotted at completion
   payoutStatus: 'fld7YMwn3ozYB69QX',    // singleSelect: Unpaid/Paid
   payoutDate: 'fldudVxM07IOaDpvI',      // date
+  assignedTo: 'fldYaLvvamO0dyty9',      // link to Crew — PLANNED assignment (set before the job happens)
+  plannedJobMode: 'fldi4YAjhiYa0mXu1',  // singleSelect: Solo/Joint — planned, distinct from Job Mode (snapshotted at completion)
 }
 
 // Crew field IDs
@@ -169,6 +171,8 @@ function parseMow(r) {
     jobMode: safeStr(f[SF.jobMode]),
     contractorPayout: safeNum(f[SF.contractorPayout]),
     payoutStatus: safeStr(f[SF.payoutStatus]),
+    assignedToIds: arr(f[SF.assignedTo]),
+    plannedJobMode: safeStr(f[SF.plannedJobMode]),
     payoutDate: safeStr(f[SF.payoutDate]),
   }
 }
@@ -947,8 +951,10 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
   const [cashLoading, setCashLoading] = useState(false)
   const [localInvStatus, setLocalInvStatus] = useState(mow.invStatus || '')
   const [localInvoiceUrl, setLocalInvoiceUrl] = useState(mow.stripeInvoiceUrl || '')
-  const [workedById, setWorkedById] = useState(mow.workedByIds?.[0] || '')
-  const [jobMode, setJobMode] = useState(mow.jobMode || 'Solo')
+  // Pre-fill from the planned assignment (Assigned To / Planned Job Mode) if the job
+  // hasn't been completed yet — Worked By/Job Mode only get written at completion.
+  const [workedById, setWorkedById] = useState(mow.workedByIds?.[0] || mow.assignedToIds?.[0] || '')
+  const [jobMode, setJobMode] = useState(mow.jobMode || (mow.assignedToIds?.[0] ? mow.plannedJobMode : '') || 'Solo')
   const fileInputRef = useRef(null)
   const activeCrew = crew.filter(c => c.status !== 'Inactive')
   const workedByPerson = crew.find(c => c.id === workedById) || null
@@ -2513,14 +2519,16 @@ function ScheduleMapView({ weekMows, contactsById, contacts }) {
 }
 
 // ─── ScheduleTab ──────────────────────────────────────────────────────────────
-function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJob, onRefresh, contacts }) {
+function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJob, onRefresh, contacts, crew = [] }) {
   const [addOpen, setAddOpen] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
   const [scheduleView, setScheduleView] = useState('list')
   const [hideCancelled, setHideCancelled] = useState(true)
+  const [assigningId, setAssigningId] = useState(null)
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
   const weekStr = weekStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+  const activeCrew = crew.filter(c => c.status !== 'Inactive')
 
   function goWeek(n) { setWeekStart(w => addDays(w, n * 7)) }
 
@@ -2531,6 +2539,24 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
       onRefresh()
     } catch {
       toast.error('Failed to update')
+    }
+  }
+
+  // value is "" (unassigned) or "<crewId>|Solo" / "<crewId>|Joint"
+  async function handleAssignCrew(mow, value) {
+    setAssigningId(mow.id)
+    try {
+      const [crewId, mode] = value ? value.split('|') : ['', '']
+      await atPatch(SCHEDULE_TABLE, mow.id, {
+        [SF.assignedTo]: crewId ? [crewId] : [],
+        [SF.plannedJobMode]: crewId ? mode : null,
+      })
+      toast.success(crewId ? 'Crew assigned' : 'Assignment cleared')
+      onRefresh()
+    } catch {
+      toast.error('Failed to update assignment')
+    } finally {
+      setAssigningId(null)
     }
   }
 
@@ -2640,6 +2666,20 @@ function ScheduleTab({ schedules, contactsById, weekStart, setWeekStart, onOpenJ
                   >
                     {Object.keys(MOW_STATUS).map(s => <option key={s}>{s}</option>)}
                   </select>
+                  {activeCrew.length > 0 && (
+                    <select
+                      className={`text-xs border rounded-lg px-2 py-1.5 bg-white max-w-[110px] ${mow.assignedToIds?.length ? 'border-green-300 text-green-700' : 'border-gray-200 text-gray-400'}`}
+                      value={mow.assignedToIds?.[0] ? `${mow.assignedToIds[0]}|${mow.plannedJobMode || 'Solo'}` : ''}
+                      disabled={assigningId === mow.id}
+                      onChange={e => handleAssignCrew(mow, e.target.value)}
+                    >
+                      <option value="">Unassigned</option>
+                      {activeCrew.map(c => [
+                        <option key={`${c.id}-solo`} value={`${c.id}|Solo`}>{c.name} · Solo</option>,
+                        <option key={`${c.id}-joint`} value={`${c.id}|Joint`}>{c.name} · Joint</option>,
+                      ])}
+                    </select>
+                  )}
                   <button
                     onClick={() => onOpenJob(mow)}
                     className="text-xs font-medium text-green-600 px-2 min-h-[32px]"
@@ -4061,6 +4101,7 @@ export default function HappyCuts() {
           onOpenJob={setJobDetail}
           onRefresh={load}
           contacts={contacts}
+          crew={crew}
         />
       )}
       {activeTab === 'projects' && (
