@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, PM_BASE_ID, CHICKENS_BASE_ID } from '../lib/airtable'
+import { EQUIPMENT_TABLE } from '../lib/fleet'
 import { useAuth } from '../hooks/useAuth'
 import {
   Building2, FileText, Egg, Tag, ListTodo, ChefHat, Wrench, FolderOpen, MapPin,
@@ -121,6 +122,9 @@ export default function Dashboard() {
   const [hcData, setHcData]       = useState([])
   const [hcLoading, setHcLoading] = useState(true)
 
+  const [fleetData, setFleetData]       = useState([])
+  const [fleetLoading, setFleetLoading] = useState(true)
+
   const [activityLogs, setActivityLogs]       = useState([])
   const [activityLoading, setActivityLoading] = useState(true)
 
@@ -161,6 +165,12 @@ export default function Dashboard() {
       .then(records => setHcData(records))
       .catch(() => {})
       .finally(() => setHcLoading(false))
+
+    // Fleet equipment
+    fetchAllRecords(EQUIPMENT_TABLE, {}, HC_BASE)
+      .then(res => setFleetData(res.data || []))
+      .catch(() => {})
+      .finally(() => setFleetLoading(false))
 
     // Recent activity
     supabase.from('access_logs')
@@ -280,6 +290,17 @@ export default function Dashboard() {
       return !isNaN(dt) && dt >= today && dt <= in7
     })
     .sort((a, b) => safeStr(a.fields?.[SF.date]).localeCompare(safeStr(b.fields?.[SF.date])))
+
+  // ── Fleet-derived values ──────────────────────────────────────────────────
+  const activeFleet = fleetData.filter(e => safeStr(e.fields?.Status) !== 'Sold')
+  const fleetTotals = {
+    invested: activeFleet.reduce((s, e) => s + safeNum(e.fields?.['Total Invested']), 0),
+    value:    activeFleet.reduce((s, e) => s + safeNum(e.fields?.['Est. Market Value']), 0),
+    equity:   activeFleet.reduce((s, e) => s + safeNum(e.fields?.['Est. Equity']), 0),
+    running:  activeFleet.filter(e => safeStr(e.fields?.Status) === 'Running').length,
+    inRepair: activeFleet.filter(e => safeStr(e.fields?.Status) === 'In Repair').length,
+    down:     activeFleet.filter(e => safeStr(e.fields?.Status) === 'Down').length,
+  }
 
   if (!isAdmin && !isVA) {
     return <MemberDashboard profile={profile} permissions={permissions} />
@@ -409,6 +430,38 @@ export default function Dashboard() {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Section 3b — Fleet ─────────────────────────────────────────────── */}
+      {isAdmin && !fleetLoading && activeFleet.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <SectionHeader title="Fleet" hash="#/fleet" />
+            <span className="text-xs text-gray-400">
+              {[
+                fleetTotals.running && `${fleetTotals.running} Running`,
+                fleetTotals.inRepair && `${fleetTotals.inRepair} In Repair`,
+                fleetTotals.down && `${fleetTotals.down} Down`,
+              ].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Invested</p>
+              <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtMoney(fleetTotals.invested)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Est. value</p>
+              <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtMoney(fleetTotals.value)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Equity</p>
+              <p className={`text-lg font-bold tabular-nums ${fleetTotals.equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {fmtMoney(fleetTotals.equity)}
+              </p>
+            </div>
           </div>
         </div>
       )}
