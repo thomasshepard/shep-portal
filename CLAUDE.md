@@ -102,6 +102,8 @@ Properties has a parallel visibility layer for the same reason: non-admin users 
 | `/happy-cuts` | HappyCuts | PermRoute(can_view_happy_cuts) | Lawn care CRM dashboard |
 | `/happy-cuts/client/:id` | HappyCutsClientDetail | PermRoute(can_view_happy_cuts) | Client detail with mow history |
 | `/happy-cuts/guide` | HappyCutsGuide | PermRoute(can_view_happy_cuts) | Pricing/service guide |
+| `/fleet` | Fleet | PermRoute(can_view_happy_cuts) | Happy Cuts equipment fleet — investment/value/equity grid |
+| `/fleet/:id` | FleetDetail | PermRoute(can_view_happy_cuts) | Machine detail — photos, repair timeline, cost log |
 | `/tools` | Tools | ProtectedRoute | Custom HTML tools |
 | `/tools/:slug` | ToolView | ProtectedRoute | Sandboxed iframe tool |
 | `/files` | Files | ProtectedRoute | Supabase Storage file browser |
@@ -273,6 +275,16 @@ Frontend: `src/components/ProjectsPanel.jsx` (list + create, plus the Projects/S
 - The standalone local Express app (`bank-dashboard`, separate repo/directory) still exists untouched as of this writing — not yet decommissioned.
 
 > `ChickenIncubator.jsx` is **not a standalone route** — it is a panel rendered inside the Chickens page for managing egg batches. `ChickenBatchDetail.jsx` is a sub-view rendered inside `ChickenIncubator.jsx` for a single batch (candling log, daily readings, hatch results).
+
+### Fleet (Happy Cuts equipment)
+
+`/fleet` + `/fleet/:id` (`src/pages/Fleet.jsx` / `FleetDetail.jsx`, both `PermRoute(can_view_happy_cuts)` — no separate flag, it's Happy Cuts equipment) track mowers/trimmers: what's been spent, condition, and estimated resale value.
+
+- **Airtable**: two new tables in the existing Happy Cuts base (`appZOi48qf8SzyOml`, `VITE_AIRTABLE_HAPPY_CUTS_BASE_ID`) — `Equipment` (`tblgG4vY2mZoOdrkO`) and `Cost Entries` (`tbl4Etxh9weJ2Qitz`), linked. `Total Invested` and `Est. Equity` on Equipment are Airtable rollup/formula fields (`Cost Entries Sum` rollup → `Total Invested` formula → `Est. Equity` formula) — never write to them directly. `Cost Entries.Cost` is nullable by design (repairs get logged before the bill is known — dropped off at Buster's, mark it TBD, fill it in later).
+- Shared config (base ID, table names, select options, staleness threshold, photo upload/parse helpers) lives in **`src/lib/fleet.js`**, imported by both pages — same pattern as `src/lib/incubation.js`.
+- **Photos** are Supabase Storage (`fleet-photos` bucket, public), not Airtable attachments — `Equipment.Photo URLs` holds a JSON array of `{url, kind}` (`kind: 'tag' | 'machine'`, tag/serial photos kept separate from machine shots for fast part-number lookup). Uploaded client-side via `uploadFleetPhoto()` in `lib/fleet.js`, same direct-to-bucket pattern as `chicken-photos` in `ChickenBatchDetail.jsx`.
+- "Needs attention" panel (missing `Purchase Price`/`Purchase Date`, or `Est. Market Value` unrefreshed >60 days) is derived client-side, not stored — mirrors the Insurance page's `issues` pattern.
+- **Operating the module without the UI**: see **[.claude/skills/fleet-ops/SKILL.md](.claude/skills/fleet-ops/SKILL.md)** — full schema + MCP recipes for adding machines, logging costs, updating market values, and pulling fleet totals directly against Airtable.
 
 ## Environment Variables
 
