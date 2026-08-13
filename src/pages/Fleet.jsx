@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Wrench, Plus, X, Loader2, AlertTriangle, Search, Camera } from 'lucide-react'
+import {
+  Wrench, Plus, X, Loader2, AlertTriangle, Search, Camera,
+  ChevronDown, ChevronUp, SlidersHorizontal, LayoutGrid, List as ListIcon, Table as TableIcon,
+} from 'lucide-react'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency } from '../lib/airtable'
 import {
   HC_BASE, EQUIPMENT_TABLE, TYPES, STATUSES, LOCATIONS, STATUS_BADGE, STATUS_DOT,
@@ -22,6 +25,28 @@ const safeNum = (v, fallback = 0) => {
   return Number.isNaN(n) ? fallback : n
 }
 
+/** Remembers a preference in localStorage, per device — this module is used
+ *  almost entirely from one iPhone, so "remember how I last had it" matters
+ *  more than syncing across devices. Fails quiet in private-browsing etc. */
+function usePersisted(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(key)
+      return raw != null ? JSON.parse(raw) : initial
+    } catch { return initial }
+  })
+  useEffect(() => {
+    try { window.localStorage.setItem(key, JSON.stringify(value)) } catch { /* ignore */ }
+  }, [key, value])
+  return [value, setValue]
+}
+
+const VIEW_MODES = [
+  { key: 'list', icon: ListIcon, label: 'List' },
+  { key: 'grid', icon: LayoutGrid, label: 'Grid' },
+  { key: 'table', icon: TableIcon, label: 'Table' },
+]
+
 export default function Fleet() {
   const [loading, setLoading] = useState(true)
   const [equipment, setEquipment] = useState([])
@@ -30,6 +55,9 @@ export default function Fleet() {
   const [locationFilter, setLocationFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
+  const [viewMode, setViewMode] = usePersisted('fleet-view-mode', 'list')
+  const [statsOpen, setStatsOpen] = usePersisted('fleet-stats-open', false)
+  const [filtersOpen, setFiltersOpen] = useState(false) // not persisted — starts closed every visit so it can't linger open eating space
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -96,54 +124,75 @@ export default function Fleet() {
     return out
   }, [equipment])
 
+  const activeFilterCount = [typeFilter, statusFilter, locationFilter].filter(v => v !== 'all').length
+
   if (loading) return <LoadingSpinner />
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Wrench size={24} className="text-blue-600" />
-            Fleet
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Happy Cuts equipment — investment, condition, and value</p>
-        </div>
+    <div className="p-3 sm:p-6 max-w-6xl mx-auto space-y-3 sm:space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <Wrench size={22} className="text-blue-600" />
+          Fleet
+        </h1>
         <button
           onClick={() => setAdding(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex-shrink-0"
         >
-          <Plus size={15} /> Add Machine
+          <Plus size={15} /> Add
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatTile label="Total invested" value={fmtCurrency(totals.invested)} sub={`${totals.activeCount} active machines`} />
-        <StatTile label="Est. fleet value" value={fmtCurrency(totals.value)} sub="Sum of Est. Market Value" />
-        <StatTile
-          label="Est. equity"
-          value={fmtCurrency(totals.equity)}
-          sub={totals.equity >= 0 ? 'Fleet is worth more than it cost' : 'Fleet has cost more than it’s worth'}
-          tone={totals.equity >= 0 ? 'good' : 'crit'}
-        />
-        <StatTile
-          label="By status"
-          value={STATUSES.filter(s => totals.counts[s]).map(s => `${totals.counts[s]} ${s}`).join(' · ') || 'No equipment yet'}
-          sub="Active fleet"
-          small
-        />
+      {/* Stats — collapsed by default; header row doubles as a one-line summary */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <button
+          onClick={() => setStatsOpen(o => !o)}
+          className="w-full px-4 py-2.5 flex items-center justify-between gap-3 text-left"
+        >
+          {statsOpen ? (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Fleet totals</span>
+          ) : (
+            <p className="text-sm text-gray-700 truncate min-w-0">
+              <span className="font-bold tabular-nums">{fmtCurrency(totals.invested)}</span> invested
+              {totals.value > 0 && (
+                <> · <span className={`font-bold tabular-nums ${totals.equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtCurrency(totals.equity)}</span> equity</>
+              )}
+              {' · '}
+              {STATUSES.filter(s => totals.counts[s]).map(s => `${totals.counts[s]} ${s}`).join(' · ') || 'no equipment yet'}
+            </p>
+          )}
+          {statsOpen ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
+        </button>
+        {statsOpen && (
+          <div className="px-4 pb-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatTile label="Total invested" value={fmtCurrency(totals.invested)} sub={`${totals.activeCount} active machines`} />
+            <StatTile label="Est. fleet value" value={fmtCurrency(totals.value)} sub="Sum of Est. Market Value" />
+            <StatTile
+              label="Est. equity"
+              value={fmtCurrency(totals.equity)}
+              sub={totals.equity >= 0 ? 'Fleet is worth more than it cost' : 'Fleet has cost more than it’s worth'}
+              tone={totals.equity >= 0 ? 'good' : 'crit'}
+            />
+            <StatTile
+              label="By status"
+              value={STATUSES.filter(s => totals.counts[s]).map(s => `${totals.counts[s]} ${s}`).join(' · ') || 'No equipment yet'}
+              sub="Active fleet"
+              small
+            />
+          </div>
+        )}
       </div>
 
       {/* Needs attention */}
       {issues.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 border-l-4 border-l-amber-500 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-            <AlertTriangle size={15} className="text-amber-600" />
+          <div className="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2">
+            <AlertTriangle size={14} className="text-amber-600" />
             <h2 className="font-semibold text-gray-800 text-sm">Needs attention</h2>
           </div>
           <div className="divide-y divide-gray-100">
             {issues.map(i => (
-              <div key={i.key} className="px-4 py-2.5 flex items-center justify-between gap-3">
+              <div key={i.key} className="px-4 py-2 flex items-center justify-between gap-3">
                 <p className="text-sm text-gray-800">{i.title}</p>
                 <Link to={`/fleet/${i.machine.id}`} className="text-xs font-medium text-blue-600 hover:text-blue-800 flex-shrink-0">
                   Fix
@@ -154,25 +203,64 @@ export default function Fleet() {
         </div>
       )}
 
-      {/* Search + filters */}
+      {/* Search + filter toggle + view switcher, one compact row */}
       <div className="space-y-2">
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name, make, model, or serial…"
-            className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search…"
+              className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <button
+            onClick={() => setFiltersOpen(o => !o)}
+            className={`relative flex items-center px-3 rounded-lg text-sm font-medium border flex-shrink-0 transition-colors ${
+              filtersOpen || activeFilterCount > 0 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+            }`}
+            title="Filters"
+          >
+            <SlidersHorizontal size={15} />
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-bold grid place-items-center">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+          <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden flex-shrink-0">
+            {VIEW_MODES.map(mode => (
+              <button
+                key={mode.key}
+                onClick={() => setViewMode(mode.key)}
+                title={mode.label}
+                className={`p-2 transition-colors ${viewMode === mode.key ? 'bg-gray-900 text-white' : 'bg-white text-gray-400 hover:bg-gray-50'}`}
+              >
+                <mode.icon size={15} />
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex gap-3 flex-wrap">
-          <FilterGroup label="Type" value={typeFilter} onChange={setTypeFilter} options={TYPES} />
-          <FilterGroup label="Status" value={statusFilter} onChange={setStatusFilter} options={STATUSES} />
-          <FilterGroup label="Location" value={locationFilter} onChange={setLocationFilter} options={LOCATIONS} />
-        </div>
+
+        {filtersOpen && (
+          <div className="bg-white border border-gray-200 rounded-lg p-3 grid gap-3 sm:grid-cols-3">
+            <CompactSelect label="Type" value={typeFilter} onChange={setTypeFilter} options={TYPES} />
+            <CompactSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={STATUSES} />
+            <CompactSelect label="Location" value={locationFilter} onChange={setLocationFilter} options={LOCATIONS} />
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => { setTypeFilter('all'); setStatusFilter('all'); setLocationFilter('all') }}
+                className="sm:col-span-3 text-xs text-blue-600 hover:text-blue-800 font-medium text-left"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Grid */}
+      {/* Results */}
       {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-sm text-gray-400">
           {equipment.length === 0 ? (
@@ -184,9 +272,15 @@ export default function Fleet() {
             </>
           ) : 'Nothing matches those filters.'}
         </div>
-      ) : (
+      ) : viewMode === 'grid' ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map(e => <MachineCard key={e.id} machine={e} />)}
+        </div>
+      ) : viewMode === 'table' ? (
+        <FleetTable machines={filtered} />
+      ) : (
+        <div className="space-y-2">
+          {filtered.map(e => <MachineRow key={e.id} machine={e} />)}
         </div>
       )}
 
@@ -213,21 +307,101 @@ export function StatTile({ label, value, sub, tone, small }) {
   )
 }
 
-function FilterGroup({ label, value, onChange, options }) {
+function CompactSelect({ label, value, onChange, options }) {
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <span className="text-xs font-medium text-gray-400 mr-0.5">{label}:</span>
-      {['all', ...options].map(opt => (
-        <button
-          key={opt}
-          onClick={() => onChange(opt)}
-          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-            value === opt ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-          }`}
-        >
-          {opt === 'all' ? 'All' : opt}
-        </button>
-      ))}
+    <label className="block min-w-0">
+      <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">{label}</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+        <option value="all">All</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
+  )
+}
+
+function MachineRow({ machine }) {
+  const f = machine.fields || {}
+  const photos = parsePhotos(f)
+  const thumb = photos.find(p => p.kind === 'machine') || photos[0]
+  const status = safeStr(f.Status, 'Running')
+  const invested = safeNum(f['Total Invested'])
+  const value = f['Est. Market Value']
+  const equity = safeNum(f['Est. Equity'])
+  const hasValue = value != null && value !== ''
+
+  return (
+    <Link
+      to={`/fleet/${machine.id}`}
+      className="flex items-center gap-3 bg-white rounded-xl border border-gray-200 p-2.5 hover:border-gray-300 hover:shadow-sm transition-all"
+    >
+      <div className="w-12 h-12 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden grid place-items-center">
+        {thumb ? <img src={thumb.url} alt="" className="w-full h-full object-cover" /> : <Wrench size={16} className="text-gray-300" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <p className="font-semibold text-gray-900 text-sm truncate">{safeStr(f.Name, 'Unnamed machine')}</p>
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[status] || STATUS_DOT.Running}`} title={status} />
+        </div>
+        <p className="text-xs text-gray-400 truncate">
+          {[safeStr(f.Make), safeStr(f.Model)].filter(Boolean).join(' ') || status}
+          {f.Location ? ` · ${safeStr(f.Location)}` : ''}
+        </p>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <p className={`text-sm font-bold tabular-nums ${!hasValue ? 'text-gray-500' : equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+          {hasValue ? fmtCurrency(equity) : fmtCurrency(invested)}
+        </p>
+        <p className="text-[10px] text-gray-400">{hasValue ? 'equity' : 'invested'}</p>
+      </div>
+    </Link>
+  )
+}
+
+function FleetTable({ machines }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <table className="w-full text-sm min-w-[560px]">
+        <thead>
+          <tr className="border-b border-gray-200 text-left">
+            <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Name</th>
+            <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Status</th>
+            <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Location</th>
+            <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Invested</th>
+            <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Value</th>
+            <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Equity</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {machines.map(m => {
+            const f = m.fields || {}
+            const status = safeStr(f.Status, 'Running')
+            const value = f['Est. Market Value']
+            const hasValue = value != null && value !== ''
+            const equity = safeNum(f['Est. Equity'])
+            return (
+              <tr key={m.id} className="hover:bg-gray-50">
+                <td className="px-3 py-2">
+                  <Link to={`/fleet/${m.id}`} className="font-medium text-gray-900 hover:text-blue-700">{safeStr(f.Name, 'Unnamed machine')}</Link>
+                  <p className="text-xs text-gray-400">{[safeStr(f.Make), safeStr(f.Model)].filter(Boolean).join(' ') || '—'}</p>
+                </td>
+                <td className="px-3 py-2">
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${STATUS_BADGE[status] || STATUS_BADGE.Running}`}>{status}</span>
+                </td>
+                <td className="px-3 py-2 text-gray-600">{safeStr(f.Location) || '—'}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-800">{fmtCurrency(safeNum(f['Total Invested']))}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-800">{hasValue ? fmtCurrency(value) : '—'}</td>
+                <td className={`px-3 py-2 text-right tabular-nums font-bold ${!hasValue ? 'text-gray-300' : equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {hasValue ? fmtCurrency(equity) : '—'}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

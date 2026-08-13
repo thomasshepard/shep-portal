@@ -5,7 +5,7 @@ import {
   ArrowLeft, Wrench, Pencil, Plus, X, Loader2, Camera,
   ChevronLeft, ChevronRight, Trash2,
 } from 'lucide-react'
-import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtDate } from '../lib/airtable'
+import { fetchAllRecords, createRecord, updateRecord, deleteRecord, fmtCurrency, fmtDate } from '../lib/airtable'
 import {
   HC_BASE, EQUIPMENT_TABLE, COST_TABLE, CATEGORIES, VENDOR_PRESETS, STATUS_BADGE, STATUS_DOT,
   uploadFleetPhoto, parsePhotos, daysSince, STALE_DAYS,
@@ -32,7 +32,7 @@ export default function FleetDetail() {
   const [machine, setMachine] = useState(null)
   const [costs, setCosts] = useState([])
   const [editing, setEditing] = useState(false)
-  const [logging, setLogging] = useState(false)
+  const [costModal, setCostModal] = useState(null) // null | 'new' | costEntryRecord
   const [uploadingKind, setUploadingKind] = useState(null) // 'tag' | 'machine' | null
   const [lightbox, setLightbox] = useState(null) // { photos, index }
   const tagInputRef = useRef(null)
@@ -212,7 +212,7 @@ export default function FleetDetail() {
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
           <h2 className="font-semibold text-gray-800 text-sm">Repair &amp; cost history</h2>
           <button
-            onClick={() => setLogging(true)}
+            onClick={() => setCostModal('new')}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700"
           >
             <Plus size={13} /> Log Repair/Cost
@@ -233,7 +233,7 @@ export default function FleetDetail() {
         {sortedCosts.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm text-gray-400">
             No repairs logged yet.{' '}
-            <button onClick={() => setLogging(true)} className="text-blue-600 hover:text-blue-800 font-medium">Log the first one</button>
+            <button onClick={() => setCostModal('new')} className="text-blue-600 hover:text-blue-800 font-medium">Log the first one</button>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
@@ -241,7 +241,11 @@ export default function FleetDetail() {
               const cf = c.fields || {}
               const hasCost = cf.Cost != null
               return (
-                <div key={c.id} className="px-4 py-3 flex items-start gap-3">
+                <button
+                  key={c.id}
+                  onClick={() => setCostModal(c)}
+                  className="w-full px-4 py-3 flex items-start gap-3 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-gray-900">{safeStr(cf.Description, 'Untitled')}</span>
@@ -256,10 +260,13 @@ export default function FleetDetail() {
                     </p>
                     {cf.Notes && <p className="text-xs text-gray-500 mt-1">{safeStr(cf.Notes)}</p>}
                   </div>
-                  <p className={`text-sm font-bold tabular-nums flex-shrink-0 ${hasCost ? 'text-gray-800' : 'text-amber-600'}`}>
-                    {hasCost ? fmtCurrency(cf.Cost) : 'TBD'}
-                  </p>
-                </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <p className={`text-sm font-bold tabular-nums ${hasCost ? 'text-gray-800' : 'text-amber-600'}`}>
+                      {hasCost ? fmtCurrency(cf.Cost) : 'TBD'}
+                    </p>
+                    <Pencil size={12} className="text-gray-300" />
+                  </div>
+                </button>
               )
             })}
           </div>
@@ -270,8 +277,13 @@ export default function FleetDetail() {
         <EquipmentModal equipment={machine} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); load() }} />
       )}
 
-      {logging && (
-        <CostEntryModal machineId={machine.id} onClose={() => setLogging(false)} onSaved={() => { setLogging(false); load() }} />
+      {costModal && (
+        <CostEntryModal
+          machineId={machine.id}
+          entry={costModal === 'new' ? null : costModal}
+          onClose={() => setCostModal(null)}
+          onSaved={() => { setCostModal(null); load() }}
+        />
       )}
 
       {lightbox && (
@@ -349,22 +361,25 @@ function Lightbox({ photos, index, onClose, onIndex, onDelete }) {
   )
 }
 
-function CostEntryModal({ machineId, onClose, onSaved }) {
-  const [description, setDescription] = useState('')
-  const [category, setCategory] = useState(CATEGORIES[0])
-  const [cost, setCost] = useState('')
-  const [tbd, setTbd] = useState(false)
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [vendor, setVendor] = useState('')
-  const [vendorCustom, setVendorCustom] = useState(false)
-  const [notes, setNotes] = useState('')
+function CostEntryModal({ machineId, entry, onClose, onSaved }) {
+  const ef = entry?.fields || {}
+  const [description, setDescription] = useState(safeStr(ef.Description))
+  const [category, setCategory] = useState(safeStr(ef.Category, CATEGORIES[0]))
+  const [cost, setCost] = useState(ef.Cost != null ? String(ef.Cost) : '')
+  const [tbd, setTbd] = useState(!!entry && ef.Cost == null)
+  const [date, setDate] = useState(entry ? safeStr(ef.Date) : new Date().toISOString().slice(0, 10))
+  const [vendor, setVendor] = useState(safeStr(ef.Vendor))
+  const [vendorCustom, setVendorCustom] = useState(!!ef.Vendor && !VENDOR_PRESETS.includes(safeStr(ef.Vendor)))
+  const [notes, setNotes] = useState(safeStr(ef.Notes))
   const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!description.trim()) return toast.error('What was it?')
     setSaving(true)
-    const { error } = await createRecord(COST_TABLE, {
+    const fields = {
       Description: description,
       Equipment: [machineId],
       Category: category,
@@ -372,18 +387,31 @@ function CostEntryModal({ machineId, onClose, onSaved }) {
       Date: date || null,
       Vendor: vendor,
       Notes: notes,
-    }, HC_BASE)
+    }
+    const { error } = entry
+      ? await updateRecord(COST_TABLE, entry.id, fields, HC_BASE)
+      : await createRecord(COST_TABLE, fields, HC_BASE)
     setSaving(false)
-    if (error) return toast.error('Failed to log: ' + error)
-    toast.success('Logged')
+    if (error) return toast.error('Failed to save: ' + error)
+    toast.success(entry ? 'Saved' : 'Logged')
+    onSaved()
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return }
+    setDeleting(true)
+    const { error } = await deleteRecord(COST_TABLE, entry.id, HC_BASE)
+    setDeleting(false)
+    if (error) return toast.error('Failed to delete: ' + error)
+    toast.success('Deleted')
     onSaved()
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl w-full max-w-md shadow-xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-900">Log a repair or cost</h2>
+      <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white rounded-t-xl">
+          <h2 className="font-semibold text-gray-900">{entry ? 'Edit repair/cost' : 'Log a repair or cost'}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -456,12 +484,35 @@ function CostEntryModal({ machineId, onClose, onSaved }) {
             <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)} className={inp} />
           </Field>
 
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
-            <button type="submit" disabled={saving}
-              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
-              {saving && <Loader2 size={14} className="animate-spin" />} Log it
-            </button>
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-2">
+              {entry && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                      confirmDelete ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-gray-100 hover:bg-gray-200 text-red-600'
+                    }`}
+                  >
+                    {deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete' : 'Delete'}
+                  </button>
+                  {confirmDelete && (
+                    <button type="button" onClick={() => setConfirmDelete(false)} className="text-xs text-gray-400 hover:text-gray-700">
+                      Cancel
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+              <button type="submit" disabled={saving}
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
+                {saving && <Loader2 size={14} className="animate-spin" />} {entry ? 'Save' : 'Log it'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
