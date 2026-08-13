@@ -191,7 +191,7 @@ export default function FleetDetail() {
           uploading={uploadingKind === 'tag'}
           onOpen={(p, i) => setLightbox({ photos: tagPhotos, index: i })}
         />
-        <input ref={tagInputRef} type="file" accept="image/*" capture="environment" className="hidden"
+        <input ref={tagInputRef} type="file" accept="image/*" className="hidden"
           onChange={e => handlePhotoSelected(e.target.files?.[0], 'tag')} />
 
         <div className="mt-4">
@@ -202,7 +202,7 @@ export default function FleetDetail() {
             uploading={uploadingKind === 'machine'}
             onOpen={(p, i) => setLightbox({ photos: machinePhotos, index: i })}
           />
-          <input ref={machineInputRef} type="file" accept="image/*" capture="environment" className="hidden"
+          <input ref={machineInputRef} type="file" accept="image/*" className="hidden"
             onChange={e => handlePhotoSelected(e.target.files?.[0], 'machine')} />
         </div>
       </div>
