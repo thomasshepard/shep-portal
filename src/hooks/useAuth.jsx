@@ -71,6 +71,7 @@ export function AuthProvider({ children }) {
     can_view_finances:   isAdmin || !!profile?.can_view_finances,
     can_view_bank_dashboard: isAdmin || !!profile?.can_view_bank_dashboard,
     can_view_insurance:  isAdmin || !!profile?.can_view_insurance,
+    can_view_fleet:      isAdmin || !!profile?.can_view_fleet,
     // Gates rows marked Visibility="Restricted" in Airtable (the family health
     // plan) separately, so the property side can be shared without it.
     can_view_health_policies: isAdmin || !!profile?.can_view_health_policies,

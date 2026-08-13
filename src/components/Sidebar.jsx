@@ -62,7 +62,7 @@ export default function Sidebar({ open, onClose }) {
     (isAdmin || permissions.can_view_recipes) && { to: '/recipes', icon: ChefHat, label: 'Recipes' },
     (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
     permissions.can_view_happy_cuts && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
-    permissions.can_view_happy_cuts && { to: '/fleet', icon: Wrench, label: 'Fleet' },
+    permissions.can_view_fleet && { to: '/fleet', icon: Wrench, label: 'Fleet' },
     isAdmin && { to: '/bitcoin', icon: Bitcoin, label: 'Bitcoin' },
     permissions.can_view_finances && { to: '/finances', icon: Wallet, label: 'Finances' },
     permissions.can_view_bank_dashboard && { to: '/bank-dashboard', icon: PiggyBank, label: 'Bank Dashboard' },

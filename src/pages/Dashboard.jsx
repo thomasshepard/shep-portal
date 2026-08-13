@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, PM_BASE_ID, CHICKENS_BASE_ID } from '../lib/airtable'
-import { EQUIPMENT_TABLE } from '../lib/fleet'
+import { FLEET_BASE_ID, EQUIPMENT_TABLE, MAINT_TABLE, maintenanceUrgency } from '../lib/fleet'
 import { useAuth } from '../hooks/useAuth'
 import {
   Building2, FileText, Egg, Tag, ListTodo, ChefHat, Wrench, FolderOpen, MapPin,
@@ -124,6 +124,7 @@ export default function Dashboard() {
 
   const [fleetData, setFleetData]       = useState([])
   const [fleetLoading, setFleetLoading] = useState(true)
+  const [fleetMaintData, setFleetMaintData] = useState([])
 
   const [activityLogs, setActivityLogs]       = useState([])
   const [activityLoading, setActivityLoading] = useState(true)
@@ -167,10 +168,15 @@ export default function Dashboard() {
       .finally(() => setHcLoading(false))
 
     // Fleet equipment
-    fetchAllRecords(EQUIPMENT_TABLE, {}, HC_BASE)
+    fetchAllRecords(EQUIPMENT_TABLE, {}, FLEET_BASE_ID)
       .then(res => setFleetData(res.data || []))
       .catch(() => {})
       .finally(() => setFleetLoading(false))
+
+    // Fleet maintenance — just for the one due-count line on the Fleet widget
+    fetchAllRecords(MAINT_TABLE, {}, FLEET_BASE_ID)
+      .then(res => setFleetMaintData(res.data || []))
+      .catch(() => {})
 
     // Recent activity
     supabase.from('access_logs')
@@ -300,6 +306,10 @@ export default function Dashboard() {
     running:  activeFleet.filter(e => safeStr(e.fields?.Status) === 'Running').length,
     inRepair: activeFleet.filter(e => safeStr(e.fields?.Status) === 'In Repair').length,
     down:     activeFleet.filter(e => safeStr(e.fields?.Status) === 'Down').length,
+    maintDue: fleetMaintData.filter(m => {
+      const s = maintenanceUrgency(m.fields || {}).state
+      return s === 'overdue' || s === 'dueSoon'
+    }).length,
   }
 
   if (!isAdmin && !isVA) {
@@ -463,6 +473,11 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
+          {fleetTotals.maintDue > 0 && (
+            <p className="text-xs text-amber-600 mt-3 pt-3 border-t border-gray-100">
+              {fleetTotals.maintDue} maintenance item{fleetTotals.maintDue === 1 ? '' : 's'} due or overdue
+            </p>
+          )}
         </div>
       )}
 

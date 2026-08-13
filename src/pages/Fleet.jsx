@@ -7,8 +7,9 @@ import {
 } from 'lucide-react'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency } from '../lib/airtable'
 import {
-  HC_BASE, EQUIPMENT_TABLE, TYPES, STATUSES, LOCATIONS, STATUS_BADGE, STATUS_DOT,
-  STALE_DAYS, parsePhotos, daysSince,
+  FLEET_BASE_ID, EQUIPMENT_TABLE, ASSET_CATEGORIES, STATUSES, LOCATIONS, AXLE_COUNTS,
+  CATEGORY_FIELDS, STATUS_BADGE, STATUS_DOT, STALE_DAYS, parsePhotos, daysSince,
+  MAINT_TABLE, maintenanceUrgency,
 } from '../lib/fleet'
 import LoadingSpinner from '../components/LoadingSpinner'
 
@@ -24,6 +25,9 @@ const safeNum = (v, fallback = 0) => {
   const n = Number(v)
   return Number.isNaN(n) ? fallback : n
 }
+const arr = v => (Array.isArray(v) ? v : [])
+
+const CATEGORY_BADGE = 'bg-slate-100 text-slate-600'
 
 /** Remembers a preference in localStorage, per device — this module is used
  *  almost entirely from one iPhone, so "remember how I last had it" matters
@@ -50,7 +54,8 @@ const VIEW_MODES = [
 export default function Fleet() {
   const [loading, setLoading] = useState(true)
   const [equipment, setEquipment] = useState([])
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [maintenance, setMaintenance] = useState([])
+  const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [locationFilter, setLocationFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -62,9 +67,14 @@ export default function Fleet() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetchAllRecords(EQUIPMENT_TABLE, {}, HC_BASE)
-      if (res.error) throw new Error(res.error)
-      setEquipment(res.data || [])
+      const [eqRes, maintRes] = await Promise.all([
+        fetchAllRecords(EQUIPMENT_TABLE, {}, FLEET_BASE_ID),
+        fetchAllRecords(MAINT_TABLE, {}, FLEET_BASE_ID),
+      ])
+      if (eqRes.error) throw new Error(eqRes.error)
+      if (maintRes.error) throw new Error(maintRes.error)
+      setEquipment(eqRes.data || [])
+      setMaintenance(maintRes.data || [])
     } catch (e) {
       toast.error('Failed to load fleet: ' + (e.message || 'unknown'))
     } finally {
@@ -78,16 +88,16 @@ export default function Fleet() {
     const q = search.trim().toLowerCase()
     return equipment.filter(e => {
       const f = e.fields || {}
-      if (typeFilter !== 'all' && safeStr(f.Type) !== typeFilter) return false
+      if (categoryFilter !== 'all' && safeStr(f.Category) !== categoryFilter) return false
       if (statusFilter !== 'all' && safeStr(f.Status) !== statusFilter) return false
       if (locationFilter !== 'all' && safeStr(f.Location) !== locationFilter) return false
       if (q) {
-        const hay = [f.Name, f.Make, f.Model, f['Serial Number']].map(x => safeStr(x).toLowerCase()).join(' ')
+        const hay = [f.Name, f.Make, f.Model, f['Serial Number'], f['License Plate']].map(x => safeStr(x).toLowerCase()).join(' ')
         if (!hay.includes(q)) return false
       }
       return true
     })
-  }, [equipment, typeFilter, statusFilter, locationFilter, search])
+  }, [equipment, categoryFilter, statusFilter, locationFilter, search])
 
   const totals = useMemo(() => {
     const live = equipment.filter(e => safeStr(e.fields?.Status) !== 'Sold')
@@ -102,14 +112,47 @@ export default function Fleet() {
     return { invested, value, equity, counts, activeCount: live.length }
   }, [equipment])
 
-  /** Everything worth flagging, derived rather than stored — mirrors the Insurance page. */
+  /** Per-machine maintenance urgency, indexed by Equipment record ID — feeds both
+   *  the card/row badges and the Needs Attention merge below. */
+  const maintByMachine = useMemo(() => {
+    const idx = {}
+    maintenance.forEach(m => {
+      const t = maintenanceUrgency(m.fields || {})
+      if (t.state !== 'overdue' && t.state !== 'dueSoon') return
+      arr(m.fields?.Equipment).forEach(eqId => {
+        const bucket = (idx[eqId] = idx[eqId] || { overdue: [], dueSoon: [] })
+        bucket[t.state === 'overdue' ? 'overdue' : 'dueSoon'].push({ item: m, t })
+      })
+    })
+    return idx
+  }, [maintenance])
+
+  /** Everything worth flagging, derived rather than stored — mirrors the Insurance page.
+   *  Maintenance Overdue/Due Soon items lead (they're time-sensitive); equipment
+   *  data-quality gaps (missing price/date, stale value) are their own, separate checks. */
   const issues = useMemo(() => {
     const out = []
     equipment
       .filter(e => safeStr(e.fields?.Status) !== 'Sold')
       .forEach(e => {
+        const name = safeStr(e.fields?.Name, 'Unnamed asset')
+        const bucket = maintByMachine[e.id]
+        if (bucket) {
+          bucket.overdue.forEach(({ item, t }) => out.push({
+            key: `maint-${item.id}`, machine: e, kind: 'maint',
+            title: `${name} — ${safeStr(item.fields?.Name, 'maintenance item')} (${t.label.toLowerCase()})`,
+          }))
+          bucket.dueSoon.forEach(({ item, t }) => out.push({
+            key: `maint-${item.id}`, machine: e, kind: 'maint',
+            title: `${name} — ${safeStr(item.fields?.Name, 'maintenance item')} (${t.label.toLowerCase()})`,
+          }))
+        }
+      })
+    equipment
+      .filter(e => safeStr(e.fields?.Status) !== 'Sold')
+      .forEach(e => {
         const f = e.fields || {}
-        const name = safeStr(f.Name, 'Unnamed machine')
+        const name = safeStr(f.Name, 'Unnamed asset')
         if (f['Purchase Price'] == null) {
           out.push({ key: `price-${e.id}`, machine: e, title: `${name} — purchase price not confirmed` })
         }
@@ -122,9 +165,9 @@ export default function Fleet() {
         }
       })
     return out
-  }, [equipment])
+  }, [equipment, maintByMachine])
 
-  const activeFilterCount = [typeFilter, statusFilter, locationFilter].filter(v => v !== 'all').length
+  const activeFilterCount = [categoryFilter, statusFilter, locationFilter].filter(v => v !== 'all').length
 
   if (loading) return <LoadingSpinner />
 
@@ -165,7 +208,7 @@ export default function Fleet() {
         </button>
         {statsOpen && (
           <div className="px-4 pb-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatTile label="Total invested" value={fmtCurrency(totals.invested)} sub={`${totals.activeCount} active machines`} />
+            <StatTile label="Total invested" value={fmtCurrency(totals.invested)} sub={`${totals.activeCount} active assets`} />
             <StatTile label="Est. fleet value" value={fmtCurrency(totals.value)} sub="Sum of Est. Market Value" />
             <StatTile
               label="Est. equity"
@@ -192,10 +235,11 @@ export default function Fleet() {
           </div>
           <div className="divide-y divide-gray-100">
             {issues.map(i => (
-              <div key={i.key} className="px-4 py-2 flex items-center justify-between gap-3">
-                <p className="text-sm text-gray-800">{i.title}</p>
+              <div key={i.key} className="px-4 py-2 flex items-center gap-3">
+                {i.kind === 'maint' && <Wrench size={12} className="text-amber-500 flex-shrink-0" />}
+                <p className="text-sm text-gray-800 flex-1 min-w-0">{i.title}</p>
                 <Link to={`/fleet/${i.machine.id}`} className="text-xs font-medium text-blue-600 hover:text-blue-800 flex-shrink-0">
-                  Fix
+                  Open
                 </Link>
               </div>
             ))}
@@ -245,12 +289,12 @@ export default function Fleet() {
 
         {filtersOpen && (
           <div className="bg-white border border-gray-200 rounded-lg p-3 grid gap-3 sm:grid-cols-3">
-            <CompactSelect label="Type" value={typeFilter} onChange={setTypeFilter} options={TYPES} />
+            <CompactSelect label="Category" value={categoryFilter} onChange={setCategoryFilter} options={ASSET_CATEGORIES} />
             <CompactSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={STATUSES} />
             <CompactSelect label="Location" value={locationFilter} onChange={setLocationFilter} options={LOCATIONS} />
             {activeFilterCount > 0 && (
               <button
-                onClick={() => { setTypeFilter('all'); setStatusFilter('all'); setLocationFilter('all') }}
+                onClick={() => { setCategoryFilter('all'); setStatusFilter('all'); setLocationFilter('all') }}
                 className="sm:col-span-3 text-xs text-blue-600 hover:text-blue-800 font-medium text-left"
               >
                 Clear filters
@@ -267,20 +311,20 @@ export default function Fleet() {
             <>
               No equipment yet.{' '}
               <button onClick={() => setAdding(true)} className="text-blue-600 hover:text-blue-800 font-medium">
-                Add your first machine
+                Add your first asset
               </button>
             </>
           ) : 'Nothing matches those filters.'}
         </div>
       ) : viewMode === 'grid' ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map(e => <MachineCard key={e.id} machine={e} />)}
+          {filtered.map(e => <MachineCard key={e.id} machine={e} maint={maintByMachine[e.id]} />)}
         </div>
       ) : viewMode === 'table' ? (
-        <FleetTable machines={filtered} />
+        <FleetTable machines={filtered} maintByMachine={maintByMachine} />
       ) : (
         <div className="space-y-2">
-          {filtered.map(e => <MachineRow key={e.id} machine={e} />)}
+          {filtered.map(e => <MachineRow key={e.id} machine={e} maint={maintByMachine[e.id]} />)}
         </div>
       )}
 
@@ -323,7 +367,33 @@ function CompactSelect({ label, value, onChange, options }) {
   )
 }
 
-function MachineRow({ machine }) {
+/** Small red/amber badge when a machine has any Overdue or Due Soon maintenance item. */
+function MaintBadge({ maint }) {
+  if (!maint || (maint.overdue.length === 0 && maint.dueSoon.length === 0)) return null
+  const isOverdue = maint.overdue.length > 0
+  const count = maint.overdue.length || maint.dueSoon.length
+  return (
+    <span
+      title={`${maint.overdue.length} overdue, ${maint.dueSoon.length} due soon`}
+      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold flex-shrink-0 ${
+        isOverdue ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+      }`}
+    >
+      <Wrench size={9} /> {count}
+    </span>
+  )
+}
+
+function CategoryBadge({ category }) {
+  if (!category) return null
+  return (
+    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold flex-shrink-0 ${CATEGORY_BADGE}`}>
+      {category}
+    </span>
+  )
+}
+
+function MachineRow({ machine, maint }) {
   const f = machine.fields || {}
   const photos = parsePhotos(f)
   const thumb = photos.find(p => p.kind === 'machine') || photos[0]
@@ -342,9 +412,11 @@ function MachineRow({ machine }) {
         {thumb ? <img src={thumb.url} alt="" className="w-full h-full object-cover" /> : <Wrench size={16} className="text-gray-300" />}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <p className="font-semibold text-gray-900 text-sm truncate">{safeStr(f.Name, 'Unnamed machine')}</p>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <p className="font-semibold text-gray-900 text-sm truncate">{safeStr(f.Name, 'Unnamed asset')}</p>
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[status] || STATUS_DOT.Running}`} title={status} />
+          <CategoryBadge category={safeStr(f.Category)} />
+          <MaintBadge maint={maint} />
         </div>
         <p className="text-xs text-gray-400 truncate">
           {[safeStr(f.Make), safeStr(f.Model)].filter(Boolean).join(' ') || status}
@@ -361,13 +433,14 @@ function MachineRow({ machine }) {
   )
 }
 
-function FleetTable({ machines }) {
+function FleetTable({ machines, maintByMachine }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-      <table className="w-full text-sm min-w-[560px]">
+      <table className="w-full text-sm min-w-[640px]">
         <thead>
           <tr className="border-b border-gray-200 text-left">
             <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Name</th>
+            <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Category</th>
             <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Status</th>
             <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Location</th>
             <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Invested</th>
@@ -385,9 +458,13 @@ function FleetTable({ machines }) {
             return (
               <tr key={m.id} className="hover:bg-gray-50">
                 <td className="px-3 py-2">
-                  <Link to={`/fleet/${m.id}`} className="font-medium text-gray-900 hover:text-blue-700">{safeStr(f.Name, 'Unnamed machine')}</Link>
+                  <div className="flex items-center gap-1.5">
+                    <Link to={`/fleet/${m.id}`} className="font-medium text-gray-900 hover:text-blue-700">{safeStr(f.Name, 'Unnamed asset')}</Link>
+                    <MaintBadge maint={maintByMachine[m.id]} />
+                  </div>
                   <p className="text-xs text-gray-400">{[safeStr(f.Make), safeStr(f.Model)].filter(Boolean).join(' ') || '—'}</p>
                 </td>
+                <td className="px-3 py-2 text-gray-600">{safeStr(f.Category) || '—'}</td>
                 <td className="px-3 py-2">
                   <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${STATUS_BADGE[status] || STATUS_BADGE.Running}`}>{status}</span>
                 </td>
@@ -406,7 +483,7 @@ function FleetTable({ machines }) {
   )
 }
 
-function MachineCard({ machine }) {
+function MachineCard({ machine, maint }) {
   const f = machine.fields || {}
   const photos = parsePhotos(f)
   const thumb = photos.find(p => p.kind === 'machine') || photos[0]
@@ -433,9 +510,17 @@ function MachineCard({ machine }) {
           <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[status] || STATUS_DOT.Running}`} />
           {status}
         </span>
+        {f.Category && (
+          <span className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold ${CATEGORY_BADGE}`}>
+            {safeStr(f.Category)}
+          </span>
+        )}
       </div>
       <div className="p-3.5">
-        <p className="font-semibold text-gray-900 text-sm truncate">{safeStr(f.Name, 'Unnamed machine')}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="font-semibold text-gray-900 text-sm truncate">{safeStr(f.Name, 'Unnamed asset')}</p>
+          <MaintBadge maint={maint} />
+        </div>
         <p className="text-xs text-gray-400 mt-0.5 truncate">
           {[safeStr(f.Make), safeStr(f.Model)].filter(Boolean).join(' ') || '—'}
           {f.Location ? ` · ${safeStr(f.Location)}` : ''}
@@ -477,7 +562,8 @@ export function Field({ label, hint, children }) {
 }
 
 const emptyEquipmentForm = {
-  name: '', type: 'Zero-Turn', make: '', model: '', serial: '', dom: '', engine: '', deckSize: '',
+  name: '', category: 'Zero-Turn', make: '', model: '', serial: '', plate: '', dom: '', engine: '', deckSize: '',
+  axles: '', gvwr: '', mileage: '', hours: '', readingDate: '', registrationExpiry: '', insuranceProvider: '',
   purchaseDate: '', purchasePrice: '', status: 'Running', location: 'Home',
   marketValue: '', notes: '',
 }
@@ -485,8 +571,14 @@ const emptyEquipmentForm = {
 export function EquipmentModal({ equipment, onClose, onSaved }) {
   const f = equipment?.fields || {}
   const [form, setForm] = useState(() => equipment ? {
-    name: safeStr(f.Name), type: safeStr(f.Type, 'Zero-Turn'), make: safeStr(f.Make), model: safeStr(f.Model),
-    serial: safeStr(f['Serial Number']), dom: safeStr(f['DOM / Year']), engine: safeStr(f.Engine), deckSize: safeStr(f['Deck Size']),
+    name: safeStr(f.Name), category: safeStr(f.Category, 'Zero-Turn'), make: safeStr(f.Make), model: safeStr(f.Model),
+    serial: safeStr(f['Serial Number']), plate: safeStr(f['License Plate']),
+    dom: safeStr(f['DOM / Year']), engine: safeStr(f.Engine), deckSize: safeStr(f['Deck Size']),
+    axles: safeStr(f['Axle Count']), gvwr: safeStr(f.GVWR),
+    mileage: f['Current Mileage'] != null ? String(f['Current Mileage']) : '',
+    hours: f['Current Engine Hours'] != null ? String(f['Current Engine Hours']) : '',
+    readingDate: safeStr(f['Reading Last Updated']),
+    registrationExpiry: safeStr(f['Registration Expiry']), insuranceProvider: safeStr(f['Insurance Provider']),
     purchaseDate: safeStr(f['Purchase Date']), purchasePrice: f['Purchase Price'] != null ? String(f['Purchase Price']) : '',
     status: safeStr(f.Status, 'Running'), location: safeStr(f.Location, 'Home'),
     marketValue: f['Est. Market Value'] != null ? String(f['Est. Market Value']) : '',
@@ -494,6 +586,7 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
   } : emptyEquipmentForm)
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+  const show = key => (CATEGORY_FIELDS[form.category] || []).includes(key)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -502,15 +595,25 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
     const num = v => (v === '' ? null : Number(v))
     const newMarketValue = num(form.marketValue)
     const marketValueChanged = newMarketValue !== (f['Est. Market Value'] ?? null)
+    const newMileage = num(form.mileage)
+    const newHours = num(form.hours)
+    const readingChanged = newMileage !== (f['Current Mileage'] ?? null) || newHours !== (f['Current Engine Hours'] ?? null)
     const fields = {
       Name: form.name,
-      Type: form.type,
+      Category: form.category,
       Make: form.make,
       Model: form.model,
       'Serial Number': form.serial,
+      'License Plate': form.plate,
       'DOM / Year': form.dom,
       Engine: form.engine,
       'Deck Size': form.deckSize,
+      'Axle Count': form.axles || null,
+      GVWR: form.gvwr,
+      'Current Mileage': newMileage,
+      'Current Engine Hours': newHours,
+      'Registration Expiry': form.registrationExpiry || null,
+      'Insurance Provider': form.insuranceProvider,
       'Purchase Date': form.purchaseDate || null,
       'Purchase Price': num(form.purchasePrice),
       Status: form.status,
@@ -518,16 +621,17 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
       'Est. Market Value': newMarketValue,
       Notes: form.notes,
     }
-    // Stamp "last updated" automatically whenever the value actually changes,
-    // so staleness tracking doesn't rely on remembering to touch a second field.
+    // Stamp "last updated" automatically whenever a tracked value actually
+    // changes, so staleness tracking doesn't rely on remembering a second field.
     if (marketValueChanged) fields['Market Value Last Updated'] = new Date().toISOString().slice(0, 10)
+    if (readingChanged) fields['Reading Last Updated'] = new Date().toISOString().slice(0, 10)
 
     const res = equipment
-      ? await updateRecord(EQUIPMENT_TABLE, equipment.id, fields, HC_BASE)
-      : await createRecord(EQUIPMENT_TABLE, fields, HC_BASE)
+      ? await updateRecord(EQUIPMENT_TABLE, equipment.id, fields, FLEET_BASE_ID)
+      : await createRecord(EQUIPMENT_TABLE, fields, FLEET_BASE_ID)
     setSaving(false)
     if (res.error) return toast.error('Failed to save: ' + res.error)
-    toast.success(equipment ? 'Saved' : 'Machine added')
+    toast.success(equipment ? 'Saved' : 'Asset added')
     onSaved()
   }
 
@@ -535,20 +639,20 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white rounded-t-xl">
-          <h2 className="font-semibold text-gray-900">{equipment ? 'Edit machine' : 'Add machine'}</h2>
+          <h2 className="font-semibold text-gray-900">{equipment ? 'Edit asset' : 'Add asset'}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <Field label="Name">
             <input value={form.name} onChange={e => set('name', e.target.value)} className={inp} required
-              placeholder="Cub Cadet Z-Force 50 #1" />
+              placeholder="Chevy Suburban" />
           </Field>
 
           <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Type">
-              <select value={form.type} onChange={e => set('type', e.target.value)} className={inp}>
-                {TYPES.map(t => <option key={t}>{t}</option>)}
+            <Field label="Category">
+              <select value={form.category} onChange={e => set('category', e.target.value)} className={inp}>
+                {ASSET_CATEGORIES.map(t => <option key={t}>{t}</option>)}
               </select>
             </Field>
             <Field label="Status">
@@ -560,7 +664,7 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
 
           <div className="grid sm:grid-cols-2 gap-4">
             <Field label="Make">
-              <input value={form.make} onChange={e => set('make', e.target.value)} className={inp} placeholder="Cub Cadet" />
+              <input value={form.make} onChange={e => set('make', e.target.value)} className={inp} placeholder="Chevrolet" />
             </Field>
             <Field label="Model">
               <input value={form.model} onChange={e => set('model', e.target.value)} className={inp} />
@@ -568,22 +672,72 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Serial number">
+            <Field label={show('vin') ? 'VIN' : 'Serial number'}>
               <input value={form.serial} onChange={e => set('serial', e.target.value)} className={inp} />
             </Field>
-            <Field label="DOM / year" hint="date of manufacture, if known">
+            <Field label="DOM / year" hint="date of manufacture / model year, if known">
               <input value={form.dom} onChange={e => set('dom', e.target.value)} className={inp} />
             </Field>
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Engine">
+          {show('plate') && (
+            <Field label="License plate">
+              <input value={form.plate} onChange={e => set('plate', e.target.value)} className={inp} />
+            </Field>
+          )}
+
+          {show('engine') && (
+            <Field label="Engine / powertrain">
               <input value={form.engine} onChange={e => set('engine', e.target.value)} className={inp} placeholder="Kohler Courage SV730 25HP" />
             </Field>
+          )}
+          {show('deckSize') && (
             <Field label="Deck size">
               <input value={form.deckSize} onChange={e => set('deckSize', e.target.value)} className={inp} placeholder="50&quot;" />
             </Field>
-          </div>
+          )}
+
+          {show('axles') && (
+            <Field label="Axle count">
+              <select value={form.axles} onChange={e => set('axles', e.target.value)} className={inp}>
+                <option value="">Not set</option>
+                {AXLE_COUNTS.map(a => <option key={a}>{a}</option>)}
+              </select>
+            </Field>
+          )}
+          {show('gvwr') && (
+            <Field label="GVWR">
+              <input value={form.gvwr} onChange={e => set('gvwr', e.target.value)} className={inp} />
+            </Field>
+          )}
+
+          {(show('mileage') || show('hours')) && (
+            <div className="grid sm:grid-cols-2 gap-4">
+              {show('mileage') && (
+                <Field label="Current mileage">
+                  <input type="number" inputMode="numeric" min="0" value={form.mileage}
+                    onChange={e => set('mileage', e.target.value)} className={inp} />
+                </Field>
+              )}
+              {show('hours') && (
+                <Field label="Current engine hours">
+                  <input type="number" inputMode="decimal" min="0" value={form.hours}
+                    onChange={e => set('hours', e.target.value)} className={inp} />
+                </Field>
+              )}
+            </div>
+          )}
+
+          {show('registration') && (
+            <Field label="Registration expiry">
+              <input type="date" value={form.registrationExpiry} onChange={e => set('registrationExpiry', e.target.value)} className={inp} />
+            </Field>
+          )}
+          {show('insurance') && (
+            <Field label="Insurance provider" hint="optional">
+              <input value={form.insuranceProvider} onChange={e => set('insuranceProvider', e.target.value)} className={inp} />
+            </Field>
+          )}
 
           <div className="grid sm:grid-cols-3 gap-4">
             <Field label="Purchase date">
@@ -619,7 +773,7 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
           {!equipment && (
             <p className="text-xs text-gray-400 flex items-start gap-1.5">
               <Camera size={13} className="flex-shrink-0 mt-0.5" />
-              Add photos (tag/serial + machine shots) from the machine's detail page after saving.
+              Add photos (tag/serial + machine shots) from the asset's detail page after saving.
             </p>
           )}
 
@@ -628,7 +782,7 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
             <button type="submit" disabled={saving}
               className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">
               {saving && <Loader2 size={14} className="animate-spin" />}
-              {equipment ? 'Save' : 'Add machine'}
+              {equipment ? 'Save' : 'Add asset'}
             </button>
           </div>
         </form>

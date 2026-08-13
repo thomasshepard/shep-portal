@@ -26,6 +26,7 @@ const emptyForm = {
   can_view_bank_dashboard: false,
   can_view_insurance: false,
   can_view_health_policies: false,
+  can_view_fleet: false,
   allowed_tags: '',
 }
 
@@ -105,6 +106,7 @@ export default function AdminUsers() {
           can_view_bank_dashboard: form.can_view_bank_dashboard,
           can_view_insurance: form.can_view_insurance,
           can_view_health_policies: form.can_view_health_policies,
+          can_view_fleet: form.can_view_fleet,
           allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         })
         .eq('id', newUserId)
@@ -601,6 +603,15 @@ export default function AdminUsers() {
                       <span className={`text-sm ${form.can_view_insurance ? 'text-gray-700' : 'text-gray-400'}`}>
                         …including health policies
                       </span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_fleet}
+                        onChange={e => setField('can_view_fleet', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Fleet &amp; Equipment</span>
                     </label>
                   </div>
                 </div>
