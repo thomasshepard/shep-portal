@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail, TrendingUp, Shield, Landmark, AlertTriangle } from 'lucide-react'
-import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtPercent, fmtDate, PM_BASE_ID } from '../lib/airtable'
+import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail, TrendingUp, Shield, Landmark, AlertTriangle, FileText } from 'lucide-react'
+import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtPercent, fmtDate, PM_BASE_ID, DOCS_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PaymentForm from '../components/PaymentForm'
@@ -35,6 +35,25 @@ const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ou
 // non-array values (objects, null) when a record has no linked items.
 const arr = v => Array.isArray(v) ? v : []
 
+// Documents suggested by the linked-record check (see lib/documentLinks.js) —
+// Kind='Property Bill', Status='Suggested', matched to this property.
+function parseBillSuggestion(record) {
+  const f = record.fields || {}
+  let fieldsObj = {}
+  try { fieldsObj = JSON.parse(f['Link Fields'] || '{}') } catch { /* malformed — treat as empty */ }
+  return { id: record.id, fieldsObj }
+}
+
+function billSuggestionSummary(fields = {}) {
+  const out = []
+  if (fields.billName) out.push(['Bill', fields.billName])
+  if (fields.vendorPayee) out.push(['Vendor', fields.vendorPayee])
+  if (fields.amountPaid != null) out.push(['Amount', fmtCurrency(fields.amountPaid)])
+  if (fields.paymentDate) out.push(['Date', fields.paymentDate])
+  if (fields.category) out.push(['Category', fields.category])
+  return out
+}
+
 export default function PropertyDetail() {
   const { id } = useParams()
   const { isAdmin, isVA, permissions, profile } = useAuth()
@@ -49,6 +68,7 @@ export default function PropertyDetail() {
   const [utilities, setUtilities] = useState([])
   const [bills, setBills] = useState([])
   const [loans, setLoans] = useState([])
+  const [billSuggestions, setBillSuggestions] = useState([])
 
   const [editingProperty, setEditingProperty] = useState(false)
   const [editForm, setEditForm] = useState({})
@@ -126,7 +146,7 @@ export default function PropertyDetail() {
       const invPayIds = arr(f['Invoices Payments'])
 
       // 2. Fetch Rental Units + other property-linked data in parallel
-      const [unitsRes, invPayRes, maintRes, utilRes, loansRes, billsRes, insuranceRes] = await Promise.all([
+      const [unitsRes, invPayRes, maintRes, utilRes, loansRes, billsRes, insuranceRes, billSugRes] = await Promise.all([
         unitIds.length > 0
           ? fetchAllRecords('Rental Units', { filterByFormula: recordIdFilter(unitIds) }, PM_BASE_ID)
           : Promise.resolve({ data: [] }),
@@ -146,6 +166,9 @@ export default function PropertyDetail() {
         permissions.can_view_insurance
           ? fetchAllRecords('Insurance and Taxes', { filterByFormula: `FIND("${id}", ARRAYJOIN({Property}))` }, PM_BASE_ID)
           : Promise.resolve({ data: [] }),
+        (isAdmin || isVA)
+          ? fetchAllRecords('Documents', { filterByFormula: `AND({Link Kind}='Property Bill', {Link Status}='Suggested', {Link Match Record ID}='${id}')` }, DOCS_BASE_ID)
+          : Promise.resolve({ data: [] }),
       ])
 
       const units = unitsRes.data || []
@@ -156,6 +179,7 @@ export default function PropertyDetail() {
       setLoans(loansRes.data || [])
       setBills(billsRes.data || [])
       setInsurance(insuranceRes.data || [])
+      setBillSuggestions(billSugRes.error ? [] : (billSugRes.data || []).map(parseBillSuggestion))
 
       // 3. Fetch Lease Agreements for all units
       const leaseIds = [...new Set(units.flatMap(u => arr(u.fields?.['Lease Agreements'])))]
@@ -190,6 +214,31 @@ export default function PropertyDetail() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // A mailed bill is a new transaction, not an update to an existing row —
+  // this always creates a Bills Payment record, never touches Property itself.
+  async function applyBillSuggestion(doc) {
+    const flds = doc.fieldsObj || {}
+    const fields = {
+      'Bill Name': flds.billName || flds.vendorPayee || 'Bill',
+      'Vendor / Payee': flds.vendorPayee || '',
+      'Amount Paid': flds.amountPaid != null ? flds.amountPaid : null,
+      'Payment Date': flds.paymentDate || null,
+      'Property / Project': [id],
+    }
+    if (flds.category) fields.Category = flds.category
+    const { error } = await createRecord('Bills Payment', fields, PM_BASE_ID)
+    if (error) return toast.error('Failed to add bill: ' + error)
+    await updateRecord('Documents', doc.id, { 'Link Status': 'Applied' }, DOCS_BASE_ID)
+    toast.success('Added to Bills')
+    load()
+  }
+
+  async function dismissBillSuggestion(doc) {
+    const { error } = await updateRecord('Documents', doc.id, { 'Link Status': 'Dismissed' }, DOCS_BASE_ID)
+    if (error) return toast.error('Failed to dismiss')
+    setBillSuggestions(prev => prev.filter(s => s.id !== doc.id))
   }
 
   async function savePropertyEdit() {
@@ -909,6 +958,35 @@ export default function PropertyDetail() {
       {/* Bills — Admin + VA */}
       {(isAdmin || isVA) && (
         <div className="bg-white rounded-xl border border-gray-200">
+          {billSuggestions.length > 0 && (
+            <div className="p-3 space-y-2 border-b border-gray-100">
+              {billSuggestions.map(doc => (
+                <div key={doc.id} className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                      <FileText size={12} /> New bill from mail
+                    </p>
+                    <div className="text-xs text-gray-600 mt-1 space-y-0.5">
+                      {billSuggestionSummary(doc.fieldsObj).map(([k, v]) => (
+                        <p key={k}><span className="text-gray-400">{k}:</span> {v}</p>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => applyBillSuggestion(doc)}
+                      className="text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-md"
+                    >
+                      Add to Bills
+                    </button>
+                    <button onClick={() => dismissBillSuggestion(doc)} className="text-[11px] text-gray-400 hover:text-red-500">
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <button
             onClick={() => setBillsOpen(o => !o)}
             className="w-full flex items-center justify-between px-5 py-3 text-left"

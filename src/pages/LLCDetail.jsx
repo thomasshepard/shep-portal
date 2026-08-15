@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Pencil, Trash2, Plus, ExternalLink, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, Pencil, Trash2, Plus, ExternalLink, AlertTriangle, FileText } from 'lucide-react'
 import {
   fetchAllRecords, updateRecord, deleteRecord, createRecord,
-  fmtDate, fmtCurrency, fmtPercent, fmtField, airtableConfigured,
+  fmtDate, fmtCurrency, fmtPercent, fmtField, airtableConfigured, DOCS_BASE_ID,
 } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import LLCForm from '../components/LLCForm'
@@ -24,6 +24,25 @@ const compStatusColors = {
   Overdue: 'bg-red-100 text-red-700',
 }
 
+// Documents suggested by the linked-record check (see lib/documentLinks.js) —
+// Kind='LLC Compliance', Status='Suggested', matched to this LLC.
+function parseComplianceSuggestion(record) {
+  const f = record.fields || {}
+  let fieldsObj = {}
+  try { fieldsObj = JSON.parse(f['Link Fields'] || '{}') } catch { /* malformed — treat as empty */ }
+  return { id: record.id, fieldsObj }
+}
+
+function complianceSuggestionSummary(fields = {}) {
+  const out = []
+  if (fields.type) out.push(['Type', fields.type])
+  if (fields.dueDate) out.push(['Due', fields.dueDate])
+  if (fields.dateFiled) out.push(['Filed', fields.dateFiled])
+  if (fields.cost != null) out.push(['Cost', fmtCurrency(fields.cost)])
+  if (fields.confirmationNumber) out.push(['Confirmation #', fields.confirmationNumber])
+  return out
+}
+
 export default function LLCDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -32,6 +51,7 @@ export default function LLCDetail() {
   const [llc, setLlc] = useState(null)
   const [properties, setProperties] = useState([])
   const [compliance, setCompliance] = useState([])
+  const [complianceSuggestions, setComplianceSuggestions] = useState([])
   const [loading, setLoading] = useState(true)
 
   const [showEditLLC, setShowEditLLC] = useState(false)
@@ -63,8 +83,8 @@ export default function LLCDetail() {
       ...(record.fields['Properties 2'] || []),
     ]
 
-    // Fetch properties and compliance in parallel
-    const [propRes, compRes] = await Promise.all([
+    // Fetch properties, compliance, and any suggested compliance mail in parallel
+    const [propRes, compRes, compSugRes] = await Promise.all([
       propIds.length
         ? fetchAllRecords('Properties', {
             filterByFormula: `OR(${propIds.map(pid => `RECORD_ID()="${pid}"`).join(',')})`,
@@ -74,6 +94,9 @@ export default function LLCDetail() {
         filterByFormula: `FIND("${id}", ARRAYJOIN({LLCs}))`,
         sort: { field: 'Due Date', direction: 'desc' },
       }),
+      fetchAllRecords('Documents', {
+        filterByFormula: `AND({Link Kind}='LLC Compliance', {Link Status}='Suggested', {Link Match Record ID}='${id}')`,
+      }, DOCS_BASE_ID),
     ])
 
     if (propRes.error) toast.error('Failed to load properties: ' + propRes.error)
@@ -81,7 +104,33 @@ export default function LLCDetail() {
 
     setProperties(propRes.data || [])
     setCompliance(compRes.data || [])
+    setComplianceSuggestions(compSugRes.error ? [] : (compSugRes.data || []).map(parseComplianceSuggestion))
     setLoading(false)
+  }
+
+  // A compliance notice is a new log entry, not an update to an existing one —
+  // this always creates a Compliance Log record, linked back via LLCs.
+  async function applyComplianceSuggestion(doc) {
+    const flds = doc.fieldsObj || {}
+    const fields = {
+      Type: flds.type || 'Annual Report',
+      'Due Date': flds.dueDate || null,
+      'Date Filed': flds.dateFiled || null,
+      Cost: flds.cost != null ? flds.cost : null,
+      'Confirmation Number': flds.confirmationNumber || '',
+      LLCs: [id],
+    }
+    const { error } = await createRecord('Compliance Log', fields)
+    if (error) return toast.error('Failed to add entry: ' + error)
+    await updateRecord('Documents', doc.id, { 'Link Status': 'Applied' }, DOCS_BASE_ID)
+    toast.success('Added to Compliance Log')
+    load()
+  }
+
+  async function dismissComplianceSuggestion(doc) {
+    const { error } = await updateRecord('Documents', doc.id, { 'Link Status': 'Dismissed' }, DOCS_BASE_ID)
+    if (error) return toast.error('Failed to dismiss')
+    setComplianceSuggestions(prev => prev.filter(s => s.id !== doc.id))
   }
 
   // LLC edit/delete
@@ -259,6 +308,35 @@ export default function LLCDetail() {
 
       {/* Compliance section */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
+        {complianceSuggestions.length > 0 && (
+          <div className="space-y-2 mb-4">
+            {complianceSuggestions.map(doc => (
+              <div key={doc.id} className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                    <FileText size={12} /> New mail suggests a compliance entry
+                  </p>
+                  <div className="text-xs text-gray-600 mt-1 space-y-0.5">
+                    {complianceSuggestionSummary(doc.fieldsObj).map(([k, v]) => (
+                      <p key={k}><span className="text-gray-400">{k}:</span> {v}</p>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => applyComplianceSuggestion(doc)}
+                    className="text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-md"
+                  >
+                    Add to Log
+                  </button>
+                  <button onClick={() => dismissComplianceSuggestion(doc)} className="text-[11px] text-gray-400 hover:text-red-500">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-gray-800">Compliance History</h2>
           {isAdmin && (
