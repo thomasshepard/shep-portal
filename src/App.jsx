@@ -47,6 +47,7 @@ import CrossvilleDashboard from './pages/CrossvilleDashboard.jsx'
 import Bitcoin from './pages/Bitcoin'
 import Finances from './pages/Finances'
 import BankDashboard from './pages/BankDashboard'
+import Bookkeeping from './pages/Bookkeeping'
 import Insurance from './pages/Insurance'
 import Fleet from './pages/Fleet'
 import FleetDetail from './pages/FleetDetail'
@@ -107,6 +108,7 @@ export default function App() {
             <Route path="bitcoin" element={<AdminRoute><Bitcoin /></AdminRoute>} />
             <Route path="finances" element={<PermRoute permission="can_view_finances"><ErrorBoundary><Finances /></ErrorBoundary></PermRoute>} />
             <Route path="bank-dashboard" element={<PermRoute permission="can_view_bank_dashboard"><ErrorBoundary><BankDashboard /></ErrorBoundary></PermRoute>} />
+            <Route path="bookkeeping" element={<PermRoute permission="can_view_bookkeeping"><ErrorBoundary><Bookkeeping /></ErrorBoundary></PermRoute>} />
             <Route path="insurance" element={<PermRoute permission="can_view_insurance"><ErrorBoundary><Insurance /></ErrorBoundary></PermRoute>} />
             <Route
               path="admin"

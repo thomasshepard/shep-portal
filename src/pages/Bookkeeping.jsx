@@ -1,0 +1,394 @@
+import { useState, useEffect } from 'react'
+import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2 } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { supabase } from '../lib/supabase'
+import { fmtCurrency } from '../lib/airtable'
+import LoadingSpinner from '../components/LoadingSpinner'
+
+// Phase 0's fixed chart of accounts (seeded by the migration). Hardcoded here
+// rather than fetched — Phase 0 is a single entity with a small, stable COA;
+// revisit once later phases add accounts dynamically.
+const PHASE0_ACCOUNTS = [
+  { code: '1000', name: 'Cash' },
+  { code: '1100', name: 'Accounts Receivable' },
+  { code: '2000', name: 'Accrued Payroll' },
+  { code: '3000', name: "Owner's Equity" },
+  { code: '4000', name: 'Mow Revenue' },
+  { code: '5000', name: 'Contractor Expense' },
+  { code: '5100', name: 'Office Supplies' },
+]
+
+const LOCKED_ENTITIES = [
+  { name: 'LeadsCompanion', phase: 'Phase 0b' },
+  { name: 'East Meadow Properties', phase: 'Phase 4' },
+  { name: 'Ridge & Anchor LLC', phase: 'Phase 3' },
+  { name: 'UCHB', phase: 'Phase 3' },
+  { name: 'Personal', phase: 'Phase 6' },
+]
+
+async function callBookkeeping(action, payload = {}) {
+  const { data, error } = await supabase.functions.invoke('bookkeeping', { body: { action, ...payload } })
+  if (error) throw new Error(error.message || `${action} failed`)
+  if (data?.ok === false) throw new Error(data.error || `${action} failed`)
+  return data
+}
+
+const emptyLine = () => ({ accountCode: PHASE0_ACCOUNTS[0].code, debit: '', credit: '' })
+
+export default function Bookkeeping() {
+  const [loading, setLoading] = useState(true)
+  const [summary, setSummary] = useState(null)
+  const [entries, setEntries] = useState([])
+  const [bankCheck, setBankCheck] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [statementInput, setStatementInput] = useState('')
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    try {
+      const [s, e, b] = await Promise.all([
+        callBookkeeping('get_summary'),
+        callBookkeeping('list_entries', { limit: 25 }),
+        callBookkeeping('get_bank_check'),
+      ])
+      setSummary(s)
+      setEntries(e.entries || [])
+      setBankCheck(b)
+      setStatementInput(b.statementBalance != null ? String(b.statementBalance) : '')
+    } catch (e) {
+      toast.error('Failed to load Bookkeeping: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function saveBankCheck() {
+    const val = Number(statementInput)
+    if (!Number.isFinite(val)) return toast.error('Enter a number')
+    try {
+      await callBookkeeping('set_bank_check', { statementBalance: val })
+      toast.success('Saved')
+      load()
+    } catch (e) {
+      toast.error('Failed to save: ' + e.message)
+    }
+  }
+
+  if (loading) return <LoadingSpinner />
+
+  const matchDiff = bankCheck ? Math.round((Number(bankCheck.statementBalance || 0) - Number(bankCheck.ledgerCashBalance || 0)) * 100) / 100 : null
+  const isClean = bankCheck?.statementBalance != null && matchDiff === 0
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <Calculator size={24} className="text-violet-600" />
+            Bookkeeping
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">Happy Cuts LLC &middot; double-entry, CPA-ready</p>
+        </div>
+        <button
+          onClick={() => setModalOpen(true)}
+          className="flex items-center gap-2 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          <Plus size={15} /> New Entry
+        </button>
+      </div>
+
+      {/* Entity rail */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-sm font-semibold bg-gray-900 text-white">
+          Happy Cuts LLC
+        </div>
+        {LOCKED_ENTITIES.map(e => (
+          <div key={e.name} className="flex-shrink-0 flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium border border-gray-200 text-gray-400">
+            {e.name}
+            <span className="text-[10px] font-bold uppercase tracking-wide bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded">{e.phase}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatTile label="Revenue · MTD" value={fmtCurrency(summary?.pnl?.income?.reduce((s, l) => s + l.amount, 0) || 0)} />
+        <StatTile label="Expenses · MTD" value={fmtCurrency(summary?.pnl?.expenses?.reduce((s, l) => s + l.amount, 0) || 0)} />
+        <StatTile
+          label="Net Income · MTD"
+          value={fmtCurrency(summary?.pnl?.netIncome || 0)}
+          tone={summary?.pnl?.netIncome >= 0 ? 'good' : 'bad'}
+        />
+        <StatTile
+          label="Bank Match"
+          value={bankCheck?.statementBalance == null ? 'Not set' : isClean ? 'Clean' : 'Off'}
+          tone={bankCheck?.statementBalance == null ? undefined : isClean ? 'good' : 'bad'}
+          sub={bankCheck?.statementBalance == null ? 'Enter a statement balance below' : isClean ? undefined : `${fmtCurrency(Math.abs(matchDiff))} ${matchDiff > 0 ? 'more' : 'less'} on the ledger`}
+        />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3">
+        {/* P&L */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-800 text-sm">Profit &amp; Loss</h2>
+            <span className="text-xs text-gray-400">Month to date</span>
+          </div>
+          <div className="px-4 py-3 space-y-1">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-1">Income</p>
+            {(summary?.pnl?.income || []).map(l => <LineRow key={l.name} label={l.name} amount={l.amount} />)}
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-2">Expenses</p>
+            {(summary?.pnl?.expenses || []).map(l => <LineRow key={l.name} label={l.name} amount={l.amount} />)}
+            <div className="flex items-center justify-between pt-2 mt-1 border-t border-gray-100">
+              <span className="text-sm font-bold text-gray-900">Net Income</span>
+              <span className="text-sm font-extrabold text-gray-900 tabular-nums">{fmtCurrency(summary?.pnl?.netIncome || 0)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Balance Sheet */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-800 text-sm">Balance Sheet</h2>
+            <span className="text-xs text-gray-400">As of today</span>
+          </div>
+          <div className="px-4 py-3 space-y-1">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-1">Assets</p>
+            {(summary?.balanceSheet || []).filter(a => a.accountType === 'asset').map(a => <LineRow key={a.code} label={a.name} amount={a.balance} />)}
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-2">Liabilities &amp; Equity</p>
+            {(summary?.balanceSheet || []).filter(a => a.accountType !== 'asset').map(a => <LineRow key={a.code} label={a.name} amount={a.balance} />)}
+          </div>
+        </div>
+      </div>
+
+      {/* Bank check */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3 flex-wrap">
+        <div className="flex-1 min-w-[200px]">
+          <p className="text-sm font-semibold text-gray-800">Does this match the bank?</p>
+          <p className="text-xs text-gray-500 mt-0.5">Enter the current Happy Cuts checking balance from online banking &mdash; compared against what the ledger computes.</p>
+        </div>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+          <input
+            type="number" step="0.01" value={statementInput}
+            onChange={e => setStatementInput(e.target.value)}
+            className="h-9 pl-6 pr-3 w-36 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <button onClick={saveBankCheck} className="h-9 px-3.5 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800">
+          Check
+        </button>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-5 flex-wrap bg-violet-50/60 border border-violet-100 rounded-xl px-4 py-2.5 text-xs text-gray-600">
+        <span className="font-semibold text-gray-700">How entries get here</span>
+        <span className="flex items-center gap-1.5"><Badge tone="auto">Auto</Badge> posted by the module that captured it &mdash; no re-typing</span>
+        <span className="flex items-center gap-1.5"><Badge tone="manual">Manual</Badge> entered directly in Bookkeeping</span>
+      </div>
+
+      {/* Entries */}
+      <div>
+        <h2 className="text-base font-bold text-gray-900 mb-2">Journal Entries</h2>
+        {entries.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-400">
+            No entries yet. Complete a mow in Happy Cuts, or add one manually.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {entries.map(entry => (
+              <EntryRow key={entry.id} entry={entry} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {modalOpen && (
+        <NewEntryModal
+          onClose={() => setModalOpen(false)}
+          onSaved={() => { setModalOpen(false); load() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function StatTile({ label, value, tone, sub }) {
+  const toneCls = tone === 'good' ? 'text-green-600' : tone === 'bad' ? 'text-red-600' : 'text-gray-900'
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">{label}</p>
+      <p className={`text-2xl font-bold tabular-nums leading-tight ${toneCls}`}>{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    </div>
+  )
+}
+
+function LineRow({ label, amount }) {
+  return (
+    <div className="flex items-center justify-between text-[13px] py-0.5">
+      <span className="text-gray-600">{label}</span>
+      <span className="font-medium text-gray-800 tabular-nums">{fmtCurrency(amount)}</span>
+    </div>
+  )
+}
+
+function Badge({ tone, children }) {
+  const cls = tone === 'auto' ? 'bg-violet-100 text-violet-700' : tone === 'manual' ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700'
+  return <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{children}</span>
+}
+
+function EntryRow({ entry, expanded, onToggle }) {
+  const total = (entry.bk_journal_lines || []).reduce((s, l) => s + Number(l.debit || 0), 0)
+  const isAuto = entry.source === 'dual_write'
+  const sourceLabel = {
+    happy_cuts_schedule_complete: 'Schedule',
+    happy_cuts_schedule_paid: 'Schedule',
+    happy_cuts_crew_payout: 'Crew',
+  }[entry.source_module] || entry.source_module
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 flex items-center gap-3 cursor-pointer" onClick={onToggle}>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate">{entry.memo || 'Journal entry'}</p>
+          <p className="text-xs text-gray-400">{entry.entry_date}</p>
+        </div>
+        {isAuto ? (
+          <Badge tone="auto"><Link2 size={10} /> Auto &middot; {sourceLabel}</Badge>
+        ) : (
+          <Badge tone="manual">Manual</Badge>
+        )}
+        <Badge tone="posted"><CheckCircle2 size={10} /> Posted</Badge>
+        <span className="text-sm font-bold text-gray-900 tabular-nums w-24 text-right flex-shrink-0">{fmtCurrency(total)}</span>
+        {expanded ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
+      </div>
+      {expanded && (
+        <div className="border-t border-gray-100 px-4 py-3">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                <th className="text-left pb-1.5">Account</th>
+                <th className="text-right pb-1.5">Debit</th>
+                <th className="text-right pb-1.5">Credit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(entry.bk_journal_lines || []).map(line => (
+                <tr key={line.id} className="border-t border-gray-50">
+                  <td className="py-1.5 font-medium text-gray-700">{line.bk_accounts?.name}</td>
+                  <td className="py-1.5 text-right tabular-nums">{Number(line.debit) > 0 ? fmtCurrency(line.debit) : '—'}</td>
+                  <td className="py-1.5 text-right tabular-nums">{Number(line.credit) > 0 ? fmtCurrency(line.credit) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-gray-400 mt-2">source_record_id: {entry.source_record_id || '—'}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NewEntryModal({ onClose, onSaved }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [memo, setMemo] = useState('')
+  const [lines, setLines] = useState([emptyLine(), emptyLine()])
+  const [saving, setSaving] = useState(false)
+
+  function setLine(i, patch) {
+    setLines(prev => prev.map((l, idx) => idx === i ? { ...l, ...patch } : l))
+  }
+  function addLine() { setLines(prev => [...prev, emptyLine()]) }
+  function removeLine(i) { setLines(prev => prev.filter((_, idx) => idx !== i)) }
+
+  const totalDebit = lines.reduce((s, l) => s + (Number(l.debit) || 0), 0)
+  const totalCredit = lines.reduce((s, l) => s + (Number(l.credit) || 0), 0)
+  const balanced = totalDebit > 0 && Math.abs(totalDebit - totalCredit) < 0.005
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!memo.trim()) return toast.error('Give it a memo')
+    if (!balanced) return toast.error('Debits and credits must balance')
+    setSaving(true)
+    try {
+      await callBookkeeping('create_manual_entry', {
+        date, memo,
+        lines: lines
+          .filter(l => Number(l.debit) > 0 || Number(l.credit) > 0)
+          .map(l => ({ accountCode: l.accountCode, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 })),
+      })
+      toast.success('Posted')
+      onSaved()
+    } catch (err) {
+      toast.error('Failed to post: ' + err.message)
+    }
+    setSaving(false)
+  }
+
+  const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl w-full max-w-xl shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 sticky top-0 bg-white rounded-t-xl">
+          <h2 className="font-semibold text-gray-900">New Journal Entry</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inp} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Memo</label>
+              <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="What is this for?" className={inp} />
+            </div>
+          </div>
+
+          <div>
+            <div className="grid grid-cols-[1fr_100px_100px_28px] gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 px-1 mb-1">
+              <span>Account</span><span className="text-right">Debit</span><span className="text-right">Credit</span><span />
+            </div>
+            <div className="space-y-2">
+              {lines.map((l, i) => (
+                <div key={i} className="grid grid-cols-[1fr_100px_100px_28px] gap-2 items-center">
+                  <select value={l.accountCode} onChange={e => setLine(i, { accountCode: e.target.value })} className={inp}>
+                    {PHASE0_ACCOUNTS.map(a => <option key={a.code} value={a.code}>{a.name}</option>)}
+                  </select>
+                  <input type="number" step="0.01" value={l.debit} onChange={e => setLine(i, { debit: e.target.value, credit: '' })} className={inp + ' text-right'} />
+                  <input type="number" step="0.01" value={l.credit} onChange={e => setLine(i, { credit: e.target.value, debit: '' })} className={inp + ' text-right'} />
+                  <button type="button" onClick={() => removeLine(i)} disabled={lines.length <= 2} className="text-gray-300 hover:text-red-500 disabled:opacity-30">
+                    <X size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={addLine} className="mt-2 text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1">
+              <Plus size={13} /> Add line
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+            <span className={`text-xs font-bold flex items-center gap-1.5 ${balanced ? 'text-green-600' : 'text-gray-400'}`}>
+              {balanced && <CheckCircle2 size={13} />}
+              {balanced ? 'Balanced' : `${fmtCurrency(totalDebit)} / ${fmtCurrency(totalCredit)}`}
+            </span>
+            <div className="flex gap-3">
+              <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+              <button type="submit" disabled={saving || !balanced}
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                {saving && <Loader2 size={14} className="animate-spin" />}
+                Post Entry
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
