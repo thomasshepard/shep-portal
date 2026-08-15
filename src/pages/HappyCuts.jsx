@@ -61,6 +61,7 @@ const SF = {
   payoutDate: 'fldudVxM07IOaDpvI',      // date
   assignedTo: 'fldYaLvvamO0dyty9',      // link to Crew — PLANNED assignment (set before the job happens)
   plannedJobMode: 'fldi4YAjhiYa0mXu1',  // singleSelect: Solo/Joint — planned, distinct from Job Mode (snapshotted at completion)
+  actualStart: 'fldlmt4gDdskQ9wHt',     // dateTime — set by "Start Work" button; used to auto-compute Duration at completion
 }
 
 // Crew field IDs
@@ -189,6 +190,7 @@ function parseMow(r) {
     assignedToIds: arr(f[SF.assignedTo]),
     plannedJobMode: safeStr(f[SF.plannedJobMode]),
     payoutDate: safeStr(f[SF.payoutDate]),
+    actualStart: safeStr(f[SF.actualStart]),
   }
 }
 
@@ -962,6 +964,8 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
   const [isCompleted, setIsCompleted] = useState(mow.status === 'Completed')
   const [markCompleteOpen, setMarkCompleteOpen] = useState(false)
   const [markCompleting, setMarkCompleting] = useState(false)
+  const [actualStart, setActualStart] = useState(mow.actualStart || '')
+  const [startingWork, setStartingWork] = useState(false)
   const [showInvoiceMenu, setShowInvoiceMenu] = useState(false)
   const [cashLoading, setCashLoading] = useState(false)
   const [localInvStatus, setLocalInvStatus] = useState(mow.invStatus || '')
@@ -1073,11 +1077,29 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
     }
   }
 
+  async function startWork() {
+    setStartingWork(true)
+    try {
+      const now = new Date().toISOString()
+      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.actualStart]: now })
+      setActualStart(now)
+      toast.success('Timer started ▶️')
+    } catch {
+      toast.error('Failed to start timer')
+    } finally {
+      setStartingWork(false)
+    }
+  }
+
   async function markComplete() {
     setMarkCompleting(true)
     // Step 1: Mark completion (must succeed)
     try {
       const completionFields = { [SF.status]: 'Completed' }
+      if (actualStart) {
+        const minutes = Math.round((Date.now() - new Date(actualStart).getTime()) / 60000)
+        if (minutes > 0) completionFields[SF.duration] = minutes
+      }
       if (workedById && workedByPerson) {
         const rate = jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate
         completionFields[SF.workedBy] = [workedById]
@@ -1261,12 +1283,31 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
           {mow.type && <span>{mow.type}</span>}
           {mow.amount != null && <span className="text-gray-400">·</span>}
           {mow.amount != null && <span className="font-semibold text-gray-800">{fmtCurrency(mow.amount)}</span>}
+          {isCompleted && mow.duration != null && <span className="text-gray-400">·</span>}
+          {isCompleted && mow.duration != null && <span>⏱️ {mow.duration} min</span>}
         </div>
 
         {/* Status badge */}
         <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
           {mow.status || 'Unknown'}
         </span>
+
+        {/* Start Work — timestamps when work actually begins so completion can auto-log duration */}
+        {!isCompleted && (
+          actualStart ? (
+            <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2.5">
+              🟢 Started at {new Date(actualStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </div>
+          ) : (
+            <button
+              onClick={startWork}
+              disabled={startingWork}
+              className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {startingWork ? <Loader2 size={16} className="animate-spin" /> : '▶️'} Start Work Now
+            </button>
+          )
+        )}
 
         {/* Special instructions */}
         {contact?.specInstr && (
@@ -1477,6 +1518,16 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setMarkCompleteOpen(false)}>
           <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-gray-800 text-lg mb-3">Mark this mow as complete?</h3>
+
+            {actualStart && (
+              <p className="text-xs text-gray-500 mb-4">
+                ⏱️ Duration will be logged as{' '}
+                <span className="font-semibold text-gray-700">
+                  {Math.max(0, Math.round((Date.now() - new Date(actualStart).getTime()) / 60000))} min
+                </span>{' '}
+                (started {new Date(actualStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })})
+              </p>
+            )}
 
             {activeCrew.length > 0 && (
               <div className="mb-4 space-y-2">
@@ -3134,6 +3185,42 @@ function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInv
     }
   }
 
+  // Marks the project paid when the client paid outside Stripe (cash, check,
+  // Venmo, etc.) instead of using the hosted invoice link. If a Stripe invoice
+  // exists, routes through mark-invoice-paid so the Stripe side is stamped
+  // unambiguously (description + metadata) as a cash payment, not just left as
+  // an unexplained "paid out of band". Mirrors the mow schedule's cash flow.
+  async function handleMarkPaidCash() {
+    setStatusLoading(true)
+    try {
+      if (p.stripeInvoiceId) {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/mark-invoice-paid`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({
+            stripeInvoiceId: p.stripeInvoiceId,
+            mowRecordId: p.id,
+            tableId: PROJECTS_TABLE,
+            existingNotes: p.notes || '',
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to mark invoice paid')
+        toast.success('Invoice marked paid (cash) ✓ — logged in Stripe')
+      } else {
+        // No Stripe invoice on this project (status moved to Invoiced by hand) — Airtable-only.
+        await atPatch(PROJECTS_TABLE, p.id, { [PF.invoiceStatus]: 'Paid' })
+        toast.success('Marked paid (cash) ✓')
+      }
+      await atPatch(PROJECTS_TABLE, p.id, { [PF.status]: 'Paid' })
+      onRefresh()
+    } catch (err) {
+      toast.error(`Could not mark as paid: ${err.message}`)
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
   return (
     <div
       className={`bg-white rounded-xl border border-gray-100 overflow-hidden transition-opacity ${isLost ? 'opacity-60 hover:opacity-100' : ''}`}
@@ -3248,11 +3335,11 @@ function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInv
             )}
             {p.status === 'Invoiced' && (
               <button
-                onClick={() => setStatus('Paid')}
+                onClick={handleMarkPaidCash}
                 disabled={statusLoading}
                 className="text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-semibold"
               >
-                Mark paid
+                💵 Mark Paid (Cash)
               </button>
             )}
             <button
