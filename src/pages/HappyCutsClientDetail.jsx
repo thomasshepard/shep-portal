@@ -54,6 +54,7 @@ const SF = {
   contractorPayout: 'fldXHs5HWVUdjGpFH',
   payoutStatus: 'fld7YMwn3ozYB69QX',
   payoutDate: 'fldudVxM07IOaDpvI',
+  actualStart: 'fldlmt4gDdskQ9wHt',    // dateTime — set by "Start Work" button; used to auto-compute Duration at completion
 }
 
 // Crew field IDs
@@ -209,6 +210,7 @@ function parseMow(r) {
     jobMode: safeStr(f[SF.jobMode]),
     contractorPayout: safeNum(f[SF.contractorPayout]),
     payoutStatus: safeStr(f[SF.payoutStatus]),
+    actualStart: safeStr(f[SF.actualStart]),
   }
 }
 
@@ -687,6 +689,8 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
   const [isCompleted, setIsCompleted] = useState(mow.status === 'Completed')
   const [markCompleteOpen, setMarkCompleteOpen] = useState(false)
   const [markCompleting, setMarkCompleting] = useState(false)
+  const [actualStart, setActualStart] = useState(mow.actualStart || '')
+  const [startingWork, setStartingWork] = useState(false)
   const [showInvoiceMenu, setShowInvoiceMenu] = useState(false)
   const [cashLoading, setCashLoading] = useState(false)
   const [localInvStatus, setLocalInvStatus] = useState(mow.invStatus || '')
@@ -779,11 +783,29 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
     }
   }
 
+  async function startWork() {
+    setStartingWork(true)
+    try {
+      const now = new Date().toISOString()
+      await atPatch(SCHEDULE_TABLE, mow.id, { [SF.actualStart]: now })
+      setActualStart(now)
+      toast.success('Timer started ▶️')
+    } catch {
+      toast.error('Failed to start timer')
+    } finally {
+      setStartingWork(false)
+    }
+  }
+
   async function markComplete() {
     setMarkCompleting(true)
     // Step 1: Mark completion (must succeed)
     try {
       const completionFields = { [SF.status]: 'Completed' }
+      if (actualStart) {
+        const minutes = Math.round((Date.now() - new Date(actualStart).getTime()) / 60000)
+        if (minutes > 0) completionFields[SF.duration] = minutes
+      }
       if (workedById && workedByPerson) {
         const rate = jobMode === 'Joint' ? workedByPerson.jointRate : workedByPerson.soloRate
         completionFields[SF.workedBy] = [workedById]
@@ -885,10 +907,29 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
           <span>{fmtDateShort(mow.date)}</span>
           {mow.type && <><span className="text-gray-400">·</span><span>{mow.type}</span></>}
           {mow.amount != null && <><span className="text-gray-400">·</span><span className="font-semibold text-gray-800">{fmtCurrency(mow.amount)}</span></>}
+          {isCompleted && mow.duration != null && <><span className="text-gray-400">·</span><span>⏱️ {mow.duration} min</span></>}
         </div>
         <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${MOW_STATUS[mow.status] || 'bg-gray-100 text-gray-500'}`}>
           {mow.status || 'Unknown'}
         </span>
+
+        {/* Start Work — timestamps when work actually begins so completion can auto-log duration */}
+        {!isCompleted && (
+          actualStart ? (
+            <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-3 py-2.5">
+              🟢 Started at {new Date(actualStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </div>
+          ) : (
+            <button
+              onClick={startWork}
+              disabled={startingWork}
+              className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {startingWork ? <Loader2 size={16} className="animate-spin" /> : '▶️'} Start Work Now
+            </button>
+          )
+        )}
+
         {contact?.specInstr && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
             <p className="text-xs font-bold text-amber-700 mb-1">⚠️ YARD NOTES</p>
@@ -1016,6 +1057,16 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setMarkCompleteOpen(false)}>
           <div className="bg-white rounded-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-gray-800 text-lg mb-3">Mark this mow as complete?</h3>
+
+            {actualStart && (
+              <p className="text-xs text-gray-500 mb-4">
+                ⏱️ Duration will be logged as{' '}
+                <span className="font-semibold text-gray-700">
+                  {Math.max(0, Math.round((Date.now() - new Date(actualStart).getTime()) / 60000))} min
+                </span>{' '}
+                (started {new Date(actualStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })})
+              </p>
+            )}
 
             {activeCrew.length > 0 && (
               <div className="mb-4 space-y-2">

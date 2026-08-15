@@ -8,6 +8,19 @@ const stripe = new Stripe(Deno.env.get('STRIPE_HAPPY_CUTS_KEY') ?? '', {
 const AIRTABLE_PAT = Deno.env.get('AIRTABLE_PAT') ?? ''
 const AIRTABLE_BASE = 'appZOi48qf8SzyOml'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
+const PROJECTS_TABLE = 'tblP7yDgETBBbgLpb'
+
+// Per-table field IDs for the Airtable write-back — mirrors create-stripe-invoice's TABLE_FIELDS
+const TABLE_FIELDS: Record<string, { invoiceStatus: string; notes: string }> = {
+  [SCHEDULE_TABLE]: {
+    invoiceStatus: 'fldhiIRXuRlvp3QXO',
+    notes:         'fldos2p3iwvUCKlH6',
+  },
+  [PROJECTS_TABLE]: {
+    invoiceStatus: 'fldrA8Jw7VziWmEIX',
+    notes:         'fldN8Uktj2w4gpR5W',
+  },
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,9 +34,11 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json()
-    const { stripeInvoiceId, mowRecordId, existingNotes } = body
+    const { stripeInvoiceId, mowRecordId, existingNotes, tableId } = body
+    const targetTable = tableId || SCHEDULE_TABLE
+    const tFields = TABLE_FIELDS[targetTable] ?? TABLE_FIELDS[SCHEDULE_TABLE]
 
-    console.log('[MarkPaid] Request:', { stripeInvoiceId, mowRecordId })
+    console.log('[MarkPaid] Request:', { stripeInvoiceId, mowRecordId, targetTable })
 
     if (!stripeInvoiceId || !mowRecordId) {
       return new Response(
@@ -31,6 +46,28 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
+
+    // --- Make the cash payment unambiguous on the Stripe side ---
+    // paid_out_of_band alone just flips the invoice to "Paid" with no record of
+    // *how* — indistinguishable in the dashboard from any other manual override.
+    // Stamp a description (shows on the invoice detail page + PDF) and metadata
+    // (shows in the dashboard's Metadata panel) before marking it paid.
+    const paidAt = new Date().toISOString()
+    const existingInvoice = await stripe.invoices.retrieve(stripeInvoiceId)
+    const cashStamp = `[PAID IN CASH — recorded via Shep Portal ${new Date(paidAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}]`
+    const newDescription = existingInvoice.description
+      ? `${existingInvoice.description}\n${cashStamp}`
+      : cashStamp
+
+    await stripe.invoices.update(stripeInvoiceId, {
+      description: newDescription,
+      metadata: {
+        ...existingInvoice.metadata,
+        payment_method: 'cash',
+        cash_marked_via: 'shep_portal',
+        cash_marked_at: paidAt,
+      },
+    })
 
     const paidInvoice = await stripe.invoices.pay(stripeInvoiceId, {
       paid_out_of_band: true,
@@ -44,7 +81,7 @@ Deno.serve(async (req) => {
       : cashNote
 
     const atRes = await fetch(
-      `https://api.airtable.com/v0/${AIRTABLE_BASE}/${SCHEDULE_TABLE}/${mowRecordId}`,
+      `https://api.airtable.com/v0/${AIRTABLE_BASE}/${targetTable}/${mowRecordId}`,
       {
         method: 'PATCH',
         headers: {
@@ -53,8 +90,8 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           fields: {
-            'fldhiIRXuRlvp3QXO': 'Paid',
-            'fldos2p3iwvUCKlH6': updatedNotes,
+            [tFields.invoiceStatus]: 'Paid',
+            [tFields.notes]: updatedNotes,
           },
           typecast: true,
         }),
