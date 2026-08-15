@@ -50,6 +50,7 @@ import BankDashboard from './pages/BankDashboard'
 import Insurance from './pages/Insurance'
 import Fleet from './pages/Fleet'
 import FleetDetail from './pages/FleetDetail'
+import FleetMaintenance from './pages/FleetMaintenance'
 
 export default function App() {
   return (
@@ -90,6 +91,7 @@ export default function App() {
             <Route path="happy-cuts/client/:id" element={<PermRoute permission="can_view_happy_cuts"><HappyCutsClientDetail /></PermRoute>} />
             <Route path="happy-cuts/guide" element={<PermRoute permission="can_view_happy_cuts"><HappyCutsGuide /></PermRoute>} />
             <Route path="fleet" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><Fleet /></ErrorBoundary></PermRoute>} />
+            <Route path="fleet/maintenance" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><FleetMaintenance /></ErrorBoundary></PermRoute>} />
             <Route path="fleet/:id" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><FleetDetail /></ErrorBoundary></PermRoute>} />
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="notifications/settings" element={<ProtectedRoute><NotificationSettings /></ProtectedRoute>} />

@@ -278,3 +278,30 @@ export function maintenanceUrgency(fields, assetFields = {}) {
   if (days <= MAINT_DUE_SOON_DAYS) return { state: 'dueSoon', urgency: 'warn', days, label: days === 0 ? 'Due today' : `Due in ${days}d` }
   return { state: 'scheduled', urgency: 'ok', days, label: `Due in ${days}d` }
 }
+
+/** Fields to write when marking one maintenance item done today — shared by
+ *  the per-asset view (FleetDetail.jsx) and the fleet-wide grouped view
+ *  (FleetMaintenance.jsx) so "mark done" and "mark all done" behave identically. */
+export function computeMarkDoneFields(fields) {
+  const today = todayISO()
+  if (fields['Interval Type'] === 'One-time') {
+    return { 'Last Done Date': today, Status: 'Done', 'Next Due Date': null }
+  }
+  return {
+    'Last Done Date': today,
+    Status: 'Active',
+    'Next Due Date': computeNextDueDate({ ...fields, 'Last Done Date': today }),
+  }
+}
+
+// ── Money-pit check ─────────────────────────────────────────────────────────
+// Flags an asset once repair/parts spend alone (Total Invested minus the
+// original Purchase Price) has caught up to what it cost to buy — the same
+// pattern that played out on the 31R707 right before it got sold at a loss.
+
+export function isMoneyPit(fields) {
+  const purchase = fields['Purchase Price']
+  const invested = fields['Total Invested']
+  if (purchase == null || invested == null || purchase <= 0) return false
+  return invested >= purchase
+}

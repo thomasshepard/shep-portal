@@ -69,13 +69,17 @@ it lives today.
 | `Location` | select | `Home` \| `Buster's` \| `Job Site` — **physical location only**, never "Sold" (that's `Status`) |
 | `Photo URLs` | long text | JSON array of `{"url": "...", "kind": "tag"\|"machine"}` — see **Photos & Documents** below |
 | `Document URLs` | long text | JSON array of `{"url": "...", "label": "..."}` — title/registration docs, same pattern as photos |
-| `Est. Market Value` | currency | manual estimate |
+| `Est. Market Value` | currency | manual estimate — **as-is / current condition**, not "worth once fixed." A machine mid-repair with an undiagnosed problem should carry a lower as-is estimate, not its healthy-machine price. |
 | `Market Value Last Updated` | date | **stamp to today whenever you change `Est. Market Value`** |
+| `Est. Value After Repair` / `Est. Repair Cost` | currency | what it'd sell for once fixed / a shop's quote to fix it — only meaningful while `Status` is `In Repair` or `Down` |
+| `Sold Date` / `Sale Price` | date / currency | only set when `Status = "Sold"`. **`Sale Price` is total consideration, not just cash** — include the value of any debt/labor forgiven as part of a trade |
 | `Notes` | long text | free text |
 | `Cost Entries`, `Maintenance Items` | link | **read-only from this side** — populated automatically by the reverse link. Never write to either directly. |
 | `Cost Entries Sum` | rollup | **read-only, computed.** Never write. |
 | `Total Invested` | formula (`Purchase Price` + `Cost Entries Sum`) | **read-only, computed.** Never write. |
-| `Est. Equity` | formula (`Est. Market Value` − `Total Invested`) | **read-only, computed.** Never write. |
+| `Est. Equity` | formula (`Est. Market Value` − `Total Invested`) | **read-only, computed — unrealized**, i.e. only meaningful pre-sale. Never write. |
+| `Repair Upside` | formula (`Est. Value After Repair` − `Est. Repair Cost` − `Total Invested`) | **read-only, computed.** Whether finishing a repair is worth it, given what's already sunk. Never write. |
+| `Realized Gain/Loss` | formula (`Sale Price` − `Total Invested`) | **read-only, computed — the realized counterpart to `Est. Equity`**, only meaningful once `Status = "Sold"`. Never write. |
 
 **Table: Cost Entries** — `tbl4Etxh9weJ2Qitz` — one row per repair/part/expense
 
@@ -146,13 +150,16 @@ up to 10) — a single-record update is just a one-element array.
 `update_records` on Equipment: `Current Mileage` and/or `Current Engine Hours` **and** `Reading Last Updated: <today>` together, every time.
 
 **Mark an asset sold**
-`update_records` on Equipment: `fields: { Status: "Sold" }`. Leave `Location` as-is or clear it.
+`update_records` on Equipment: `Status: "Sold"`, `Sold Date: <today>`, `Sale Price: <total consideration>`. Leave `Location` as-is or clear it. `list_records` on Equipment excludes Sold by default in the app's UI (not in the API — you'll still get Sold records back from `list_records` unless you filter client-side).
+
+**Set a repair decision estimate** (while In Repair or Down)
+`update_records` on Equipment: `Est. Value After Repair` and `Est. Repair Cost`. Read `Repair Upside` back afterward (or compute it yourself: value − cost − Total Invested) to answer "is finishing this worth it."
 
 **List the fleet / find an asset**
-`list_records` on Equipment (small table, fetch it all). Filter/search client-side.
+`list_records` on Equipment (small table, fetch it all). Filter/search client-side. Filter out `Status = "Sold"` yourself if asked for "the fleet" / "active assets" — the app does this by default but the raw API does not.
 
 **Needs-attention check** (mirrors `Fleet.jsx`'s logic exactly)
-Over non-Sold Equipment: flag `Purchase Price` null, `Purchase Date` empty, or `Est. Market Value` set with `Market Value Last Updated` >60 days old — plus, separately, any linked Maintenance Item that's Overdue/Due Soon.
+Over non-Sold Equipment: flag `Purchase Price` null, `Purchase Date` empty, `Est. Market Value` set with `Market Value Last Updated` >60 days old, or `Total Invested >= Purchase Price` (a "money pit" — repair spend alone has caught up to what it cost to buy) — plus, separately, any linked Maintenance Item that's Overdue/Due Soon.
 
 **Fleet totals**
 Sum `Total Invested`, `Est. Market Value`, `Est. Equity` across non-Sold Equipment — precomputed, just read and sum.
@@ -170,7 +177,7 @@ Set `Last Done Date` to today. `One-time`: `Status: "Done"`, clear `Next Due Dat
 `update_records`: `Status: "Active"`, `Next Due Date: <today>`.
 
 **What maintenance needs attention fleet-wide**
-`list_records` on Maintenance Items, compute urgency per row, filter to Overdue/Due Soon. This is the same set folded into the Fleet page's own Needs Attention panel — don't duplicate it onto the global Dashboard; that panel deliberately stays out of the cross-business Dashboard (one summary line on the existing Fleet widget is all it gets there).
+`list_records` on Maintenance Items, compute urgency per row, filter to Overdue/Due Soon. This is the same set folded into the Fleet page's own Needs Attention panel — don't duplicate it onto the global Dashboard; that panel deliberately stays out of the cross-business Dashboard (one summary line on the existing Fleet widget is all it gets there). For the full fleet-wide picture (not just Overdue/Due Soon), see `/fleet/maintenance` in the app — it groups by task `Name` (same task on multiple machines = one group), excludes Sold assets' items, and is what `FleetMaintenance.jsx` reads. If asked to "mark done" more than one item at once, use `computeMarkDoneFields()`'s logic per item (don't reinvent it) rather than a single shared date/status across items with different Interval Types.
 
 ## Photos & Documents — not fully MCP-operable
 

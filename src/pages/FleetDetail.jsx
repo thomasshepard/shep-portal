@@ -11,6 +11,7 @@ import {
   uploadFleetPhoto, uploadFleetDocument, parsePhotos, parseDocuments, daysSince, STALE_DAYS,
   MAINT_TABLE, MAINT_CATEGORIES, MAINT_PRIORITIES, MAINT_INTERVAL_TYPES,
   MAINT_CATEGORY_BADGE, MAINT_PRIORITY_BADGE, computeNextDueDate, maintenanceUrgency, todayISO,
+  computeMarkDoneFields, isMoneyPit,
 } from '../lib/fleet'
 import { EquipmentModal, StatTile, Field, inp } from './Fleet'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -116,15 +117,7 @@ export default function FleetDetail() {
   )
 
   async function markDone(item) {
-    const f2 = item.fields || {}
-    const fields = { 'Last Done Date': todayISO() }
-    if (f2['Interval Type'] === 'One-time') {
-      fields.Status = 'Done'
-      fields['Next Due Date'] = null
-    } else {
-      fields.Status = 'Active'
-      fields['Next Due Date'] = computeNextDueDate({ ...f2, 'Last Done Date': todayISO() })
-    }
+    const fields = computeMarkDoneFields(item.fields || {})
     const { error } = await updateRecord(MAINT_TABLE, item.id, fields, FLEET_BASE_ID)
     if (error) return toast.error('Failed to update: ' + error)
     toast.success('Marked done')
@@ -198,6 +191,10 @@ export default function FleetDetail() {
   const readingIsStale = (f['Current Mileage'] != null || f['Current Engine Hours'] != null) && readingStaleDays != null && readingStaleDays > READING_STALE_DAYS
   const regExpiry = parseDate(f['Registration Expiry'])
   const regExpired = regExpiry && regExpiry < new Date()
+  const isSold = status === 'Sold'
+  const isRepairing = status === 'In Repair' || status === 'Down'
+  const moneyPit = !isSold && isMoneyPit(f)
+  const hasRepairEstimate = f['Est. Value After Repair'] != null && f['Est. Repair Cost'] != null
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-5">
@@ -260,23 +257,70 @@ export default function FleetDetail() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile label="Purchase price" value={f['Purchase Price'] != null ? fmtCurrency(f['Purchase Price']) : '—'} sub={f['Purchase Date'] ? fmtDate(f['Purchase Date']) : 'Date unknown'} />
         <StatTile label="Total invested" value={fmtCurrency(safeNum(f['Total Invested']))} sub={`Purchase + ${costs.length} logged cost${costs.length === 1 ? '' : 's'}`} />
-        <StatTile
-          label="Est. market value"
-          value={f['Est. Market Value'] != null ? fmtCurrency(f['Est. Market Value']) : '—'}
-          sub={f['Market Value Last Updated'] ? `Updated ${fmtDate(f['Market Value Last Updated'])}` : 'Never estimated'}
-          tone={isStale ? 'crit' : undefined}
-        />
-        <StatTile
-          label="Est. equity"
-          value={f['Est. Market Value'] != null ? fmtCurrency(safeNum(f['Est. Equity'])) : '—'}
-          sub={f['Est. Market Value'] == null ? 'Set a market value to see this' : safeNum(f['Est. Equity']) >= 0 ? 'Worth more than invested' : 'Invested more than it’s worth'}
-          tone={f['Est. Market Value'] == null ? undefined : safeNum(f['Est. Equity']) >= 0 ? 'good' : 'crit'}
-        />
+        {isSold ? (
+          <>
+            <StatTile
+              label="Sale price"
+              value={f['Sale Price'] != null ? fmtCurrency(f['Sale Price']) : '—'}
+              sub={f['Sold Date'] ? `Sold ${fmtDate(f['Sold Date'])}` : 'Sold date unknown'}
+            />
+            <StatTile
+              label="Realized gain/loss"
+              value={f['Sale Price'] != null ? fmtCurrency(safeNum(f['Realized Gain/Loss'])) : '—'}
+              sub={f['Sale Price'] == null ? 'Set a sale price to see this' : safeNum(f['Realized Gain/Loss']) >= 0 ? 'Sold for more than invested' : 'Sold for less than invested'}
+              tone={f['Sale Price'] == null ? undefined : safeNum(f['Realized Gain/Loss']) >= 0 ? 'good' : 'crit'}
+            />
+          </>
+        ) : (
+          <>
+            <StatTile
+              label="Est. market value"
+              value={f['Est. Market Value'] != null ? fmtCurrency(f['Est. Market Value']) : '—'}
+              sub={f['Market Value Last Updated'] ? `As-is, updated ${fmtDate(f['Market Value Last Updated'])}` : 'Never estimated'}
+              tone={isStale ? 'crit' : undefined}
+            />
+            <StatTile
+              label="Est. equity"
+              value={f['Est. Market Value'] != null ? fmtCurrency(safeNum(f['Est. Equity'])) : '—'}
+              sub={f['Est. Market Value'] == null ? 'Set a market value to see this' : safeNum(f['Est. Equity']) >= 0 ? 'Worth more than invested' : 'Invested more than it’s worth'}
+              tone={f['Est. Market Value'] == null ? undefined : safeNum(f['Est. Equity']) >= 0 ? 'good' : 'crit'}
+            />
+          </>
+        )}
       </div>
-      {isStale && (
+      {isStale && !isSold && (
         <p className="text-xs text-amber-600 -mt-2">
           Market value hasn't been touched in {staleDays} days — worth a quick check before trusting the equity number above.
         </p>
+      )}
+      {moneyPit && (
+        <p className="text-xs text-red-600 -mt-2 font-medium">
+          Repairs ({fmtCurrency(safeNum(f['Total Invested']) - safeNum(f['Purchase Price']))}) have caught up to the {fmtCurrency(f['Purchase Price'])} purchase price — worth deciding whether to keep sinking money in.
+        </p>
+      )}
+
+      {/* Repair decision — only while actually broken */}
+      {isRepairing && hasRepairEstimate && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 className="font-semibold text-gray-800 text-sm mb-3">Worth fixing?</h2>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Value if fixed</p>
+              <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtCurrency(f['Est. Value After Repair'])}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Repair cost</p>
+              <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtCurrency(f['Est. Repair Cost'])}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Upside</p>
+              <p className={`text-lg font-bold tabular-nums ${safeNum(f['Repair Upside']) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {fmtCurrency(safeNum(f['Repair Upside']))}
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">Value if fixed − repair cost − {fmtCurrency(safeNum(f['Total Invested']))} already spent</p>
+        </div>
       )}
 
       {/* Maintenance */}

@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
-  Wrench, Plus, X, Loader2, AlertTriangle, Search, Camera,
+  Wrench, Plus, X, Loader2, AlertTriangle, Search, Camera, ClipboardList, DollarSign,
   ChevronDown, ChevronUp, SlidersHorizontal, LayoutGrid, List as ListIcon, Table as TableIcon,
 } from 'lucide-react'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency } from '../lib/airtable'
 import {
   FLEET_BASE_ID, EQUIPMENT_TABLE, ASSET_CATEGORIES, STATUSES, LOCATIONS, AXLE_COUNTS,
   CATEGORY_FIELDS, STATUS_BADGE, STATUS_DOT, STALE_DAYS, parsePhotos, daysSince,
-  MAINT_TABLE, maintenanceUrgency,
+  MAINT_TABLE, maintenanceUrgency, isMoneyPit,
 } from '../lib/fleet'
 import LoadingSpinner from '../components/LoadingSpinner'
 
@@ -63,6 +63,7 @@ export default function Fleet() {
   const [viewMode, setViewMode] = usePersisted('fleet-view-mode', 'list')
   const [statsOpen, setStatsOpen] = usePersisted('fleet-stats-open', false)
   const [filtersOpen, setFiltersOpen] = useState(false) // not persisted — starts closed every visit so it can't linger open eating space
+  const [showSold, setShowSold] = useState(false) // not persisted — sold assets stay out of the way by default
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -84,10 +85,16 @@ export default function Fleet() {
 
   useEffect(() => { load() }, [load])
 
+  const soldCount = useMemo(() => equipment.filter(e => safeStr(e.fields?.Status) === 'Sold').length, [equipment])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return equipment.filter(e => {
       const f = e.fields || {}
+      const isSold = safeStr(f.Status) === 'Sold'
+      // Sold assets stay archived out of the working view unless explicitly
+      // asked for — either the "Show sold" toggle, or filtering to Sold directly.
+      if (isSold && !showSold && statusFilter !== 'Sold') return false
       if (categoryFilter !== 'all' && safeStr(f.Category) !== categoryFilter) return false
       if (statusFilter !== 'all' && safeStr(f.Status) !== statusFilter) return false
       if (locationFilter !== 'all' && safeStr(f.Location) !== locationFilter) return false
@@ -97,7 +104,7 @@ export default function Fleet() {
       }
       return true
     })
-  }, [equipment, categoryFilter, statusFilter, locationFilter, search])
+  }, [equipment, categoryFilter, statusFilter, locationFilter, search, showSold])
 
   const totals = useMemo(() => {
     const live = equipment.filter(e => safeStr(e.fields?.Status) !== 'Sold')
@@ -163,6 +170,12 @@ export default function Fleet() {
         if (f['Est. Market Value'] != null && staleDays != null && staleDays > STALE_DAYS) {
           out.push({ key: `stale-${e.id}`, machine: e, title: `${name} — market value hasn't been updated in ${staleDays} days` })
         }
+        if (isMoneyPit(f)) {
+          out.push({
+            key: `moneypit-${e.id}`, machine: e, kind: 'moneypit',
+            title: `${name} — repairs (${fmtCurrency(safeNum(f['Total Invested']) - safeNum(f['Purchase Price']))}) have caught up to the ${fmtCurrency(f['Purchase Price'])} purchase price`,
+          })
+        }
       })
     return out
   }, [equipment, maintByMachine])
@@ -178,12 +191,21 @@ export default function Fleet() {
           <Wrench size={22} className="text-blue-600" />
           Fleet
         </h1>
-        <button
-          onClick={() => setAdding(true)}
-          className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex-shrink-0"
-        >
-          <Plus size={15} /> Add
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Link
+            to="/fleet/maintenance"
+            title="All maintenance, fleet-wide"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            <ClipboardList size={15} />
+          </Link>
+          <button
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={15} /> Add
+          </button>
+        </div>
       </div>
 
       {/* Stats — collapsed by default; header row doubles as a one-line summary */}
@@ -202,6 +224,7 @@ export default function Fleet() {
               )}
               {' · '}
               {STATUSES.filter(s => totals.counts[s]).map(s => `${totals.counts[s]} ${s}`).join(' · ') || 'no equipment yet'}
+              {soldCount > 0 && <span className="text-gray-400"> · {soldCount} sold</span>}
             </p>
           )}
           {statsOpen ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
@@ -237,6 +260,7 @@ export default function Fleet() {
             {issues.map(i => (
               <div key={i.key} className="px-4 py-2 flex items-center gap-3">
                 {i.kind === 'maint' && <Wrench size={12} className="text-amber-500 flex-shrink-0" />}
+                {i.kind === 'moneypit' && <DollarSign size={12} className="text-red-500 flex-shrink-0" />}
                 <p className="text-sm text-gray-800 flex-1 min-w-0">{i.title}</p>
                 <Link to={`/fleet/${i.machine.id}`} className="text-xs font-medium text-blue-600 hover:text-blue-800 flex-shrink-0">
                   Open
@@ -292,6 +316,12 @@ export default function Fleet() {
             <CompactSelect label="Category" value={categoryFilter} onChange={setCategoryFilter} options={ASSET_CATEGORIES} />
             <CompactSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={STATUSES} />
             <CompactSelect label="Location" value={locationFilter} onChange={setLocationFilter} options={LOCATIONS} />
+            {soldCount > 0 && (
+              <label className="sm:col-span-3 flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={showSold} onChange={e => setShowSold(e.target.checked)} className="rounded" />
+                Show sold ({soldCount})
+              </label>
+            )}
             {activeFilterCount > 0 && (
               <button
                 onClick={() => { setCategoryFilter('all'); setStatusFilter('all'); setLocationFilter('all') }}
@@ -398,10 +428,12 @@ function MachineRow({ machine, maint }) {
   const photos = parsePhotos(f)
   const thumb = photos.find(p => p.kind === 'machine') || photos[0]
   const status = safeStr(f.Status, 'Running')
+  const isSold = status === 'Sold'
   const invested = safeNum(f['Total Invested'])
   const value = f['Est. Market Value']
   const equity = safeNum(f['Est. Equity'])
   const hasValue = value != null && value !== ''
+  const realized = f['Sale Price'] != null ? safeNum(f['Realized Gain/Loss']) : null
 
   return (
     <Link
@@ -424,10 +456,19 @@ function MachineRow({ machine, maint }) {
         </p>
       </div>
       <div className="text-right flex-shrink-0">
-        <p className={`text-sm font-bold tabular-nums ${!hasValue ? 'text-gray-500' : equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-          {hasValue ? fmtCurrency(equity) : fmtCurrency(invested)}
-        </p>
-        <p className="text-[10px] text-gray-400">{hasValue ? 'equity' : 'invested'}</p>
+        {isSold && realized != null ? (
+          <>
+            <p className={`text-sm font-bold tabular-nums ${realized >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtCurrency(realized)}</p>
+            <p className="text-[10px] text-gray-400">realized</p>
+          </>
+        ) : (
+          <>
+            <p className={`text-sm font-bold tabular-nums ${!hasValue ? 'text-gray-500' : equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {hasValue ? fmtCurrency(equity) : fmtCurrency(invested)}
+            </p>
+            <p className="text-[10px] text-gray-400">{hasValue ? 'equity' : 'invested'}</p>
+          </>
+        )}
       </div>
     </Link>
   )
@@ -455,6 +496,8 @@ function FleetTable({ machines, maintByMachine }) {
             const value = f['Est. Market Value']
             const hasValue = value != null && value !== ''
             const equity = safeNum(f['Est. Equity'])
+            const realized = f['Sale Price'] != null ? safeNum(f['Realized Gain/Loss']) : null
+            const showRealized = status === 'Sold' && realized != null
             return (
               <tr key={m.id} className="hover:bg-gray-50">
                 <td className="px-3 py-2">
@@ -471,8 +514,14 @@ function FleetTable({ machines, maintByMachine }) {
                 <td className="px-3 py-2 text-gray-600">{safeStr(f.Location) || '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-800">{fmtCurrency(safeNum(f['Total Invested']))}</td>
                 <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-800">{hasValue ? fmtCurrency(value) : '—'}</td>
-                <td className={`px-3 py-2 text-right tabular-nums font-bold ${!hasValue ? 'text-gray-300' : equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {hasValue ? fmtCurrency(equity) : '—'}
+                <td
+                  title={showRealized ? 'Realized gain/loss' : undefined}
+                  className={`px-3 py-2 text-right tabular-nums font-bold ${
+                    showRealized ? (realized >= 0 ? 'text-green-600' : 'text-red-600')
+                      : !hasValue ? 'text-gray-300' : equity >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {showRealized ? fmtCurrency(realized) : hasValue ? fmtCurrency(equity) : '—'}
                 </td>
               </tr>
             )
@@ -492,6 +541,8 @@ function MachineCard({ machine, maint }) {
   const value = f['Est. Market Value']
   const equity = safeNum(f['Est. Equity'])
   const hasValue = value != null && value !== ''
+  const realized = f['Sale Price'] != null ? safeNum(f['Realized Gain/Loss']) : null
+  const showRealized = status === 'Sold' && realized != null
 
   return (
     <Link
@@ -535,9 +586,12 @@ function MachineCard({ machine, maint }) {
             <p className="text-sm font-bold text-gray-800 tabular-nums">{hasValue ? fmtCurrency(value) : '—'}</p>
           </div>
           <div>
-            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">Equity</p>
-            <p className={`text-sm font-bold tabular-nums ${!hasValue ? 'text-gray-300' : equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {hasValue ? fmtCurrency(equity) : '—'}
+            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">{showRealized ? 'Realized' : 'Equity'}</p>
+            <p className={`text-sm font-bold tabular-nums ${
+              showRealized ? (realized >= 0 ? 'text-green-600' : 'text-red-600')
+                : !hasValue ? 'text-gray-300' : equity >= 0 ? 'text-green-600' : 'text-red-600'
+            }`}>
+              {showRealized ? fmtCurrency(realized) : hasValue ? fmtCurrency(equity) : '—'}
             </p>
           </div>
         </div>
@@ -561,11 +615,29 @@ export function Field({ label, hint, children }) {
   )
 }
 
+/** Inline "is finishing this repair worth it?" comparison — Est. Value After
+ *  Repair minus Est. Repair Cost minus what's already sunk. Same math as the
+ *  Airtable "Repair Upside" formula field, computed live here so it updates
+ *  as the numbers are typed, before the record is even saved. */
+function RepairUpsideHint({ repairValue, repairCost, totalInvested }) {
+  if (!Number.isFinite(repairValue) || !Number.isFinite(repairCost)) return null
+  const upside = repairValue - repairCost - totalInvested
+  return (
+    <div className="sm:col-span-2 text-xs">
+      <span className="text-gray-500">Worth finishing the repair? </span>
+      <span className={`font-bold tabular-nums ${upside >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+        {upside >= 0 ? '+' : ''}{fmtCurrency(upside)}
+      </span>
+      <span className="text-gray-400"> after-repair value minus repair cost minus {fmtCurrency(totalInvested)} already spent</span>
+    </div>
+  )
+}
+
 const emptyEquipmentForm = {
   name: '', category: 'Zero-Turn', make: '', model: '', serial: '', plate: '', dom: '', engine: '', deckSize: '',
   axles: '', gvwr: '', mileage: '', hours: '', readingDate: '', registrationExpiry: '', insuranceProvider: '',
   purchaseDate: '', purchasePrice: '', status: 'Running', location: 'Home',
-  marketValue: '', notes: '',
+  marketValue: '', notes: '', soldDate: '', salePrice: '', repairValue: '', repairCost: '',
 }
 
 export function EquipmentModal({ equipment, onClose, onSaved }) {
@@ -583,10 +655,22 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
     status: safeStr(f.Status, 'Running'), location: safeStr(f.Location, 'Home'),
     marketValue: f['Est. Market Value'] != null ? String(f['Est. Market Value']) : '',
     notes: safeStr(f.Notes),
+    soldDate: safeStr(f['Sold Date']), salePrice: f['Sale Price'] != null ? String(f['Sale Price']) : '',
+    repairValue: f['Est. Value After Repair'] != null ? String(f['Est. Value After Repair']) : '',
+    repairCost: f['Est. Repair Cost'] != null ? String(f['Est. Repair Cost']) : '',
   } : emptyEquipmentForm)
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const show = key => (CATEGORY_FIELDS[form.category] || []).includes(key)
+
+  // Default Sold Date to today the moment Status flips to Sold, if it's not already set.
+  function setStatus(newStatus) {
+    setForm(p => ({
+      ...p,
+      status: newStatus,
+      soldDate: newStatus === 'Sold' && !p.soldDate ? new Date().toISOString().slice(0, 10) : p.soldDate,
+    }))
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -620,6 +704,10 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
       Location: form.location,
       'Est. Market Value': newMarketValue,
       Notes: form.notes,
+      'Sold Date': form.status === 'Sold' ? (form.soldDate || null) : null,
+      'Sale Price': form.status === 'Sold' ? num(form.salePrice) : null,
+      'Est. Value After Repair': num(form.repairValue),
+      'Est. Repair Cost': num(form.repairCost),
     }
     // Stamp "last updated" automatically whenever a tracked value actually
     // changes, so staleness tracking doesn't rely on remembering a second field.
@@ -656,11 +744,52 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
               </select>
             </Field>
             <Field label="Status">
-              <select value={form.status} onChange={e => set('status', e.target.value)} className={inp}>
+              <select value={form.status} onChange={e => setStatus(e.target.value)} className={inp}>
                 {STATUSES.map(s => <option key={s}>{s}</option>)}
               </select>
             </Field>
           </div>
+
+          {form.status === 'Sold' && (
+            <div className="grid sm:grid-cols-2 gap-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <Field label="Sale price" hint="total consideration — include any debt/labor forgiven as part of the deal">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" inputMode="decimal" step="0.01" min="0" value={form.salePrice}
+                    onChange={e => set('salePrice', e.target.value)} className={inp + ' pl-6'} />
+                </div>
+              </Field>
+              <Field label="Sold date">
+                <input type="date" value={form.soldDate} onChange={e => set('soldDate', e.target.value)} className={inp} />
+              </Field>
+            </div>
+          )}
+
+          {(form.status === 'In Repair' || form.status === 'Down') && (
+            <div className="grid sm:grid-cols-2 gap-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <Field label="Est. value after repair" hint="what it'd sell for once fixed">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" inputMode="decimal" step="0.01" min="0" value={form.repairValue}
+                    onChange={e => set('repairValue', e.target.value)} className={inp + ' pl-6'} />
+                </div>
+              </Field>
+              <Field label="Est. repair cost" hint="a shop's quote, or your own estimate">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                  <input type="number" inputMode="decimal" step="0.01" min="0" value={form.repairCost}
+                    onChange={e => set('repairCost', e.target.value)} className={inp + ' pl-6'} />
+                </div>
+              </Field>
+              {form.repairValue !== '' && form.repairCost !== '' && (
+                <RepairUpsideHint
+                  repairValue={Number(form.repairValue)}
+                  repairCost={Number(form.repairCost)}
+                  totalInvested={safeNum(f['Total Invested']) + (equipment ? 0 : Number(form.purchasePrice) || 0)}
+                />
+              )}
+            </div>
+          )}
 
           <div className="grid sm:grid-cols-2 gap-4">
             <Field label="Make">
@@ -757,7 +886,7 @@ export function EquipmentModal({ equipment, onClose, onSaved }) {
             </Field>
           </div>
 
-          <Field label="Est. market value" hint="what it'd sell for on FB Marketplace today">
+          <Field label="Est. market value" hint="as-is, in its current condition — not what it'd be worth fixed">
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
               <input type="number" inputMode="decimal" step="0.01" min="0" value={form.marketValue}
