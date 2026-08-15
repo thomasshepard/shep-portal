@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import { notify, getAdminUserIds } from '../lib/notifications'
+import { supabase } from '../lib/supabase'
 import {
   Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
   CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen, TreePine,
@@ -104,6 +105,20 @@ async function atPatch(table, id, fields) {
   const r = await fetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields, typecast: true }) })
   return r.json()
 }
+// Bookkeeping dual-write — best-effort, never fatal. Airtable (above) is the
+// real source of truth for day-to-day ops; if this fails, the mow/payout
+// workflow must not be blocked by it. Logs + toasts a soft warning instead.
+async function postBookkeeping(action, payload) {
+  try {
+    const { data, error } = await supabase.functions.invoke('bookkeeping', { body: { action, ...payload } })
+    if (error) throw new Error(error.message || `${action} failed`)
+    if (data?.ok === false) throw new Error(data.error || `${action} failed`)
+  } catch (e) {
+    console.error(`[bookkeeping] ${action} failed:`, e.message)
+    toast('Bookkeeping entry didn’t post — the mow itself is saved fine. Check Bookkeeping later.', { icon: '⚠️' })
+  }
+}
+
 async function fetchAll(table) {
   const records = []; let offset = null
   do {
@@ -1008,6 +1023,10 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
           [SF.notes]: updatedNotes,
         })
         toast.success('Marked as paid (cash) ✓')
+        // Cash collected — clears the receivable booked at completion.
+        // (Stripe-paid mows go through mark-invoice-paid server-side and
+        // aren't wired to Bookkeeping yet — noted as a fast-follow.)
+        postBookkeeping('post_mow_payment', { scheduleRecordId: mow.id, amount: safeNum(mow.amount, 0) })
       } else {
         const res = await fetch(
           `${SUPABASE_URL}/functions/v1/mark-invoice-paid`,
@@ -1074,12 +1093,22 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
       }
       setIsCompleted(true)
       setMarkCompleteOpen(false)
+
+      // Step 2: Bookkeeping dual-write (best-effort, never blocks completion —
+      // see postBookkeeping's own comment). Revenue is earned the moment a
+      // mow is completed, independent of when it's actually paid.
+      postBookkeeping('post_mow_completion', {
+        scheduleRecordId: mow.id,
+        amount: safeNum(mow.amount, 0),
+        contractorPayout: (workedById && workedByPerson) ? completionFields[SF.contractorPayout] : null,
+        contractorName: (workedById && workedByPerson) ? workedByPerson.name : null,
+      })
     } catch {
       toast.error('Failed to mark complete')
       setMarkCompleting(false)
       return
     }
-    // Step 2: Auto-schedule next mow (failure is non-fatal)
+    // Step 3: Auto-schedule next mow (failure is non-fatal)
     try {
       const nextMow = await createNextRecurringMow(mow, contact)
       if (nextMow) {
@@ -3827,6 +3856,11 @@ function CrewTab({ crew, schedules, onRefresh }) {
     try {
       await Promise.all(jobs.map(j => atPatch(SCHEDULE_TABLE, j.id, { [SF.payoutStatus]: 'Paid', [SF.payoutDate]: today })))
       toast.success(`Marked ${jobs.length} job${jobs.length !== 1 ? 's' : ''} paid`)
+      // Settles the payable booked at completion for each of these jobs.
+      const totalAmount = jobs.reduce((s, j) => s + safeNum(j.contractorPayout, 0), 0)
+      if (totalAmount > 0) {
+        postBookkeeping('post_crew_payout', { scheduleRecordIds: jobs.map(j => j.id), totalAmount })
+      }
       onRefresh()
     } catch {
       toast.error('Failed to update')
