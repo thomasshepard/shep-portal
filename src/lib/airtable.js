@@ -4,6 +4,9 @@ const PAT = import.meta.env.VITE_AIRTABLE_PAT
 export const CHICKENS_BASE_ID = import.meta.env.VITE_AIRTABLE_CHICKENS_BASE_ID
 export const PM_BASE_ID = import.meta.env.VITE_AIRTABLE_PM_BASE_ID
 export const DOCS_BASE_ID = import.meta.env.VITE_AIRTABLE_DOCS_BASE_ID
+// Shepard Owned Companies (LLCs) — same value as the default BASE_ID, exported so
+// modules outside pages/LLCs.jsx / LLCDetail.jsx can pass it explicitly.
+export const LLC_BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID
 export const FBM_BASE_ID = 'app25IsSJz9bATUV7'
 export const TASKS_BASE_ID = import.meta.env.VITE_TASKS_BASE_ID
 export const RECIPES_BASE_ID = 'appPKrIVr569rWySg'

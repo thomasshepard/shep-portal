@@ -6,7 +6,7 @@ import {
   CheckCircle2, Clock, Loader2, ChevronDown, ChevronUp, Building2, FileText,
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
-import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, PM_BASE_ID } from '../lib/airtable'
+import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, PM_BASE_ID, DOCS_BASE_ID } from '../lib/airtable'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 const OBLIGATIONS_TABLE = 'Insurance and Taxes'
@@ -24,6 +24,33 @@ const safeNum = (v, fallback = 0) => {
   if (v == null || typeof v === 'object') return fallback
   const n = Number(v)
   return Number.isNaN(n) ? fallback : n
+}
+
+// Documents suggested by the linked-record check (see lib/documentLinks.js) —
+// Kind='Insurance & Taxes', Status='Suggested'. Parsed locally, same pattern
+// as every other page's own safeStr/safeNum accessors.
+function parseSuggestion(record) {
+  const f = record.fields || {}
+  let fieldsObj = {}
+  try { fieldsObj = JSON.parse(f['Link Fields'] || '{}') } catch { /* malformed — treat as empty */ }
+  return {
+    id: record.id,
+    name: safeStr(f['Name']) || 'Document',
+    linkMatch: safeStr(f['Link Match']),
+    linkMatchId: safeStr(f['Link Match Record ID']),
+    fieldsObj,
+  }
+}
+
+function suggestionSummary(fields = {}) {
+  const out = []
+  if (fields.renewalDate) out.push(['Renewal', fields.renewalDate])
+  if (fields.payableFrom) out.push(['Payable from', fields.payableFrom])
+  if (fields.delinquentAfter) out.push(['Delinquent after', fields.delinquentAfter])
+  if (fields.currentAmount != null) out.push(['Amount', fmtCurrency(fields.currentAmount)])
+  if (fields.policyNumber) out.push(['Policy #', fields.policyNumber])
+  if (fields.policyType) out.push(['Policy type', fields.policyType])
+  return out
 }
 
 const KINDS = ['Insurance', 'Property Tax']
@@ -164,18 +191,21 @@ export default function Insurance() {
   const [obligations, setObligations] = useState([])
   const [properties, setProperties] = useState([])
   const [payments, setPayments] = useState([])
+  const [suggestions, setSuggestions] = useState([])
   const [filter, setFilter] = useState('all')
   const [editing, setEditing] = useState(null)   // record or 'new'
+  const [prefillDoc, setPrefillDoc] = useState(null) // suggestion doc backing a new 'Create obligation'
   const [expanded, setExpanded] = useState(new Set())
   const [payingFor, setPayingFor] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [obRes, propRes, payRes] = await Promise.all([
+      const [obRes, propRes, payRes, sugRes] = await Promise.all([
         fetchAllRecords(OBLIGATIONS_TABLE, {}, PM_BASE_ID),
         fetchAllRecords('Property', {}, PM_BASE_ID),
         fetchAllRecords(PAYMENTS_TABLE, {}, PM_BASE_ID),
+        fetchAllRecords('Documents', { filterByFormula: "AND({Link Kind}='Insurance & Taxes', {Link Status}='Suggested')" }, DOCS_BASE_ID),
       ])
       if (obRes.error) throw new Error(obRes.error)
       setObligations(obRes.data || [])
@@ -184,6 +214,7 @@ export default function Insurance() {
         return addr && !addr.startsWith('DELETE')
       }))
       setPayments(payRes.data || [])
+      setSuggestions(sugRes.error ? [] : (sugRes.data || []).map(parseSuggestion))
     } catch (e) {
       toast.error('Failed to load insurance data: ' + (e.message || 'unknown'))
     } finally {
@@ -192,6 +223,37 @@ export default function Insurance() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const suggestionsByObligation = useMemo(() => {
+    const idx = {}
+    suggestions.forEach(s => { if (s.linkMatchId) idx[s.linkMatchId] = s })
+    return idx
+  }, [suggestions])
+  const unmatchedSuggestions = useMemo(() => suggestions.filter(s => !s.linkMatchId), [suggestions])
+
+  async function applySuggestion(doc) {
+    const flds = doc.fieldsObj || {}
+    const patch = {}
+    if (flds.renewalDate) patch['Renewal Date'] = flds.renewalDate
+    if (flds.payableFrom) patch['Payable From'] = flds.payableFrom
+    if (flds.delinquentAfter) patch['Delinquent After'] = flds.delinquentAfter
+    if (flds.currentAmount != null) patch['Current Amount'] = flds.currentAmount
+    if (flds.policyNumber) patch['Policy Number'] = flds.policyNumber
+    if (flds.policyType) patch['Policy Type'] = flds.policyType
+    if (Object.keys(patch).length === 0) { toast('Nothing extractable to apply', { icon: 'ℹ️' }); return }
+
+    const { error } = await updateRecord(OBLIGATIONS_TABLE, doc.linkMatchId, patch, PM_BASE_ID)
+    if (error) return toast.error('Failed to update: ' + error)
+    await updateRecord('Documents', doc.id, { 'Link Status': 'Applied' }, DOCS_BASE_ID)
+    toast.success('Updated from document')
+    load()
+  }
+
+  async function dismissSuggestion(doc) {
+    const { error } = await updateRecord('Documents', doc.id, { 'Link Status': 'Dismissed' }, DOCS_BASE_ID)
+    if (error) return toast.error('Failed to dismiss')
+    load()
+  }
 
   // Restricted rows (the health plan) are filtered out entirely for anyone
   // without the flag — they never reach the browser's rendered output.
@@ -404,6 +466,39 @@ export default function Insurance() {
         </div>
       )}
 
+      {/* Unmatched mail — insurance/tax documents with no existing obligation to attach to */}
+      {unmatchedSuggestions.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 border-l-4 border-l-amber-500 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+            <FileText size={15} className="text-amber-600" />
+            <h2 className="font-semibold text-gray-800 text-sm">Unmatched insurance/tax mail</h2>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {unmatchedSuggestions.map(doc => (
+              <div key={doc.id} className="px-4 py-2.5 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-gray-800">{doc.linkMatch || doc.name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {suggestionSummary(doc.fieldsObj).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'No details extracted'}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => { setEditing('new'); setPrefillDoc(doc) }}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                  >
+                    Create obligation
+                  </button>
+                  <button onClick={() => dismissSuggestion(doc)} className="text-[11px] text-gray-400 hover:text-red-500">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Radar */}
       {radar.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -515,6 +610,9 @@ export default function Insurance() {
                       key={o.id}
                       obligation={o}
                       payments={paymentsByObligation[o.id] || []}
+                      suggestion={suggestionsByObligation[o.id]}
+                      onApplySuggestion={applySuggestion}
+                      onDismissSuggestion={dismissSuggestion}
                       expanded={expanded.has(o.id)}
                       onToggle={() => toggle(o.id)}
                       onEdit={() => setEditing(o)}
@@ -540,6 +638,9 @@ export default function Insurance() {
                   key={o.id}
                   obligation={o}
                   payments={paymentsByObligation[o.id] || []}
+                  suggestion={suggestionsByObligation[o.id]}
+                  onApplySuggestion={applySuggestion}
+                  onDismissSuggestion={dismissSuggestion}
                   expanded={expanded.has(o.id)}
                   onToggle={() => toggle(o.id)}
                   onEdit={() => setEditing(o)}
@@ -554,10 +655,14 @@ export default function Insurance() {
       {editing && (
         <ObligationModal
           obligation={editing === 'new' ? null : editing}
+          prefillDoc={editing === 'new' ? prefillDoc : null}
           properties={activeProperties}
           canSeeRestricted={canSeeRestricted}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); load() }}
+          onClose={() => { setEditing(null); setPrefillDoc(null) }}
+          onSaved={async () => {
+            if (prefillDoc) await updateRecord('Documents', prefillDoc.id, { 'Link Status': 'Applied' }, DOCS_BASE_ID)
+            setEditing(null); setPrefillDoc(null); load()
+          }}
         />
       )}
 
@@ -585,7 +690,7 @@ function StatTile({ label, value, sub, tone }) {
   )
 }
 
-function ObligationRow({ obligation, payments, expanded, onToggle, onEdit, onLogPayment }) {
+function ObligationRow({ obligation, payments, suggestion, onApplySuggestion, onDismissSuggestion, expanded, onToggle, onEdit, onLogPayment }) {
   const f = obligation.fields || {}
   const kind = safeStr(f.Kind)
   const isTax = kind === 'Property Tax'
@@ -598,6 +703,36 @@ function ObligationRow({ obligation, payments, expanded, onToggle, onEdit, onLog
 
   return (
     <div>
+      {suggestion && (
+        <div className="mx-4 mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                <FileText size={12} /> New document suggests an update
+              </p>
+              <div className="text-xs text-gray-600 mt-1 space-y-0.5">
+                {suggestionSummary(suggestion.fieldsObj).map(([k, v]) => (
+                  <p key={k}><span className="text-gray-400">{k}:</span> {v}</p>
+                ))}
+                {suggestionSummary(suggestion.fieldsObj).length === 0 && (
+                  <p className="text-gray-400">No structured details extracted.</p>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+              <button
+                onClick={() => onApplySuggestion(suggestion)}
+                className="text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-md"
+              >
+                Apply
+              </button>
+              <button onClick={() => onDismissSuggestion(suggestion)} className="text-[11px] text-gray-400 hover:text-red-500">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="px-4 py-3 flex items-start gap-3">
         <span className={`w-8 h-8 rounded-lg grid place-items-center flex-shrink-0 ${
           isTax ? 'bg-violet-50 text-violet-600' : 'bg-blue-50 text-blue-600'
@@ -779,9 +914,26 @@ function Field({ label, hint, children }) {
   )
 }
 
-function ObligationModal({ obligation, properties, canSeeRestricted, onClose, onSaved }) {
+function ObligationModal({ obligation, prefillDoc, properties, canSeeRestricted, onClose, onSaved }) {
   const f = obligation?.fields || {}
-  const [form, setForm] = useState(() => obligation ? {
+  const [form, setForm] = useState(() => {
+    if (!obligation && prefillDoc) {
+      const x = prefillDoc.fieldsObj || {}
+      return {
+        ...emptyForm,
+        name: x.vendorOrJurisdiction || '',
+        kind: x.subKind === 'Property Tax' ? 'Property Tax' : 'Insurance',
+        entity: x.entity || '',
+        vendor: x.vendorOrJurisdiction || '',
+        amount: x.currentAmount != null ? String(x.currentAmount) : '',
+        renewalDate: x.renewalDate || '',
+        payableFrom: x.payableFrom || '',
+        delinquentAfter: x.delinquentAfter || '',
+        policyType: x.policyType || '',
+        policyNumber: x.policyNumber || '',
+      }
+    }
+    return obligation ? {
     name: safeStr(f.Name), kind: safeStr(f.Kind, 'Insurance'), status: safeStr(f.Status, 'Active'),
     propertyId: arr(f.Property)[0] || '', entity: safeStr(f.Entity),
     vendor: safeStr(f.Vendor), portal: safeStr(f['Payment Portal Link']),
@@ -800,7 +952,8 @@ function ObligationModal({ obligation, properties, canSeeRestricted, onClose, on
     agentName: safeStr(f['Agent Name']), agentPhone: safeStr(f['Agent Phone']),
     claimsPhone: safeStr(f['Claims Phone']),
     visibility: safeStr(f.Visibility, 'Standard'), notes: safeStr(f.Notes),
-  } : emptyForm)
+    } : emptyForm
+  })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const isTax = form.kind === 'Property Tax'

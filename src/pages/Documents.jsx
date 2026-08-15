@@ -2,9 +2,10 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import DocumentActionCenter from '../components/DocumentActionCenter'
 import {
   Search, X, FileText, AlertTriangle, ExternalLink, Calendar,
-  ChevronLeft, ChevronRight, ChevronDown, Plus, Upload, Share2, Flag, Mail,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, Upload, Share2, Flag, Mail, Link2,
 } from 'lucide-react'
-import { fetchAllRecords, updateRecord, DOCS_BASE_ID } from '../lib/airtable'
+import { fetchAllRecords, updateRecord, DOCS_BASE_ID, PM_BASE_ID, LLC_BASE_ID } from '../lib/airtable'
+import { classifyDocument, extractLinkedFields, fuzzyMatchName, ensureLinkFields, LINK_KIND_LABELS } from '../lib/documentLinks'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
@@ -79,6 +80,11 @@ function parseDoc(record) {
     shared: f['Shared'] === true,
     duplicate: f['Duplicate'] === true,
     attachments,
+    linkKind: safeStr(f['Link Kind'] || '', ''),
+    linkStatus: safeStr(f['Link Status'] || '', ''),
+    linkMatch: safeStr(f['Link Match'] || '', ''),
+    linkMatchId: safeStr(f['Link Match Record ID'] || '', ''),
+    linkFields: safeStr(f['Link Fields'] || '', ''),
     raw: f,
   }
 }
@@ -120,6 +126,7 @@ const STANDARD_KEYS = new Set([
   'Tags', 'Shared', 'Duplicate',
   'IsMail', 'Sender', 'Recipient', 'OCR',
   'Created', 'Last Modified', 'Needs Cleanup',
+  'Link Kind', 'Link Status', 'Link Match', 'Link Match Record ID', 'Link Fields',
 ])
 
 // Ensure Tags, Shared, Duplicate fields exist; create if missing
@@ -185,6 +192,7 @@ export default function Documents() {
     async function init() {
       if (!DOCS_BASE_ID) { setNotConfigured(true); setLoading(false); return }
       await ensureDocsFields()
+      await ensureLinkFields()
       await load()
     }
     init()
@@ -655,6 +663,82 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
 
   const extraFields = Object.entries(doc.raw).filter(([k]) => !STANDARD_KEYS.has(k))
 
+  // Linked record (Insurance & Taxes / Property Bill / LLC Compliance) suggestion
+  const classifiedKind = classifyDocument(doc)
+  const [linkChecking, setLinkChecking] = useState(false)
+  const [linkStatus, setLinkStatus] = useState(doc.linkStatus)
+  const [linkMatch, setLinkMatch] = useState(doc.linkMatch)
+  const [linkFieldsObj, setLinkFieldsObj] = useState(() => {
+    try { return JSON.parse(doc.linkFields || '{}') } catch { return {} }
+  })
+
+  async function checkLinkedRecord() {
+    if (!classifiedKind) return
+    setLinkChecking(true)
+    try {
+      const extracted = await extractLinkedFields(doc, classifiedKind)
+      let matchId = ''
+      let matchLabel = ''
+
+      if (classifiedKind === 'insurance_tax') {
+        const { data } = await fetchAllRecords('Insurance and Taxes', {}, PM_BASE_ID)
+        const query = extracted?.vendorOrJurisdiction || doc.sender
+        const match = fuzzyMatchName(query, data || [], r => r.fields?.Vendor || r.fields?.Name)
+        matchId = match?.id || ''
+        matchLabel = match
+          ? `Insurance and Taxes: ${match.fields?.Name || match.fields?.Vendor}`
+          : (extracted?.vendorOrJurisdiction ? `New: ${extracted.vendorOrJurisdiction}` : '')
+      } else if (classifiedKind === 'property_bill') {
+        const { data } = await fetchAllRecords('Property', {}, PM_BASE_ID)
+        const query = extracted?.propertyAddressGuess || doc.sender
+        const match = fuzzyMatchName(query, data || [], 'Address')
+        matchId = match?.id || ''
+        matchLabel = match
+          ? `Property: ${match.fields?.Address}`
+          : (extracted?.propertyAddressGuess ? `Unmatched: ${extracted.propertyAddressGuess}` : '')
+      } else if (classifiedKind === 'llc_compliance') {
+        const { data } = await fetchAllRecords('LLCs', {}, LLC_BASE_ID)
+        const query = extracted?.llcNameGuess || doc.sender
+        const match = fuzzyMatchName(query, data || [], 'Name')
+        matchId = match?.id || ''
+        matchLabel = match
+          ? `LLC: ${match.fields?.Name}`
+          : (extracted?.llcNameGuess ? `Unmatched: ${extracted.llcNameGuess}` : '')
+      }
+
+      const status = extracted ? 'Suggested' : 'No Match'
+      const fieldsJson = extracted ? JSON.stringify(extracted) : ''
+      const kindLabel = LINK_KIND_LABELS[classifiedKind]
+
+      const { error } = await updateRecord('Documents', doc.id, {
+        'Link Kind': kindLabel,
+        'Link Status': status,
+        'Link Match': matchLabel,
+        'Link Match Record ID': matchId,
+        'Link Fields': fieldsJson,
+      }, DOCS_BASE_ID)
+      if (error) { toast.error('Failed to save linked-record check'); return }
+
+      setLinkStatus(status)
+      setLinkMatch(matchLabel)
+      setLinkFieldsObj(extracted || {})
+      onUpdateDoc(doc.id, { linkKind: kindLabel, linkStatus: status, linkMatch: matchLabel, linkMatchId: matchId, linkFields: fieldsJson })
+      if (status === 'No Match') toast('Checked — nothing extractable found', { icon: 'ℹ️' })
+      else toast.success('Linked record suggestion saved')
+    } catch {
+      toast.error('Linked-record check failed')
+    } finally {
+      setLinkChecking(false)
+    }
+  }
+
+  async function dismissLink() {
+    const { error } = await updateRecord('Documents', doc.id, { 'Link Status': 'Dismissed' }, DOCS_BASE_ID)
+    if (error) { toast.error('Failed to dismiss'); return }
+    setLinkStatus('Dismissed')
+    onUpdateDoc(doc.id, { linkStatus: 'Dismissed' })
+  }
+
   // Share via SMS
   function handleShare() {
     const url = doc.attachments[0]?.url || ''
@@ -840,6 +924,49 @@ function DocModal({ doc, attachIdx, setAttachIdx, onClose, onUpdateDoc, onMarkDu
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Notes</p>
                 <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{doc.notes}</p>
+              </div>
+            )}
+
+            {/* Linked Record — Insurance & Taxes / Property Bill / LLC Compliance suggestion */}
+            {classifiedKind && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Linked Record</p>
+                {!linkStatus && (
+                  <button
+                    onClick={checkLinkedRecord}
+                    disabled={linkChecking}
+                    className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50 border border-blue-200 rounded-lg px-3 py-1.5 hover:bg-blue-50 transition-colors"
+                  >
+                    <Link2 size={14} /> {linkChecking ? 'Checking…' : 'Check for linked record'}
+                  </button>
+                )}
+                {linkStatus === 'Suggested' && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                    <p className="text-sm text-gray-800 font-medium">📄 {linkMatch || 'Suggested match'}</p>
+                    <div className="text-xs text-gray-600 space-y-0.5">
+                      {Object.entries(linkFieldsObj)
+                        .filter(([k, v]) => v != null && v !== '' && !k.toLowerCase().includes('guess'))
+                        .map(([k, v]) => <p key={k}><span className="text-gray-400">{k}:</span> {String(v)}</p>)}
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <p className="text-xs text-gray-500">Review and apply from the target page's banner.</p>
+                      <button onClick={dismissLink} className="text-xs text-gray-400 hover:text-red-500 flex-shrink-0">Dismiss</button>
+                    </div>
+                  </div>
+                )}
+                {linkStatus === 'No Match' && (
+                  <p className="text-xs text-gray-400">
+                    Checked — nothing extractable found.{' '}
+                    <button onClick={checkLinkedRecord} className="text-blue-600 hover:underline">Re-check</button>
+                  </p>
+                )}
+                {linkStatus === 'Applied' && <p className="text-xs text-green-600">✓ Applied to the linked record.</p>}
+                {linkStatus === 'Dismissed' && (
+                  <p className="text-xs text-gray-400">
+                    Dismissed.{' '}
+                    <button onClick={checkLinkedRecord} className="text-blue-600 hover:underline">Re-check</button>
+                  </p>
+                )}
               </div>
             )}
 
