@@ -531,7 +531,38 @@ async function actionGetBankCheck(payload: any) {
   const { data, error } = await sb.from('bk_bank_checks').select('*').eq('entity_id', entityId).maybeSingle()
   if (error) throw new Error(error.message)
   const summary: any = await actionGetSummary({ entityName })
-  return { ok: true, statementBalance: data?.statement_balance ?? null, checkedAt: data?.checked_at ?? null, ledgerCashBalance: summary.cashBalance }
+
+  // Predates the SimpleFin bank feed (Phase 0a) — back then, "does this
+  // match the bank" genuinely needed Thomas to type in whatever his
+  // banking app showed. Now that a mapped checking account syncs its real
+  // balance on every "Sync now," typing that same number in by hand is
+  // just redundant data entry — use the synced balance automatically when
+  // one exists, and only fall back to the manual bk_bank_checks value for
+  // entities with no bank feed connected to Cash yet.
+  let liveBalance: number | null = null
+  let liveBalanceDate: string | null = null
+  try {
+    const cashAcct = await getAccountIds(entityId, ['1000'])
+    const { data: feedAccount } = await sb.from('bk_bank_accounts')
+      .select('last_balance, last_balance_date')
+      .eq('entity_id', entityId).eq('ledger_account_id', cashAcct['1000']).eq('status', 'active')
+      .order('last_balance_date', { ascending: false }).limit(1).maybeSingle()
+    if (feedAccount?.last_balance != null) {
+      liveBalance = Number(feedAccount.last_balance)
+      liveBalanceDate = feedAccount.last_balance_date
+    }
+  } catch {
+    // No '1000' Cash account, or no bank feed mapped to it yet — fine,
+    // falls through to the manual value below.
+  }
+
+  return {
+    ok: true,
+    statementBalance: liveBalance ?? (data?.statement_balance ?? null),
+    checkedAt: liveBalance != null ? liveBalanceDate : (data?.checked_at ?? null),
+    ledgerCashBalance: summary.cashBalance,
+    isLive: liveBalance != null,
+  }
 }
 
 async function actionSetBankCheck(payload: any, userId: string) {

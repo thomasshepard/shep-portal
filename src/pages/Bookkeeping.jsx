@@ -205,23 +205,37 @@ export default function Bookkeeping() {
         </div>
       </div>
 
-      {/* Bank check */}
+      {/* Bank check — auto once a bank feed is mapped to Cash (its synced
+          balance is used directly, no need to type in what the feed
+          already told us); manual entry stays as the fallback for entities
+          without a connected bank account yet. */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3 flex-wrap">
-        <div className="flex-1 min-w-[200px]">
-          <p className="text-sm font-semibold text-gray-800">Does this match the bank?</p>
-          <p className="text-xs text-gray-500 mt-0.5">Enter the current {selectedEntity} checking balance from online banking &mdash; compared against what the ledger computes.</p>
-        </div>
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-          <input
-            type="number" step="0.01" value={statementInput}
-            onChange={e => setStatementInput(e.target.value)}
-            className="h-9 pl-6 pr-3 w-36 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        <button onClick={saveBankCheck} className="h-9 px-3.5 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800">
-          Check
-        </button>
+        {bankCheck?.isLive ? (
+          <div className="flex-1 min-w-[200px]">
+            <p className="text-sm font-semibold text-gray-800">Does this match the bank?</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Checked automatically against your connected bank feed{bankCheck.checkedAt ? ` — balance as of ${String(bankCheck.checkedAt).slice(0, 10)}` : ''}. {fmtCurrency(bankCheck.statementBalance)} on the bank, {fmtCurrency(bankCheck.ledgerCashBalance)} on the ledger.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 min-w-[200px]">
+              <p className="text-sm font-semibold text-gray-800">Does this match the bank?</p>
+              <p className="text-xs text-gray-500 mt-0.5">No bank feed connected to Cash yet for {selectedEntity} — enter the current checking balance from online banking &mdash; compared against what the ledger computes.</p>
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input
+                type="number" step="0.01" value={statementInput}
+                onChange={e => setStatementInput(e.target.value)}
+                className="h-9 pl-6 pr-3 w-36 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button onClick={saveBankCheck} className="h-9 px-3.5 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800">
+              Check
+            </button>
+          </>
+        )}
       </div>
 
       {/* Bank Feed */}
