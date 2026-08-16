@@ -20,7 +20,19 @@ const LOCKED_ENTITIES = [
 
 async function callBookkeeping(action, payload = {}) {
   const { data, error } = await supabase.functions.invoke('bookkeeping', { body: { action, ...payload } })
-  if (error) throw new Error(error.message || `${action} failed`)
+  if (error) {
+    // supabase-js doesn't parse the response body on a non-2xx status — it
+    // just gives a generic "Edge Function returned a non-2xx status code".
+    // The function always replies with a real { ok: false, error } JSON
+    // body, so read it directly off the underlying Response for a message
+    // that's actually actionable.
+    let detail = error.message
+    try {
+      const body = await error.context?.json()
+      if (body?.error) detail = body.error
+    } catch { /* body wasn't JSON or already consumed — fall back to generic message */ }
+    throw new Error(detail || `${action} failed`)
+  }
   if (data?.ok === false) throw new Error(data.error || `${action} failed`)
   return data
 }
