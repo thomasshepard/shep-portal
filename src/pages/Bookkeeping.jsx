@@ -581,7 +581,12 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
 
   return (
     <div className="mt-3 pt-2 border-t border-gray-100">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Receipt</p>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Receipt</p>
+        {picking && (
+          <button onClick={() => setPicking(false)} className="text-[11px] font-medium text-gray-400 hover:text-gray-600">Cancel</button>
+        )}
+      </div>
       {!picking ? (
         <button onClick={findCandidates} className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5">
           <Paperclip size={12} /> Attach Receipt
@@ -592,6 +597,7 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
         <p className="text-xs text-gray-400">No documents found within 5 days of this entry's date.</p>
       ) : (
         <div className="space-y-1">
+          <p className="text-[11px] text-gray-400 mb-1">Tap the matching receipt to attach it — nothing is linked until you pick one.</p>
           {suggestion && (
             <button
               onClick={() => attach(suggestion.documentId)} disabled={busyId === suggestion.documentId}
@@ -600,6 +606,9 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
               {busyId === suggestion.documentId ? <Loader2 size={12} className="animate-spin flex-shrink-0" /> : <span className="flex-shrink-0">★</span>}
               <span className="text-sm text-gray-800 truncate">{suggestion.name} <span className="text-xs text-gray-400">(suggested)</span></span>
             </button>
+          )}
+          {!suggestion && (
+            <p className="text-[11px] text-gray-400">No confident AI match — showing every document within 5 days, pick manually:</p>
           )}
           {candidates.filter(c => c.id !== suggestion?.documentId).map(c => (
             <button
