@@ -1,6 +1,8 @@
-// bookkeeping — double-entry ledger for Shep Portal's businesses, Phase 0
-// (Happy Cuts LLC only). See bookkeeping-module-spec.md (workspace root) for
-// the full design.
+// bookkeeping — double-entry ledger for Shep Portal's businesses. See
+// bookkeeping-module-spec.md (workspace root) for the full design. Phase 1a
+// adds a SimpleFin bank feed (connect + sync + manual quick-categorize) on
+// top of Phase 0's dual-write/manual-entry core — no AI categorization or
+// automatic sync yet, that's Phase 1b.
 //
 // Auth: deployed WITH jwt verification (no --no-verify-jwt) — the caller must
 // be a logged-in Shep Portal user. Every action additionally checks the
@@ -72,7 +74,7 @@ async function postEntry(opts: {
   entityId: string
   entryDate: string
   memo: string
-  source: 'dual_write' | 'manual'
+  source: 'dual_write' | 'manual' | 'bank_feed'
   sourceModule?: string
   sourceRecordId?: string
   createdBy?: string
@@ -106,6 +108,145 @@ async function postEntry(opts: {
   if (postErr) throw new Error(postErr.message)
 
   return { posted: true, entryId }
+}
+
+// ── SimpleFin bank feed (Phase 1a) ──────────────────────────────────────
+//
+// Protocol confirmed directly against simplefin.org: no client id/secret,
+// no OAuth. The user gets a one-time Setup Token from their own SimpleFin
+// Bridge account (bridge.simplefin.org/simplefin/create — they authenticate
+// to their own bank there, we never see those credentials), pastes it into
+// Bookkeeping once, and `claim_setup_token` exchanges it for a persistent
+// Access URL. GET {access_url}/accounts?version=2 returns every linked
+// account's balance AND transactions in one call — 24 requests/day across
+// the whole claim, 90-day max window per request.
+
+// The Access URL has HTTP Basic Auth credentials baked into its userinfo
+// component (scheme://user:pass@host/path) — but the WHATWG fetch spec
+// fetch() implements forbids sending URLs with embedded credentials, so
+// pulling them out and sending an explicit Authorization header (same as
+// the protocol's own reference Python example) is required, not optional.
+function parseAccessUrl(accessUrl: string): { baseUrl: string; authHeader: string } {
+  const url = new URL(accessUrl)
+  const username = url.username
+  const password = url.password
+  url.username = ''
+  url.password = ''
+  return { baseUrl: url.toString().replace(/\/$/, ''), authHeader: 'Basic ' + btoa(`${username}:${password}`) }
+}
+
+/** Notifies every admin + can_view_bookkeeping user that a bank connection
+ *  needs re-auth. Deliberately simpler than src/lib/notifications.js's
+ *  notify(): no category/mute check (bookkeeping has no notification
+ *  preference wired up yet), and skips entirely — rather than refreshing
+ *  read:false — when a non-dismissed row already exists, so a connection
+ *  stuck in needs_reauth doesn't re-surface as unread on every sync. */
+async function notifyReauth(claimId: string) {
+  try {
+    const [{ data: admins }, { data: permitted }] = await Promise.all([
+      sb.from('profiles').select('id').eq('role', 'admin'),
+      sb.from('profiles').select('id').eq('can_view_bookkeeping', true),
+    ])
+    const ids = [...new Set([...(admins || []), ...(permitted || [])].map((r: any) => r.id))]
+    const sourceKey = `bk_reauth_${claimId}`
+
+    for (const uid of ids) {
+      const { data: existing } = await sb.from('notifications')
+        .select('id, dismissed').eq('source_key', sourceKey).eq('user_id', uid).maybeSingle()
+      if (existing) continue // already notified (dismissed or not) — don't spam or resurrect
+
+      await sb.from('notifications').insert({
+        user_id: uid,
+        title: 'Bookkeeping bank connection needs re-authentication',
+        body: 'A SimpleFin bank connection has expired or needs re-auth. Reconnect it from the Bookkeeping page.',
+        module: 'bookkeeping',
+        severity: 'action_needed',
+        action_url: '/#/bookkeeping',
+        source_key: sourceKey,
+      })
+    }
+  } catch (err) {
+    // Notifications must never break a sync.
+    console.error('[bookkeeping] notifyReauth failed:', err)
+  }
+}
+
+/** Fetches one claim's accounts+transactions and upserts them. Called both
+ *  right after claiming a new Setup Token (so accounts appear immediately)
+ *  and from the manual "Sync now" button. */
+async function syncOneClaim(claim: { id: string; access_url: string; last_synced_at: string | null }) {
+  const { baseUrl, authHeader } = parseAccessUrl(claim.access_url)
+  // Overlap the window by 5 days on repeat syncs (protocol's own recommendation,
+  // to not miss transactions that post late); 90 days back on first sync.
+  const startDate = claim.last_synced_at
+    ? Math.floor(new Date(claim.last_synced_at).getTime() / 1000) - 5 * 86400
+    : Math.floor(Date.now() / 1000) - 90 * 86400
+
+  const res = await fetch(`${baseUrl}/accounts?version=2&pending=1&start-date=${startDate}`, {
+    headers: { Authorization: authHeader },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(`SimpleFin sync failed (${res.status}): ${JSON.stringify(data?.errlist || data)}`)
+  }
+
+  const errlist: any[] = Array.isArray(data.errlist) ? data.errlist : []
+  const reauthAccountIds = new Set(errlist.filter(e => e.account_id).map(e => e.account_id))
+  const hasConnReauth = errlist.some(e => String(e.code || '').startsWith('con.'))
+
+  const discoveredAccounts: any[] = []
+  for (const acct of data.accounts || []) {
+    const status = reauthAccountIds.has(acct.id) ? 'needs_reauth' : 'active'
+    const fields = {
+      conn_id: acct.conn_id ?? null,
+      conn_name: acct.conn_name ?? null,
+      display_name: acct.name,
+      currency: acct.currency ?? null,
+      last_balance: acct.balance != null ? num(acct.balance) : null,
+      last_balance_date: acct['balance-date'] ? new Date(acct['balance-date'] * 1000).toISOString() : null,
+      status,
+    }
+
+    const { data: existing } = await sb.from('bk_bank_accounts').select('id')
+      .eq('claim_id', claim.id).eq('simplefin_account_id', acct.id).maybeSingle()
+
+    let bankAccountId: string
+    if (existing) {
+      bankAccountId = existing.id
+      const { error: updErr } = await sb.from('bk_bank_accounts').update(fields).eq('id', bankAccountId)
+      if (updErr) throw new Error(updErr.message)
+    } else {
+      const { data: inserted, error: insErr } = await sb.from('bk_bank_accounts')
+        .insert({ claim_id: claim.id, simplefin_account_id: acct.id, ...fields })
+        .select('id').single()
+      if (insErr) throw new Error(insErr.message)
+      bankAccountId = inserted.id
+    }
+    discoveredAccounts.push({ id: bankAccountId, displayName: acct.name, connName: acct.conn_name, status })
+
+    const txRows = (acct.transactions || []).map((t: any) => ({
+      bank_account_id: bankAccountId,
+      simplefin_transaction_id: t.id,
+      posted_at: new Date((t.posted || t.transacted_at || 0) * 1000).toISOString(),
+      amount: num(t.amount),
+      description: t.description,
+      pending: !!t.pending,
+    }))
+    if (txRows.length > 0) {
+      const { error: txErr } = await sb.from('bk_raw_transactions')
+        .upsert(txRows, { onConflict: 'bank_account_id,simplefin_transaction_id' })
+      if (txErr) throw new Error(txErr.message)
+    }
+  }
+
+  await sb.from('bk_feed_claims').update({
+    last_synced_at: new Date().toISOString(),
+    status: hasConnReauth ? 'needs_reauth' : 'active',
+  }).eq('id', claim.id)
+
+  if (hasConnReauth || reauthAccountIds.size > 0) await notifyReauth(claim.id)
+
+  return { discoveredAccounts, errlist }
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────
@@ -324,6 +465,152 @@ async function actionSetBankCheck(payload: any, userId: string) {
   return { ok: true }
 }
 
+async function actionClaimSetupToken(payload: any, userId: string) {
+  const setupToken = String(payload?.setupToken || '').trim()
+  if (!setupToken) throw new Error('setupToken is required')
+
+  let claimUrl: string
+  try {
+    claimUrl = atob(setupToken)
+  } catch {
+    throw new Error("That doesn't look like a valid Setup Token (expected base64)")
+  }
+  if (!/^https:\/\//.test(claimUrl)) throw new Error('Decoded Setup Token is not an HTTPS URL — refusing to use it')
+
+  const claimRes = await fetch(claimUrl, { method: 'POST', headers: { 'Content-Length': '0' } })
+  const accessUrl = (await claimRes.text()).trim()
+  if (!claimRes.ok || !accessUrl.startsWith('https://')) {
+    throw new Error(`Could not claim that Setup Token (status ${claimRes.status}) — it may already be used or expired. Generate a new one at bridge.simplefin.org.`)
+  }
+
+  const { data: claim, error: insErr } = await sb.from('bk_feed_claims')
+    .insert({ access_url: accessUrl, created_by: userId })
+    .select('id, access_url, last_synced_at').single()
+  if (insErr) throw new Error(insErr.message)
+
+  const result = await syncOneClaim(claim)
+  return { ok: true, claimId: claim.id, ...result }
+}
+
+async function actionSyncFeedTransactions(payload: any) {
+  const claimId = payload?.claimId ? String(payload.claimId) : null
+  const query = claimId
+    ? sb.from('bk_feed_claims').select('id, access_url, last_synced_at').eq('id', claimId)
+    : sb.from('bk_feed_claims').select('id, access_url, last_synced_at').eq('status', 'active')
+  const { data: claims, error } = await query
+  if (error) throw new Error(error.message)
+  if (!claims || claims.length === 0) return { ok: true, synced: 0, results: [] }
+
+  const results = []
+  for (const claim of claims) {
+    try {
+      results.push({ claimId: claim.id, ...(await syncOneClaim(claim)) })
+    } catch (err: any) {
+      results.push({ claimId: claim.id, error: err?.message || String(err) })
+    }
+  }
+  return { ok: true, synced: results.length, results }
+}
+
+async function actionListFeedAccounts(payload: any) {
+  let q = sb.from('bk_bank_accounts')
+    .select('id, claim_id, display_name, conn_name, currency, entity_id, ledger_account_id, last_balance, last_balance_date, status')
+  q = payload?.entityName
+    ? q.eq('entity_id', await getEntityId(String(payload.entityName)))
+    : q.is('entity_id', null)
+  const { data, error } = await q.order('display_name')
+  if (error) throw new Error(error.message)
+  return { ok: true, accounts: data || [] }
+}
+
+async function actionMapFeedAccount(payload: any) {
+  const bankAccountId = String(payload?.bankAccountId || '')
+  if (!bankAccountId) throw new Error('bankAccountId is required')
+  const entityName = String(payload?.entityName || '')
+  if (!entityName) throw new Error('entityName is required')
+  const ledgerAccountCode = String(payload?.ledgerAccountCode || '')
+  if (!ledgerAccountCode) throw new Error('ledgerAccountCode is required')
+
+  const entityId = await getEntityId(entityName)
+  const acct = await getAccountIds(entityId, [ledgerAccountCode])
+
+  const { error } = await sb.from('bk_bank_accounts')
+    .update({ entity_id: entityId, ledger_account_id: acct[ledgerAccountCode] })
+    .eq('id', bankAccountId)
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}
+
+async function actionListRawTransactions(payload: any) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const unmatchedOnly = payload?.unmatchedOnly !== false
+  const entityId = await getEntityId(entityName)
+
+  let q = sb.from('bk_raw_transactions')
+    .select('id, posted_at, amount, description, pending, matched_journal_entry_id, bk_bank_accounts!inner(id, display_name, entity_id, ledger_account_id)')
+    .eq('bk_bank_accounts.entity_id', entityId)
+    .order('posted_at', { ascending: false })
+    .limit(100)
+  if (unmatchedOnly) q = q.is('matched_journal_entry_id', null)
+
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return { ok: true, transactions: data || [] }
+}
+
+async function actionQuickCategorizeTransaction(payload: any, userId: string) {
+  const rawTransactionId = String(payload?.rawTransactionId || '')
+  if (!rawTransactionId) throw new Error('rawTransactionId is required')
+  const accountCode = String(payload?.accountCode || '')
+  if (!accountCode) throw new Error('accountCode is required')
+
+  const { data: raw, error: rawErr } = await sb.from('bk_raw_transactions')
+    .select('id, amount, description, posted_at, matched_journal_entry_id, bk_bank_accounts!inner(entity_id, ledger_account_id)')
+    .eq('id', rawTransactionId).single()
+  if (rawErr || !raw) throw new Error('Transaction not found')
+  if (raw.matched_journal_entry_id) throw new Error('This transaction has already been categorized')
+
+  const bankAccount = (raw as any).bk_bank_accounts
+  if (!bankAccount?.entity_id || !bankAccount?.ledger_account_id) {
+    throw new Error("This bank account isn't mapped to an entity/ledger account yet")
+  }
+
+  const amount = num(raw.amount)
+  const acct = await getAccountIds(bankAccount.entity_id, [accountCode])
+  const otherAccountId = acct[accountCode]
+
+  // SimpleFin sign convention: positive = deposit (money in), negative =
+  // withdrawal — so a deposit debits the ledger's Cash/CC account and
+  // credits the income account picked, and vice versa for a withdrawal.
+  const lines = amount > 0
+    ? [{ accountId: bankAccount.ledger_account_id, debit: Math.abs(amount) }, { accountId: otherAccountId, credit: Math.abs(amount) }]
+    : [{ accountId: otherAccountId, debit: Math.abs(amount) }, { accountId: bankAccount.ledger_account_id, credit: Math.abs(amount) }]
+
+  const result = await postEntry({
+    entityId: bankAccount.entity_id,
+    entryDate: String(raw.posted_at).slice(0, 10),
+    memo: String(payload?.memo || raw.description || 'Bank feed transaction'),
+    source: 'bank_feed',
+    sourceModule: 'bookkeeping_bank_feed',
+    sourceRecordId: rawTransactionId,
+    createdBy: userId,
+    lines,
+  })
+
+  if (result.posted && result.entryId) {
+    await sb.from('bk_raw_transactions').update({ matched_journal_entry_id: result.entryId }).eq('id', rawTransactionId)
+  }
+  return { ok: true, ...result }
+}
+
+async function actionRemoveFeedClaim(payload: any) {
+  const claimId = String(payload?.claimId || '')
+  if (!claimId) throw new Error('claimId is required')
+  const { error } = await sb.from('bk_feed_claims').update({ status: 'removed' }).eq('id', claimId)
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}
+
 const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>> = {
   post_mow_completion: actionPostMowCompletion,
   post_mow_payment:    actionPostMowPayment,
@@ -333,6 +620,13 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   list_entries:        actionListEntries,
   get_bank_check:      actionGetBankCheck,
   set_bank_check:      actionSetBankCheck,
+  claim_setup_token:      actionClaimSetupToken,
+  sync_feed_transactions: actionSyncFeedTransactions,
+  list_feed_accounts:     actionListFeedAccounts,
+  map_feed_account:       actionMapFeedAccount,
+  list_raw_transactions:  actionListRawTransactions,
+  quick_categorize_transaction: actionQuickCategorizeTransaction,
+  remove_feed_claim:      actionRemoveFeedClaim,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
