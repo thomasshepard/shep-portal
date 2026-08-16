@@ -15,14 +15,32 @@ function pickDocField(fields, ...keys) {
   for (const k of keys) if (fields[k] != null && fields[k] !== '') return fields[k]
   return null
 }
+// Documents has no structured "Amount" field for receipts — best-effort
+// regex guess off the OCR text/summary so the receipt picker can show an
+// amount hint next to each candidate instead of just name+date. A number
+// near the word "total" wins (grand total is usually the last one printed
+// on a receipt); otherwise fall back to the largest dollar figure found.
+function extractAmountGuess(ocr, summary) {
+  const text = `${ocr || ''} ${summary || ''}`
+  const nearTotal = [...text.matchAll(/total[^$\d]{0,20}\$?\s?(\d{1,5}(?:,\d{3})*\.\d{2})/gi)]
+  if (nearTotal.length) {
+    const n = parseFloat(nearTotal[nearTotal.length - 1][1].replace(/,/g, ''))
+    if (!Number.isNaN(n)) return n
+  }
+  const all = [...text.matchAll(/\$\s?(\d{1,5}(?:,\d{3})*\.\d{2})/g)].map(m => parseFloat(m[1].replace(/,/g, '')))
+  return all.length ? Math.max(...all) : null
+}
 function parseDocLite(record) {
   const f = record.fields || {}
+  const ocr = f['OCR'] || ''
+  const summary = pickDocField(f, 'Summary', 'AI Summary') || ''
   return {
     id: record.id,
     name: pickDocField(f, 'Name', 'Document Name', 'Title') || 'Untitled document',
     date: pickDocField(f, 'Date', 'Document Date'),
-    summary: pickDocField(f, 'Summary', 'AI Summary') || '',
-    ocr: f['OCR'] || '',
+    summary,
+    ocr,
+    amountGuess: extractAmountGuess(ocr, summary),
     attachments: Array.isArray(pickDocField(f, 'Attachments', 'File', 'Scan', 'Document')) ? pickDocField(f, 'Attachments', 'File', 'Scan', 'Document') : [],
   }
 }
@@ -478,6 +496,7 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
   const [candidates, setCandidates] = useState([])
   const [suggestion, setSuggestion] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  const [previewId, setPreviewId] = useState(null)
 
   useEffect(() => {
     if (!entry.receipt_document_id) return
@@ -514,6 +533,15 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
         .map(parseDocLite)
         .filter(d => d.attachments.length > 0 && !alreadyUsed.has(d.id) && d.date)
         .filter(d => Math.abs((new Date(d.date) - entryDate) / 86400000) <= 5)
+        // Amount match (when we could guess one from the OCR text) beats
+        // pure date proximity — an exact dollar match 4 days out is a
+        // better candidate than a same-day receipt for a different amount.
+        .sort((a, b) => {
+          const aHit = a.amountGuess != null && Math.abs(a.amountGuess - total) < 0.01
+          const bHit = b.amountGuess != null && Math.abs(b.amountGuess - total) < 0.01
+          if (aHit !== bHit) return aHit ? -1 : 1
+          return Math.abs(new Date(a.date) - entryDate) - Math.abs(new Date(b.date) - entryDate)
+        })
         .slice(0, 20)
       setCandidates(list)
 
@@ -534,6 +562,7 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
       await callBookkeeping('attach_receipt', { entryId: entry.id, documentId })
       toast.success('Receipt attached')
       setPicking(false)
+      setPreviewId(null)
       onChanged?.()
     } catch (e) {
       toast.error('Failed to attach: ' + e.message)
@@ -584,7 +613,7 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
       <div className="flex items-center justify-between mb-1.5">
         <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Receipt</p>
         {picking && (
-          <button onClick={() => setPicking(false)} className="text-[11px] font-medium text-gray-400 hover:text-gray-600">Cancel</button>
+          <button onClick={() => { setPicking(false); setPreviewId(null) }} className="text-[11px] font-medium text-gray-400 hover:text-gray-600">Cancel</button>
         )}
       </div>
       {!picking ? (
@@ -597,28 +626,66 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
         <p className="text-xs text-gray-400">No documents found within 5 days of this entry's date.</p>
       ) : (
         <div className="space-y-1">
-          <p className="text-[11px] text-gray-400 mb-1">Tap the matching receipt to attach it — nothing is linked until you pick one.</p>
-          {suggestion && (
-            <button
-              onClick={() => attach(suggestion.documentId)} disabled={busyId === suggestion.documentId}
-              className="w-full flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-left hover:bg-amber-100 disabled:opacity-50"
-            >
-              {busyId === suggestion.documentId ? <Loader2 size={12} className="animate-spin flex-shrink-0" /> : <span className="flex-shrink-0">★</span>}
-              <span className="text-sm text-gray-800 truncate">{suggestion.name} <span className="text-xs text-gray-400">(suggested)</span></span>
-            </button>
-          )}
+          <p className="text-[11px] text-gray-400 mb-1">Tap a receipt to preview it, then confirm — nothing attaches until you do.</p>
           {!suggestion && (
-            <p className="text-[11px] text-gray-400">No confident AI match — showing every document within 5 days, pick manually:</p>
+            <p className="text-[11px] text-gray-400">No confident AI match — showing every document within 5 days, review and pick manually:</p>
           )}
-          {candidates.filter(c => c.id !== suggestion?.documentId).map(c => (
-            <button
-              key={c.id} onClick={() => attach(c.id)} disabled={busyId === c.id}
-              className="w-full flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50"
-            >
-              <span className="text-sm text-gray-700 truncate">{c.name}</span>
-              <span className="text-xs text-gray-400 flex-shrink-0">{busyId === c.id ? <Loader2 size={12} className="animate-spin" /> : c.date}</span>
-            </button>
+          {candidates.map(c => (
+            <ReceiptCandidateCard
+              key={c.id} candidate={c} isSuggested={c.id === suggestion?.documentId}
+              expanded={previewId === c.id} onToggle={() => setPreviewId(id => id === c.id ? null : c.id)}
+              transactionTotal={total} busy={busyId === c.id} onAttach={() => attach(c.id)}
+            />
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReceiptCandidateCard({ candidate, isSuggested, expanded, onToggle, transactionTotal, busy, onAttach }) {
+  const amountMatches = candidate.amountGuess != null && Math.abs(candidate.amountGuess - transactionTotal) < 0.01
+  const thumb = candidate.attachments[0]?.thumbnails?.large?.url || candidate.attachments[0]?.thumbnails?.small?.url
+  return (
+    <div className={`border rounded-lg overflow-hidden ${isSuggested ? 'border-amber-200 bg-amber-50' : 'border-gray-100'}`}>
+      <button onClick={onToggle} className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left">
+        <span className="flex items-center gap-1.5 min-w-0">
+          {isSuggested && <span className="flex-shrink-0">★</span>}
+          <span className="text-sm text-gray-800 truncate">{candidate.name}</span>
+          {isSuggested && <span className="text-xs text-gray-400 flex-shrink-0">(suggested)</span>}
+        </span>
+        <span className="flex items-center gap-2 flex-shrink-0 text-xs">
+          <span className={amountMatches ? 'font-semibold text-green-700' : candidate.amountGuess != null ? 'text-gray-400' : 'text-gray-300'}>
+            {candidate.amountGuess != null ? fmtCurrency(candidate.amountGuess) : 'amount unknown'}
+          </span>
+          <span className="text-gray-400">{candidate.date}</span>
+          {expanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+        </span>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-gray-100 pt-2">
+          {!amountMatches && candidate.amountGuess != null && (
+            <p className="text-[11px] text-red-500 mb-2">Guessed amount doesn't match this transaction ({fmtCurrency(transactionTotal)}) — double check before attaching.</p>
+          )}
+          <div className="flex gap-3">
+            {thumb && (
+              <a href={candidate.attachments[0]?.url} target="_blank" rel="noreferrer" className="flex-shrink-0">
+                <img src={thumb} alt="" className="w-20 h-20 rounded object-cover border border-gray-200" />
+              </a>
+            )}
+            <div className="min-w-0 flex-1">
+              {candidate.summary && <p className="text-xs text-gray-600 mb-1 line-clamp-4">{candidate.summary}</p>}
+              <a href={candidate.attachments[0]?.url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                Open full receipt ↗
+              </a>
+            </div>
+          </div>
+          <button
+            onClick={onAttach} disabled={busy}
+            className="w-full mt-3 h-9 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            {busy && <Loader2 size={13} className="animate-spin" />} Attach this receipt
+          </button>
         </div>
       )}
     </div>
