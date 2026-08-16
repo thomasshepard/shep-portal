@@ -665,7 +665,10 @@ export default function AdminUsers() {
 // here (same duplication pattern as this app's per-page safeStr/safeNum
 // helpers) since Admin doesn't otherwise import from the Bookkeeping page.
 // Add a new entity to both lists when Bookkeeping onboards one.
-const BOOKKEEPING_ENTITIES = ['Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC']
+const BOOKKEEPING_ENTITIES = [
+  'Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC',
+  'Personal', 'Shepard Holdings LLC', 'Virginia Holdings LLC',
+]
 
 function EditTagsModal({ user, onClose, onSave }) {
   const [tags, setTags] = useState(
