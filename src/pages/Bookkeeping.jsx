@@ -949,7 +949,7 @@ function PartnerCapitalCard({ entityName, refreshSignal }) {
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
         <h2 className="font-semibold text-gray-800 text-sm">Partner Capital &middot; Quarterly K-1 Preview</h2>
-        <p className="text-xs text-gray-400 mt-0.5">{data?.periodStart} to {data?.periodEnd} &middot; a computed preview, not a posted closing entry</p>
+        <p className="text-xs text-gray-400 mt-0.5">Contributions/Draws/Allocated Income for {data?.periodStart} to {data?.periodEnd} &middot; Ending Capital is life-to-date &middot; a computed preview, not a posted closing entry</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -958,7 +958,7 @@ function PartnerCapitalCard({ entityName, refreshSignal }) {
               <th className="px-4 py-2">Partner</th>
               <th className="px-4 py-2 text-right">Contributions (Q)</th>
               <th className="px-4 py-2 text-right">Draws (Q)</th>
-              <th className="px-4 py-2 text-right">Allocated Income</th>
+              <th className="px-4 py-2 text-right">Allocated Income (Q)</th>
               <th className="px-4 py-2 text-right">Ending Capital</th>
             </tr>
           </thead>
@@ -968,7 +968,7 @@ function PartnerCapitalCard({ entityName, refreshSignal }) {
                 <td className="px-4 py-2.5 font-medium text-gray-800">{p.name} <span className="text-xs text-gray-400">({p.ownershipPct}%)</span></td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{fmtCurrency(p.contributionsPeriod)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{fmtCurrency(p.drawsPeriod)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{fmtCurrency(p.allocatedIncome)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{fmtCurrency(p.allocatedIncomePeriod)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmtCurrency(p.endingBalance)}</td>
               </tr>
             ))}

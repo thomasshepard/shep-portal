@@ -963,7 +963,16 @@ async function actionGetPartnerCapitalStatement(payload: any) {
     .eq('bk_journal_entries.status', 'posted')
   if (linesErr) throw new Error(linesErr.message)
 
+  // Two net-income figures, not one: periodNetIncome is "this quarter" for
+  // display context, allTimeNetIncome is life-of-the-entity and is what
+  // Ending Capital actually needs. There's no closing entry ever moving
+  // prior periods' income into equity (deliberate — see comment above), so
+  // every prior period's accumulated profit still lives in the income/
+  // expense accounts. Allocating only the current period's income into
+  // Ending Capital would silently understate it starting the second period
+  // an entity has any activity.
   let periodNetIncome = 0
+  let allTimeNetIncome = 0
   const byPartner: Record<string, { contributionsAllTime: number; drawsAllTime: number; contributionsPeriod: number; drawsPeriod: number }> = {}
   for (const p of partners || []) byPartner[p.id] = { contributionsAllTime: 0, drawsAllTime: 0, contributionsPeriod: 0, drawsPeriod: 0 }
 
@@ -974,9 +983,12 @@ async function actionGetPartnerCapitalStatement(payload: any) {
     const net = Number(line.debit) - Number(line.credit)
 
     // Income is credit-normal, expense is debit-normal.
-    if (acct && inPeriod) {
-      if (acct.account_type === 'income') periodNetIncome += -net
-      else if (acct.account_type === 'expense') periodNetIncome -= net
+    if (acct?.account_type === 'income') {
+      allTimeNetIncome += -net
+      if (inPeriod) periodNetIncome += -net
+    } else if (acct?.account_type === 'expense') {
+      allTimeNetIncome -= net
+      if (inPeriod) periodNetIncome -= net
     }
 
     if (line.partner_id && byPartner[line.partner_id]) {
@@ -994,7 +1006,9 @@ async function actionGetPartnerCapitalStatement(payload: any) {
 
   const result = (partners || []).map(p => {
     const b = byPartner[p.id]
-    const allocatedIncome = Math.round(periodNetIncome * (Number(p.ownership_pct) / 100) * 100) / 100
+    const pct = Number(p.ownership_pct) / 100
+    const allocatedIncomePeriod = Math.round(periodNetIncome * pct * 100) / 100
+    const allocatedIncomeAllTime = Math.round(allTimeNetIncome * pct * 100) / 100
     return {
       id: p.id,
       name: p.name,
@@ -1003,12 +1017,12 @@ async function actionGetPartnerCapitalStatement(payload: any) {
       drawsPeriod: b.drawsPeriod,
       contributionsAllTime: b.contributionsAllTime,
       drawsAllTime: b.drawsAllTime,
-      allocatedIncome,
-      endingBalance: b.contributionsAllTime - b.drawsAllTime + allocatedIncome,
+      allocatedIncomePeriod,
+      endingBalance: b.contributionsAllTime - b.drawsAllTime + allocatedIncomeAllTime,
     }
   })
 
-  return { ok: true, periodStart, periodEnd, periodNetIncome, partners: result }
+  return { ok: true, periodStart, periodEnd, periodNetIncome, allTimeNetIncome, partners: result }
 }
 
 // ── Phase 3 — dual-write from Bills Payment and Insurance/Obligation
