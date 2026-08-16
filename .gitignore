@@ -29,3 +29,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Supabase CLI local state — regenerated per machine, not meant to be shared
+supabase/.temp/
+
+# Claude Code local permission settings — machine-specific
+.claude/settings.local.json
