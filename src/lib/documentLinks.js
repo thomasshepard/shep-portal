@@ -137,6 +137,65 @@ export async function extractLinkedFields(doc, kind) {
   }
 }
 
+// ── Receipt matching (Bookkeeping) ──────────────────────────────────────
+// Opposite direction from extractLinkedFields() above — that classifies one
+// document and extracts fields FROM it. This starts from one already-
+// categorized Bookkeeping transaction and searches a small candidate list
+// of documents FOR it. No Document Type closed list involved (nothing in
+// the live schema confirms a "Receipt" category value, so this leans on a
+// date-range candidate filter instead — see the caller in Bookkeeping.jsx).
+
+/** Calls Claude to pick the most likely receipt for one transaction out of
+ *  a small candidate list. `candidates`: [{id, name, date, summary, ocr}].
+ *  Returns { documentId, name } | null. Never throws (fails soft to null,
+ *  same as extractLinkedFields) — a missing suggestion just means the
+ *  manual candidate list is the fallback, never a blocker. */
+export async function suggestReceiptForTransaction(transaction, candidates) {
+  if (!ANTH_KEY || !Array.isArray(candidates) || candidates.length === 0) return null
+
+  const compact = candidates.map(c => ({
+    id: c.id,
+    name: c.name || '',
+    date: c.date || '',
+    summary: (c.summary || '').slice(0, 400),
+    ocr: (c.ocr || '').slice(0, 800),
+  }))
+
+  const system = `You match a bank transaction to its receipt for a small business ledger. Return ONLY JSON, no markdown, no preamble. Shape: {"documentId":string|null}. "documentId" must be exactly one of these ids, or null if none of them genuinely look like the receipt for this transaction: ${JSON.stringify(compact.map(c => c.id))}. Reference (each candidate document): ${JSON.stringify(compact)}. Never invent an id outside that list. Prefer null over a weak guess.`
+  const message = JSON.stringify({
+    amount: transaction.amount,
+    date: transaction.date || '',
+    description: transaction.description || '',
+  })
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTH_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 100,
+        system,
+        messages: [{ role: 'user', content: message }],
+      }),
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    let text = json?.content?.[0]?.text || '{}'
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+    const parsed = JSON.parse(text)
+    const match = candidates.find(c => c.id === parsed.documentId)
+    return match ? { documentId: match.id, name: match.name } : null
+  } catch {
+    return null
+  }
+}
+
 // ── Fuzzy name matching ──────────────────────────────────────────────────
 // No existing equivalent in the codebase — safeStr/safeNum/arr are per-page
 // render helpers, not matchers.

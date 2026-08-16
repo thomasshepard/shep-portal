@@ -1,9 +1,31 @@
 import { useState, useEffect } from 'react'
-import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet } from 'lucide-react'
+import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
-import { fmtCurrency } from '../lib/airtable'
+import { fmtCurrency, fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
+import { suggestReceiptForTransaction } from '../lib/documentLinks'
 import LoadingSpinner from '../components/LoadingSpinner'
+
+// Local field-name access for Documents records — this page doesn't own the
+// Documents table, so it copies Documents.jsx's own defensive multi-name
+// pick() rather than assuming one canonical field name (per that module's
+// documented schema drift between the "Documents"/"Scanned Documents"
+// tables). Only the handful of fields receipt-matching actually needs.
+function pickDocField(fields, ...keys) {
+  for (const k of keys) if (fields[k] != null && fields[k] !== '') return fields[k]
+  return null
+}
+function parseDocLite(record) {
+  const f = record.fields || {}
+  return {
+    id: record.id,
+    name: pickDocField(f, 'Name', 'Document Name', 'Title') || 'Untitled document',
+    date: pickDocField(f, 'Date', 'Document Date'),
+    summary: pickDocField(f, 'Summary', 'AI Summary') || '',
+    ocr: f['OCR'] || '',
+    attachments: Array.isArray(pickDocField(f, 'Attachments', 'File', 'Scan', 'Document')) ? pickDocField(f, 'Attachments', 'File', 'Scan', 'Document') : [],
+  }
+}
 
 // Live, clickable entities. LeadsCompanion joined Happy Cuts in Phase 0b —
 // both are real manual-entry-capable entities now.
@@ -264,7 +286,7 @@ export default function Bookkeeping() {
         ) : (
           <div className="space-y-2">
             {entries.map(entry => (
-              <EntryRow key={entry.id} entry={entry} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} accounts={expenseIncomeAccounts} />
+              <EntryRow key={entry.id} entry={entry} entries={entries} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} accounts={expenseIncomeAccounts} />
             ))}
           </div>
         )}
@@ -322,7 +344,7 @@ function Badge({ tone, children }) {
 // old posting and repost with the corrected account.
 const RECATEGORIZABLE_MODULES = new Set(['bookkeeping_bank_feed', 'bookkeeping_bank_feed_auto'])
 
-function EntryRow({ entry, expanded, onToggle, onVoided, accounts }) {
+function EntryRow({ entry, entries, expanded, onToggle, onVoided, accounts }) {
   const [voiding, setVoiding] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
   const total = (entry.bk_journal_lines || []).reduce((s, l) => s + Number(l.debit || 0), 0)
@@ -408,6 +430,8 @@ function EntryRow({ entry, expanded, onToggle, onVoided, accounts }) {
             </table>
           </div>
 
+          <ReceiptSection entry={entry} entries={entries} total={total} onChanged={onVoided} />
+
           {canRecategorize && (
             <div className="mt-3 pt-2 border-t border-gray-100">
               <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Wrong category?</label>
@@ -433,6 +457,159 @@ function EntryRow({ entry, expanded, onToggle, onVoided, accounts }) {
               Void
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Attaches a scanned receipt (Documents module, Airtable) to an already-
+// posted journal entry. Opposite direction from documentLinks.js's existing
+// Documents→Insurance/Bills/LLC pattern (starts from the transaction, finds
+// a matching document, not the other way around) — see the plan notes in
+// src/lib/documentLinks.js's suggestReceiptForTransaction() for why. Date-
+// range candidate filtering, not category-based — nothing in the live
+// Airtable schema confirms a "Receipt" Document Type value to gate on.
+function ReceiptSection({ entry, entries, total, onChanged }) {
+  const [receiptDoc, setReceiptDoc] = useState(null)
+  const [loadingDoc, setLoadingDoc] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [candidates, setCandidates] = useState([])
+  const [suggestion, setSuggestion] = useState(null)
+  const [busyId, setBusyId] = useState(null)
+
+  useEffect(() => {
+    if (!entry.receipt_document_id) return
+    let cancelled = false
+    // Airtable attachment URLs expire in a couple hours — always re-fetch
+    // live rather than caching anything, same as Documents.jsx itself does.
+    async function load() {
+      setLoadingDoc(true)
+      try {
+        const { data } = await fetchAllRecords('Documents', { filterByFormula: `RECORD_ID()='${entry.receipt_document_id}'` }, DOCS_BASE_ID)
+        if (!cancelled) setReceiptDoc(data?.[0] ? parseDocLite(data[0]) : null)
+      } catch {
+        if (!cancelled) setReceiptDoc(null)
+      } finally {
+        if (!cancelled) setLoadingDoc(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [entry.receipt_document_id])
+
+  async function findCandidates() {
+    setPicking(true)
+    setSearching(true)
+    setCandidates([])
+    setSuggestion(null)
+    try {
+      const { data } = await fetchAllRecords('Documents', {}, DOCS_BASE_ID)
+      const alreadyUsed = new Set(
+        (entries || []).filter(e => e.id !== entry.id && e.receipt_document_id).map(e => e.receipt_document_id)
+      )
+      const entryDate = new Date(entry.entry_date)
+      const list = (data || [])
+        .map(parseDocLite)
+        .filter(d => d.attachments.length > 0 && !alreadyUsed.has(d.id) && d.date)
+        .filter(d => Math.abs((new Date(d.date) - entryDate) / 86400000) <= 5)
+        .slice(0, 20)
+      setCandidates(list)
+
+      const match = await suggestReceiptForTransaction(
+        { amount: total, date: entry.entry_date, description: entry.memo },
+        list.map(d => ({ id: d.id, name: d.name, date: d.date, summary: d.summary, ocr: d.ocr }))
+      )
+      setSuggestion(match)
+    } catch (e) {
+      toast.error('Failed to search Documents: ' + e.message)
+    }
+    setSearching(false)
+  }
+
+  async function attach(documentId) {
+    setBusyId(documentId)
+    try {
+      await callBookkeeping('attach_receipt', { entryId: entry.id, documentId })
+      toast.success('Receipt attached')
+      setPicking(false)
+      onChanged?.()
+    } catch (e) {
+      toast.error('Failed to attach: ' + e.message)
+    }
+    setBusyId(null)
+  }
+
+  async function detach() {
+    setBusyId('detach')
+    try {
+      await callBookkeeping('detach_receipt', { entryId: entry.id })
+      toast.success('Removed')
+      setReceiptDoc(null)
+      onChanged?.()
+    } catch (e) {
+      toast.error('Failed to remove: ' + e.message)
+    }
+    setBusyId(null)
+  }
+
+  if (entry.receipt_document_id) {
+    return (
+      <div className="mt-3 pt-2 border-t border-gray-100">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Receipt</p>
+        {loadingDoc ? (
+          <p className="text-xs text-gray-400 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Loading…</p>
+        ) : receiptDoc ? (
+          <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+            {receiptDoc.attachments[0]?.thumbnails?.small?.url && (
+              <img src={receiptDoc.attachments[0].thumbnails.small.url} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />
+            )}
+            <a href={receiptDoc.attachments[0]?.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline flex-1 min-w-0 truncate">
+              {receiptDoc.name}
+            </a>
+            <button onClick={detach} disabled={busyId === 'detach'} className="text-xs font-medium text-red-500 hover:text-red-700 disabled:opacity-50 flex-shrink-0">
+              {busyId === 'detach' ? <Loader2 size={12} className="animate-spin" /> : 'Remove'}
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400">Receipt document no longer found in Documents.</p>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 pt-2 border-t border-gray-100">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Receipt</p>
+      {!picking ? (
+        <button onClick={findCandidates} className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5">
+          <Paperclip size={12} /> Attach Receipt
+        </button>
+      ) : searching ? (
+        <p className="text-xs text-gray-400 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Searching Documents…</p>
+      ) : candidates.length === 0 ? (
+        <p className="text-xs text-gray-400">No documents found within 5 days of this entry's date.</p>
+      ) : (
+        <div className="space-y-1">
+          {suggestion && (
+            <button
+              onClick={() => attach(suggestion.documentId)} disabled={busyId === suggestion.documentId}
+              className="w-full flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-left hover:bg-amber-100 disabled:opacity-50"
+            >
+              {busyId === suggestion.documentId ? <Loader2 size={12} className="animate-spin flex-shrink-0" /> : <span className="flex-shrink-0">★</span>}
+              <span className="text-sm text-gray-800 truncate">{suggestion.name} <span className="text-xs text-gray-400">(suggested)</span></span>
+            </button>
+          )}
+          {candidates.filter(c => c.id !== suggestion?.documentId).map(c => (
+            <button
+              key={c.id} onClick={() => attach(c.id)} disabled={busyId === c.id}
+              className="w-full flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50"
+            >
+              <span className="text-sm text-gray-700 truncate">{c.name}</span>
+              <span className="text-xs text-gray-400 flex-shrink-0">{busyId === c.id ? <Loader2 size={12} className="animate-spin" /> : c.date}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>

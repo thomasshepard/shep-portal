@@ -515,7 +515,7 @@ async function actionListEntries(payload: any) {
 
   const { data: entries, error } = await sb
     .from('bk_journal_entries')
-    .select('id, entry_date, memo, source, source_module, source_record_id, status, created_by, bk_journal_lines(id, debit, credit, memo, bk_accounts(code, name))')
+    .select('id, entry_date, memo, source, source_module, source_record_id, status, created_by, receipt_document_id, bk_journal_lines(id, debit, credit, memo, bk_accounts(code, name))')
     .eq('entity_id', entityId)
     .eq('status', 'posted')
     .order('entry_date', { ascending: false })
@@ -523,6 +523,24 @@ async function actionListEntries(payload: any) {
   if (error) throw new Error(error.message)
 
   return { ok: true, entries: entries || [] }
+}
+
+async function actionAttachReceipt(payload: any) {
+  const entryId = String(payload?.entryId || '')
+  if (!entryId) throw new Error('entryId is required')
+  const documentId = String(payload?.documentId || '')
+  if (!documentId) throw new Error('documentId is required')
+  const { error } = await sb.from('bk_journal_entries').update({ receipt_document_id: documentId }).eq('id', entryId)
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}
+
+async function actionDetachReceipt(payload: any) {
+  const entryId = String(payload?.entryId || '')
+  if (!entryId) throw new Error('entryId is required')
+  const { error } = await sb.from('bk_journal_entries').update({ receipt_document_id: null }).eq('id', entryId)
+  if (error) throw new Error(error.message)
+  return { ok: true }
 }
 
 async function actionGetBankCheck(payload: any) {
@@ -972,6 +990,8 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   recategorize_transaction: actionRecategorizeTransaction,
   ignore_feed_account:      actionIgnoreFeedAccount,
   list_triage_candidates:   actionListTriageCandidates,
+  attach_receipt:           actionAttachReceipt,
+  detach_receipt:           actionDetachReceipt,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
