@@ -357,21 +357,31 @@ async function actionPostMowPayment(payload: any, userId: string) {
   if (!scheduleRecordId) throw new Error('scheduleRecordId is required')
   const amount = num(payload?.amount)
 
+  // HappyCuts.jsx only calls this from the no-Stripe-invoice cash path —
+  // physical cash handed to Thomas in person. Per him, that money usually
+  // never reaches the business bank account at all; it's kept or spent
+  // personally, which is functionally an owner distribution the moment
+  // it's collected, not a deposit. Default to that. depositedToBank:true
+  // is there for the less-common case where the cash genuinely got
+  // deposited — not currently sent by HappyCuts.jsx, but available.
+  const depositedToBank = payload?.depositedToBank === true
+
   const entityId = await getEntityId(DEFAULT_ENTITY)
-  const acct = await getAccountIds(entityId, ['1000', '1100'])
+  const acct = await getAccountIds(entityId, depositedToBank ? ['1000', '1100'] : ['3100', '1100'])
 
   const result = await postEntry({
     entityId,
     entryDate: new Date().toISOString().slice(0, 10),
-    memo: 'Mow payment received (cash)',
+    memo: depositedToBank
+      ? 'Mow payment received (cash) — deposited to business account'
+      : 'Mow payment received (cash) — kept as owner distribution',
     source: 'dual_write',
     sourceModule: 'happy_cuts_schedule_paid',
     sourceRecordId: scheduleRecordId,
     createdBy: userId,
-    lines: [
-      { accountId: acct['1000'], debit: amount },   // Cash
-      { accountId: acct['1100'], credit: amount },  // Accounts Receivable
-    ],
+    lines: depositedToBank
+      ? [{ accountId: acct['1000'], debit: amount }, { accountId: acct['1100'], credit: amount }]     // Cash / AR
+      : [{ accountId: acct['3100'], debit: amount }, { accountId: acct['1100'], credit: amount }],    // Owner's Draws / AR
   })
   return { ok: true, ...result }
 }
@@ -766,6 +776,30 @@ async function actionSuggestCategory(payload: any) {
   }
 }
 
+async function actionRecordDistribution(payload: any, userId: string) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const amount = num(payload?.amount)
+  if (amount <= 0) throw new Error('Amount must be greater than zero')
+  const date = String(payload?.date || new Date().toISOString().slice(0, 10))
+  const memo = String(payload?.memo || '').trim() || 'Owner distribution'
+
+  const entityId = await getEntityId(entityName)
+  const acct = await getAccountIds(entityId, ['1000', '3100'])
+
+  const result = await postEntry({
+    entityId,
+    entryDate: date,
+    memo,
+    source: 'manual',
+    createdBy: userId,
+    lines: [
+      { accountId: acct['3100'], debit: amount },   // Owner's Draws
+      { accountId: acct['1000'], credit: amount },  // Cash
+    ],
+  })
+  return { ok: true, ...result }
+}
+
 async function actionVoidEntry(payload: any) {
   const entryId = String(payload?.entryId || '')
   if (!entryId) throw new Error('entryId is required')
@@ -802,6 +836,7 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   remove_feed_claim:      actionRemoveFeedClaim,
   suggest_category:       actionSuggestCategory,
   void_entry:             actionVoidEntry,
+  record_distribution:    actionRecordDistribution,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
