@@ -5,21 +5,13 @@ import { supabase } from '../lib/supabase'
 import { fmtCurrency } from '../lib/airtable'
 import LoadingSpinner from '../components/LoadingSpinner'
 
-// Phase 0's fixed chart of accounts (seeded by the migration). Hardcoded here
-// rather than fetched — Phase 0 is a single entity with a small, stable COA;
-// revisit once later phases add accounts dynamically.
-const PHASE0_ACCOUNTS = [
-  { code: '1000', name: 'Cash' },
-  { code: '1100', name: 'Accounts Receivable' },
-  { code: '2000', name: 'Accrued Payroll' },
-  { code: '3000', name: "Owner's Equity" },
-  { code: '4000', name: 'Mow Revenue' },
-  { code: '5000', name: 'Contractor Expense' },
-  { code: '5100', name: 'Office Supplies' },
-]
+// Live, clickable entities. LeadsCompanion joined Happy Cuts in Phase 0b —
+// both are real manual-entry-capable entities now.
+const ACTIVE_ENTITIES = ['Happy Cuts LLC', 'East Meadow Consulting LLC']
 
+// Entities the spec has planned but hasn't built yet — shown as locked pills
+// so the roadmap is visible without implying they're clickable.
 const LOCKED_ENTITIES = [
-  { name: 'LeadsCompanion', phase: 'Phase 0b' },
   { name: 'East Meadow Properties', phase: 'Phase 4' },
   { name: 'Ridge & Anchor LLC', phase: 'Phase 3' },
   { name: 'UCHB', phase: 'Phase 3' },
@@ -28,14 +20,33 @@ const LOCKED_ENTITIES = [
 
 async function callBookkeeping(action, payload = {}) {
   const { data, error } = await supabase.functions.invoke('bookkeeping', { body: { action, ...payload } })
-  if (error) throw new Error(error.message || `${action} failed`)
+  if (error) {
+    // supabase-js doesn't parse the response body on a non-2xx status — it
+    // just gives a generic "Edge Function returned a non-2xx status code".
+    // The function always replies with a real { ok: false, error } JSON
+    // body, so read it directly off the underlying Response for a message
+    // that's actually actionable.
+    let detail = error.message
+    try {
+      const body = await error.context?.json()
+      if (body?.error) detail = body.error
+    } catch { /* body wasn't JSON or already consumed — fall back to generic message */ }
+    throw new Error(detail || `${action} failed`)
+  }
   if (data?.ok === false) throw new Error(data.error || `${action} failed`)
   return data
 }
 
-const emptyLine = () => ({ accountCode: PHASE0_ACCOUNTS[0].code, debit: '', credit: '' })
+function accountsFromSummary(summary) {
+  if (!summary) return []
+  const bs = (summary.balanceSheet || []).map(a => ({ code: a.code, name: a.name }))
+  const income = (summary.pnl?.income || []).map(a => ({ code: a.code, name: a.name }))
+  const expenses = (summary.pnl?.expenses || []).map(a => ({ code: a.code, name: a.name }))
+  return [...bs, ...income, ...expenses]
+}
 
 export default function Bookkeeping() {
+  const [selectedEntity, setSelectedEntity] = useState('Happy Cuts LLC')
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState(null)
   const [entries, setEntries] = useState([])
@@ -44,15 +55,15 @@ export default function Bookkeeping() {
   const [modalOpen, setModalOpen] = useState(false)
   const [statementInput, setStatementInput] = useState('')
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [selectedEntity])
 
   async function load() {
     setLoading(true)
     try {
       const [s, e, b] = await Promise.all([
-        callBookkeeping('get_summary'),
-        callBookkeeping('list_entries', { limit: 25 }),
-        callBookkeeping('get_bank_check'),
+        callBookkeeping('get_summary', { entityName: selectedEntity }),
+        callBookkeeping('list_entries', { entityName: selectedEntity, limit: 25 }),
+        callBookkeeping('get_bank_check', { entityName: selectedEntity }),
       ])
       setSummary(s)
       setEntries(e.entries || [])
@@ -69,13 +80,15 @@ export default function Bookkeeping() {
     const val = Number(statementInput)
     if (!Number.isFinite(val)) return toast.error('Enter a number')
     try {
-      await callBookkeeping('set_bank_check', { statementBalance: val })
+      await callBookkeeping('set_bank_check', { entityName: selectedEntity, statementBalance: val })
       toast.success('Saved')
       load()
     } catch (e) {
       toast.error('Failed to save: ' + e.message)
     }
   }
+
+  const accounts = accountsFromSummary(summary)
 
   if (loading) return <LoadingSpinner />
 
@@ -90,7 +103,7 @@ export default function Bookkeeping() {
             <Calculator size={24} className="text-violet-600" />
             Bookkeeping
           </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Happy Cuts LLC &middot; double-entry, CPA-ready</p>
+          <p className="text-sm text-gray-500 mt-0.5">{selectedEntity} &middot; double-entry, CPA-ready</p>
         </div>
         <button
           onClick={() => setModalOpen(true)}
@@ -102,9 +115,17 @@ export default function Bookkeeping() {
 
       {/* Entity rail */}
       <div className="flex gap-2 overflow-x-auto pb-1">
-        <div className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-sm font-semibold bg-gray-900 text-white">
-          Happy Cuts LLC
-        </div>
+        {ACTIVE_ENTITIES.map(name => (
+          <button
+            key={name}
+            onClick={() => setSelectedEntity(name)}
+            className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-sm font-semibold transition-colors ${
+              selectedEntity === name ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-300'
+            }`}
+          >
+            {name}
+          </button>
+        ))}
         {LOCKED_ENTITIES.map(e => (
           <div key={e.name} className="flex-shrink-0 flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium border border-gray-200 text-gray-400">
             {e.name}
@@ -168,7 +189,7 @@ export default function Bookkeeping() {
       <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <p className="text-sm font-semibold text-gray-800">Does this match the bank?</p>
-          <p className="text-xs text-gray-500 mt-0.5">Enter the current Happy Cuts checking balance from online banking &mdash; compared against what the ledger computes.</p>
+          <p className="text-xs text-gray-500 mt-0.5">Enter the current {selectedEntity} checking balance from online banking &mdash; compared against what the ledger computes.</p>
         </div>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
@@ -208,6 +229,8 @@ export default function Bookkeeping() {
 
       {modalOpen && (
         <NewEntryModal
+          entityName={selectedEntity}
+          accounts={accounts}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); load() }}
         />
@@ -293,7 +316,8 @@ function EntryRow({ entry, expanded, onToggle }) {
   )
 }
 
-function NewEntryModal({ onClose, onSaved }) {
+function NewEntryModal({ entityName, accounts, onClose, onSaved }) {
+  const emptyLine = () => ({ accountCode: accounts[0]?.code || '', debit: '', credit: '' })
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [memo, setMemo] = useState('')
   const [lines, setLines] = useState([emptyLine(), emptyLine()])
@@ -316,7 +340,7 @@ function NewEntryModal({ onClose, onSaved }) {
     setSaving(true)
     try {
       await callBookkeeping('create_manual_entry', {
-        date, memo,
+        entityName, date, memo,
         lines: lines
           .filter(l => Number(l.debit) > 0 || Number(l.credit) > 0)
           .map(l => ({ accountCode: l.accountCode, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 })),
@@ -358,7 +382,7 @@ function NewEntryModal({ onClose, onSaved }) {
               {lines.map((l, i) => (
                 <div key={i} className="grid grid-cols-[1fr_100px_100px_28px] gap-2 items-center">
                   <select value={l.accountCode} onChange={e => setLine(i, { accountCode: e.target.value })} className={inp}>
-                    {PHASE0_ACCOUNTS.map(a => <option key={a.code} value={a.code}>{a.name}</option>)}
+                    {accounts.map(a => <option key={a.code} value={a.code}>{a.name}</option>)}
                   </select>
                   <input type="number" step="0.01" value={l.debit} onChange={e => setLine(i, { debit: e.target.value, credit: '' })} className={inp + ' text-right'} />
                   <input type="number" step="0.01" value={l.credit} onChange={e => setLine(i, { credit: e.target.value, debit: '' })} className={inp + ' text-right'} />

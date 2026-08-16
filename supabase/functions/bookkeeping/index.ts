@@ -35,12 +35,15 @@ function json(body: unknown, status = 200) {
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
-// Phase 0 is Happy Cuts-only — hardcode the lookup by name rather than
-// threading an entityId through every dual-write caller. Revisit once a
-// second entity (LeadsCompanion, Phase 0b) needs this.
-async function getHappyCutsEntityId(): Promise<string> {
-  const { data, error } = await sb.from('bk_entities').select('id').eq('name', 'Happy Cuts LLC').single()
-  if (error || !data) throw new Error('Happy Cuts LLC entity not found — has the Phase 0 migration run?')
+// Dual-write callers (HappyCuts.jsx) never send an entityName — they only
+// ever mean Happy Cuts, so every action defaults to it. Read/write actions
+// reachable from the Bookkeeping page itself accept payload.entityName to
+// target a different entity (Phase 0b: LeadsCompanion).
+const DEFAULT_ENTITY = 'Happy Cuts LLC'
+
+async function getEntityId(name: string): Promise<string> {
+  const { data, error } = await sb.from('bk_entities').select('id').eq('name', name).single()
+  if (error || !data) throw new Error(`Entity "${name}" not found — has its migration run?`)
   return data.id
 }
 
@@ -113,7 +116,7 @@ async function actionPostMowCompletion(payload: any, userId: string) {
   const amount = num(payload?.amount)
   const payout = payload?.contractorPayout != null ? num(payload.contractorPayout) : 0
 
-  const entityId = await getHappyCutsEntityId()
+  const entityId = await getEntityId(DEFAULT_ENTITY)
   const codes = payout > 0 ? ['1100', '4000', '5000', '2000'] : ['1100', '4000']
   const acct = await getAccountIds(entityId, codes)
 
@@ -144,7 +147,7 @@ async function actionPostMowPayment(payload: any, userId: string) {
   if (!scheduleRecordId) throw new Error('scheduleRecordId is required')
   const amount = num(payload?.amount)
 
-  const entityId = await getHappyCutsEntityId()
+  const entityId = await getEntityId(DEFAULT_ENTITY)
   const acct = await getAccountIds(entityId, ['1000', '1100'])
 
   const result = await postEntry({
@@ -168,7 +171,7 @@ async function actionPostCrewPayout(payload: any, userId: string) {
   if (scheduleRecordIds.length === 0) throw new Error('scheduleRecordIds is required')
   const totalAmount = num(payload?.totalAmount)
 
-  const entityId = await getHappyCutsEntityId()
+  const entityId = await getEntityId(DEFAULT_ENTITY)
   const acct = await getAccountIds(entityId, ['2000', '1000'])
 
   // Deterministic batch key from the actual set of jobs being paid — a
@@ -199,7 +202,8 @@ async function actionCreateManualEntry(payload: any, userId: string) {
   const rawLines = Array.isArray(payload?.lines) ? payload.lines : []
   if (rawLines.length < 2) throw new Error('An entry needs at least two lines')
 
-  const entityId = await getHappyCutsEntityId()
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const entityId = await getEntityId(entityName)
   const codes = [...new Set(rawLines.map((l: any) => String(l.accountCode)))]
   const acct = await getAccountIds(entityId, codes)
 
@@ -226,8 +230,9 @@ async function actionCreateManualEntry(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
-async function actionGetSummary(_payload: any) {
-  const entityId = await getHappyCutsEntityId()
+async function actionGetSummary(payload: any) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const entityId = await getEntityId(entityName)
   const monthStart = new Date().toISOString().slice(0, 8) + '01'
 
   const { data: accounts, error: acctErr } = await sb.from('bk_accounts').select('id, code, name, account_type').eq('entity_id', entityId)
@@ -262,8 +267,8 @@ async function actionGetSummary(_payload: any) {
     }
   }
 
-  const income = (accounts || []).filter(a => a.account_type === 'income').map(a => ({ name: a.name, amount: pnlLines[a.name] || 0 }))
-  const expenses = (accounts || []).filter(a => a.account_type === 'expense').map(a => ({ name: a.name, amount: pnlLines[a.name] || 0 }))
+  const income = (accounts || []).filter(a => a.account_type === 'income').map(a => ({ code: a.code, name: a.name, amount: pnlLines[a.name] || 0 }))
+  const expenses = (accounts || []).filter(a => a.account_type === 'expense').map(a => ({ code: a.code, name: a.name, amount: pnlLines[a.name] || 0 }))
   const totalIncome = income.reduce((s, l) => s + l.amount, 0)
   const totalExpenses = expenses.reduce((s, l) => s + l.amount, 0)
 
@@ -280,7 +285,8 @@ async function actionGetSummary(_payload: any) {
 }
 
 async function actionListEntries(payload: any) {
-  const entityId = await getHappyCutsEntityId()
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const entityId = await getEntityId(entityName)
   const limit = Math.min(Number(payload?.limit) || 25, 100)
 
   const { data: entries, error } = await sb
@@ -295,17 +301,19 @@ async function actionListEntries(payload: any) {
   return { ok: true, entries: entries || [] }
 }
 
-async function actionGetBankCheck(_payload: any) {
-  const entityId = await getHappyCutsEntityId()
+async function actionGetBankCheck(payload: any) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const entityId = await getEntityId(entityName)
   const { data, error } = await sb.from('bk_bank_checks').select('*').eq('entity_id', entityId).maybeSingle()
   if (error) throw new Error(error.message)
-  const summary = await actionGetSummary({})
+  const summary: any = await actionGetSummary({ entityName })
   return { ok: true, statementBalance: data?.statement_balance ?? null, checkedAt: data?.checked_at ?? null, ledgerCashBalance: summary.cashBalance }
 }
 
 async function actionSetBankCheck(payload: any, userId: string) {
   const statementBalance = num(payload?.statementBalance)
-  const entityId = await getHappyCutsEntityId()
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const entityId = await getEntityId(entityName)
   const { error } = await sb.from('bk_bank_checks').upsert({
     entity_id: entityId,
     statement_balance: statementBalance,
