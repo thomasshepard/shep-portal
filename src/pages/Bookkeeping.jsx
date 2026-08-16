@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2 } from 'lucide-react'
+import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { fmtCurrency } from '../lib/airtable'
@@ -89,6 +89,12 @@ export default function Bookkeeping() {
   }
 
   const accounts = accountsFromSummary(summary)
+  // Bank Feed's two dropdowns need different slices of the chart of accounts:
+  // mapping a bank account to the ledger only makes sense against Cash/liability
+  // accounts, while quick-categorizing a transaction picks the "other side" —
+  // an income or expense account, same as every dual-write posting does.
+  const cashLikeAccounts = (summary?.balanceSheet || []).filter(a => a.accountType === 'asset' || a.accountType === 'liability')
+  const expenseIncomeAccounts = [...(summary?.pnl?.income || []), ...(summary?.pnl?.expenses || [])]
 
   if (loading) return <LoadingSpinner />
 
@@ -204,6 +210,15 @@ export default function Bookkeeping() {
         </button>
       </div>
 
+      {/* Bank Feed */}
+      <BankFeedPanel
+        key={selectedEntity}
+        entityName={selectedEntity}
+        cashLikeAccounts={cashLikeAccounts}
+        expenseIncomeAccounts={expenseIncomeAccounts}
+        onPosted={load}
+      />
+
       {/* Legend */}
       <div className="flex items-center gap-5 flex-wrap bg-violet-50/60 border border-violet-100 rounded-xl px-4 py-2.5 text-xs text-gray-600">
         <span className="font-semibold text-gray-700">How entries get here</span>
@@ -260,7 +275,7 @@ function LineRow({ label, amount }) {
 }
 
 function Badge({ tone, children }) {
-  const cls = tone === 'auto' ? 'bg-violet-100 text-violet-700' : tone === 'manual' ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700'
+  const cls = tone === 'auto' ? 'bg-violet-100 text-violet-700' : tone === 'manual' ? 'bg-gray-100 text-gray-600' : tone === 'bad' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
   return <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{children}</span>
 }
 
@@ -412,6 +427,209 @@ function NewEntryModal({ entityName, accounts, onClose, onSaved }) {
             </div>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+// Phase 1a bank feed — SimpleFin only, manual sync + manual quick-categorize
+// (no AI yet, that's Phase 1b). Self-contained: remounts fresh whenever the
+// parent's `key={entityName}` changes rather than threading feed state
+// through Bookkeeping()'s own load(). `onPosted` lets a successful
+// quick-categorize refresh the parent's P&L/balance sheet.
+function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, onPosted }) {
+  const [loading, setLoading] = useState(true)
+  const [mappedAccounts, setMappedAccounts] = useState([])
+  const [unmappedAccounts, setUnmappedAccounts] = useState([])
+  const [transactions, setTransactions] = useState([])
+  const [setupToken, setSetupToken] = useState('')
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [busyId, setBusyId] = useState(null)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    try {
+      const [mapped, unmapped, txs] = await Promise.all([
+        callBookkeeping('list_feed_accounts', { entityName }),
+        callBookkeeping('list_feed_accounts', {}),
+        callBookkeeping('list_raw_transactions', { entityName }),
+      ])
+      setMappedAccounts(mapped.accounts || [])
+      setUnmappedAccounts(unmapped.accounts || [])
+      setTransactions(txs.transactions || [])
+    } catch (e) {
+      toast.error('Failed to load bank feed: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function connect(e) {
+    e.preventDefault()
+    if (!setupToken.trim()) return
+    setConnecting(true)
+    try {
+      await callBookkeeping('claim_setup_token', { setupToken: setupToken.trim() })
+      toast.success('Connected — map each account below to finish setup')
+      setSetupToken('')
+      load()
+    } catch (e) {
+      toast.error('Failed to connect: ' + e.message)
+    }
+    setConnecting(false)
+  }
+
+  async function mapAccount(bankAccountId, ledgerAccountCode) {
+    if (!ledgerAccountCode) return
+    setBusyId(bankAccountId)
+    try {
+      await callBookkeeping('map_feed_account', { bankAccountId, entityName, ledgerAccountCode })
+      toast.success('Mapped')
+      load()
+    } catch (e) {
+      toast.error('Failed to map: ' + e.message)
+    }
+    setBusyId(null)
+  }
+
+  async function sync() {
+    setSyncing(true)
+    try {
+      const result = await callBookkeeping('sync_feed_transactions', {})
+      const failed = (result.results || []).filter(r => r.error)
+      if (failed.length > 0) toast.error(`Sync had ${failed.length} issue(s) — see console`)
+      else toast.success('Synced')
+      load()
+    } catch (e) {
+      toast.error('Failed to sync: ' + e.message)
+    }
+    setSyncing(false)
+  }
+
+  async function categorize(rawTransactionId, accountCode) {
+    if (!accountCode) return
+    setBusyId(rawTransactionId)
+    try {
+      await callBookkeeping('quick_categorize_transaction', { rawTransactionId, accountCode })
+      setTransactions(prev => prev.filter(t => t.id !== rawTransactionId))
+      onPosted?.()
+    } catch (e) {
+      toast.error('Failed to post: ' + e.message)
+    }
+    setBusyId(null)
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-2 text-sm text-gray-400">
+        <Loader2 size={14} className="animate-spin" /> Loading bank feed…
+      </div>
+    )
+  }
+
+  const unmappedForThisEntity = unmappedAccounts // any claimed-but-unmapped account can be mapped to whichever entity is open right now
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <h2 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+          <Landmark size={15} className="text-violet-600" /> Bank Feed
+        </h2>
+        {mappedAccounts.length > 0 && (
+          <button onClick={sync} disabled={syncing} className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50">
+            <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
+          </button>
+        )}
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Connect form */}
+        <form onSubmit={connect} className="flex items-end gap-2 flex-wrap">
+          <div className="flex-1 min-w-[240px]">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Connect a bank &mdash; <a href="https://bridge.simplefin.org/simplefin/create" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">get a Setup Token here</a>, then paste it below
+            </label>
+            <textarea
+              value={setupToken} onChange={e => setSetupToken(e.target.value)}
+              placeholder="Paste Setup Token"
+              rows={1}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <button type="submit" disabled={connecting || !setupToken.trim()}
+            className="h-9 px-3.5 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
+            {connecting && <Loader2 size={14} className="animate-spin" />}
+            Connect
+          </button>
+        </form>
+
+        {/* Unmapped accounts needing a Cash/liability account picked */}
+        {unmappedForThisEntity.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Needs mapping to {entityName}</p>
+            {unmappedForThisEntity.map(a => (
+              <div key={a.id} className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                <span className="flex-1 text-sm text-gray-700 truncate">{a.displayName || a.display_name}{a.connName || a.conn_name ? ` · ${a.connName || a.conn_name}` : ''}</span>
+                <select
+                  defaultValue=""
+                  disabled={busyId === a.id}
+                  onChange={e => mapAccount(a.id, e.target.value)}
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5"
+                >
+                  <option value="" disabled>Map to account…</option>
+                  {cashLikeAccounts.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Mapped accounts summary */}
+        {mappedAccounts.length > 0 && (
+          <div className="space-y-1">
+            {mappedAccounts.map(a => (
+              <div key={a.id} className="flex items-center justify-between text-[13px] py-1">
+                <span className="text-gray-600 flex items-center gap-1.5">
+                  {a.display_name}
+                  {a.status === 'needs_reauth' && (
+                    <Badge tone="bad"><AlertTriangle size={10} /> Needs re-auth</Badge>
+                  )}
+                </span>
+                <span className="font-medium text-gray-800 tabular-nums">{a.last_balance != null ? fmtCurrency(a.last_balance) : '—'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Unreviewed transactions */}
+        {transactions.length > 0 && (
+          <div className="space-y-1.5 pt-1 border-t border-gray-100">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-2">Unreviewed transactions</p>
+            {transactions.map(t => (
+              <div key={t.id} className="flex items-center gap-2 py-1">
+                <span className="text-xs text-gray-400 w-20 flex-shrink-0">{String(t.posted_at).slice(0, 10)}</span>
+                <span className="flex-1 text-sm text-gray-700 truncate">{t.description}{t.pending ? ' (pending)' : ''}</span>
+                <span className="text-sm font-medium text-gray-800 tabular-nums w-24 text-right flex-shrink-0">{fmtCurrency(t.amount)}</span>
+                <select
+                  defaultValue=""
+                  disabled={busyId === t.id}
+                  onChange={e => categorize(t.id, e.target.value)}
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 max-w-[160px]"
+                >
+                  <option value="" disabled>Categorize…</option>
+                  {expenseIncomeAccounts.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {mappedAccounts.length === 0 && unmappedForThisEntity.length === 0 && (
+          <p className="text-xs text-gray-400">No bank accounts connected for {entityName} yet.</p>
+        )}
       </div>
     </div>
   )
