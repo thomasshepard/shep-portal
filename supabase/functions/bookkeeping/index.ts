@@ -725,8 +725,14 @@ async function actionSuggestCategory(payload: any) {
   // accounts. Never throws (fails soft to null) — a suggestion is a nice-
   // to-have, never load-bearing.
   try {
+    // gemini-2.5-flash-lite 404s for new API keys ("no longer available to
+    // new users") even though it's still listed by /v1beta/models — Google
+    // deprecates by key-creation-date, not by removing the model outright.
+    // gemini-flash-lite-latest is a floating alias Google keeps pointed at
+    // whatever their current cheap model is (gemini-3.5-flash-lite as of
+    // 2026-08), so this shouldn't need updating the next time they rotate.
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -739,13 +745,23 @@ async function actionSuggestCategory(payload: any) {
         }),
       },
     )
-    if (!res.ok) return { ok: true, suggested: null }
+    if (!res.ok) {
+      // Failing soft to null is correct behavior (a missing suggestion must
+      // never block the transaction list) — but silent-by-design is exactly
+      // how the gemini-2.5-flash-lite deprecation went unnoticed. Log it so
+      // the next model/API break is a bk_error_log query, not manual curl
+      // debugging.
+      const body = await res.text().catch(() => '')
+      sb.from('bk_error_log').insert({ action: 'suggest_category', error_message: `Gemini ${res.status}: ${body.slice(0, 500)}` }).then(() => {}, () => {})
+      return { ok: true, suggested: null }
+    }
     const json = await res.json()
     const text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
     const parsed = JSON.parse(text)
     const match = closedList.find(a => a.code === parsed.code)
     return { ok: true, suggested: match || null }
-  } catch {
+  } catch (err: any) {
+    sb.from('bk_error_log').insert({ action: 'suggest_category', error_message: err?.message || String(err) }).then(() => {}, () => {})
     return { ok: true, suggested: null }
   }
 }
