@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip, BookOpen } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { fmtCurrency, fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
@@ -68,6 +69,7 @@ function accountsFromSummary(summary) {
 }
 
 export default function Bookkeeping() {
+  const navigate = useNavigate()
   const [selectedEntity, setSelectedEntity] = useState('Happy Cuts LLC')
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState(null)
@@ -140,6 +142,12 @@ export default function Bookkeeping() {
           <p className="text-sm text-gray-500 mt-0.5">{selectedEntity} &middot; double-entry, CPA-ready</p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => navigate('/bookkeeping/guide')}
+            className="flex items-center gap-1.5 text-sm text-violet-700 hover:text-violet-900 font-medium px-1"
+          >
+            <BookOpen size={15} /> Guide
+          </button>
           <button
             onClick={() => setDistributionModalOpen(true)}
             className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
