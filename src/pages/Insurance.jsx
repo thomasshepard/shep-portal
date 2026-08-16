@@ -7,7 +7,22 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, PM_BASE_ID, DOCS_BASE_ID } from '../lib/airtable'
+import { supabase } from '../lib/supabase'
 import LoadingSpinner from '../components/LoadingSpinner'
+
+// Bookkeeping Phase 3 dual-write — best-effort, silent-skip. getEntityId()
+// on the edge function throws when the obligation's Entity isn't onboarded
+// to Bookkeeping yet (everything except Ridge & Anchor, to start) — that's
+// expected, not an error, so it's swallowed here. A dual-write failure must
+// never surface to the user or block the primary "Payment logged" action.
+async function postBookkeepingObligationPayment(payload) {
+  try {
+    const { error } = await supabase.functions.invoke('bookkeeping', { body: { action: 'post_obligation_payment', ...payload } })
+    if (error) console.warn('[bookkeeping] post_obligation_payment skipped:', error.message)
+  } catch (e) {
+    console.warn('[bookkeeping] post_obligation_payment skipped:', e.message)
+  }
+}
 
 const OBLIGATIONS_TABLE = 'Insurance and Taxes'
 const PAYMENTS_TABLE    = 'Obligation Payments'
@@ -1218,7 +1233,7 @@ function PaymentModal({ obligation, onClose, onSaved }) {
     if (!form.period.trim()) return toast.error('Which period is this for?')
     setSaving(true)
     const num = v => (v === '' ? null : Number(v))
-    const { error } = await createRecord(PAYMENTS_TABLE, {
+    const { data, error } = await createRecord(PAYMENTS_TABLE, {
       Name: `${safeStr(f.Name)} — ${form.period}`,
       Obligation: [obligation.id],
       Period: form.period,
@@ -1233,6 +1248,14 @@ function PaymentModal({ obligation, onClose, onSaved }) {
     setSaving(false)
     if (error) return toast.error('Failed to log payment: ' + error)
     toast.success('Payment logged')
+    postBookkeepingObligationPayment({
+      entityName: safeStr(f.Entity),
+      kind: safeStr(f.Kind),
+      amount: num(form.amountPaid),
+      date: form.paidDate,
+      memo: `${safeStr(f.Name)} — ${form.period}`,
+      paymentRecordId: data?.id,
+    })
     onSaved()
   }
 
