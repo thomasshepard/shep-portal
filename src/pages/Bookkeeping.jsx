@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { fmtCurrency } from '../lib/airtable'
@@ -53,6 +53,7 @@ export default function Bookkeeping() {
   const [bankCheck, setBankCheck] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [distributionModalOpen, setDistributionModalOpen] = useState(false)
   const [statementInput, setStatementInput] = useState('')
 
   useEffect(() => { load() }, [selectedEntity])
@@ -111,12 +112,20 @@ export default function Bookkeeping() {
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">{selectedEntity} &middot; double-entry, CPA-ready</p>
         </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={15} /> New Entry
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setDistributionModalOpen(true)}
+            className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            <Wallet size={15} /> Record Distribution
+          </button>
+          <button
+            onClick={() => setModalOpen(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={15} /> New Entry
+          </button>
+        </div>
       </div>
 
       {/* Entity rail */}
@@ -248,6 +257,14 @@ export default function Bookkeeping() {
           accounts={accounts}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); load() }}
+        />
+      )}
+
+      {distributionModalOpen && (
+        <DistributionModal
+          entityName={selectedEntity}
+          onClose={() => setDistributionModalOpen(false)}
+          onSaved={() => { setDistributionModalOpen(false); load() }}
         />
       )}
     </div>
@@ -453,6 +470,71 @@ function NewEntryModal({ entityName, accounts, onClose, onSaved }) {
                 Post Entry
               </button>
             </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// Money the owner takes out of the entity — Dr Owner's Draws / Cr Cash,
+// posted via record_distribution. Deliberately a simpler form than
+// NewEntryModal's line-by-line builder: amount + memo + date is the whole
+// shape of this transaction, no account picker needed.
+function DistributionModal({ entityName, onClose, onSaved }) {
+  const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [saving, setSaving] = useState(false)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    const amt = Number(amount)
+    if (!Number.isFinite(amt) || amt <= 0) return toast.error('Enter an amount')
+    setSaving(true)
+    try {
+      await callBookkeeping('record_distribution', { entityName, amount: amt, memo: memo.trim(), date })
+      toast.success('Distribution recorded')
+      onSaved()
+    } catch (err) {
+      toast.error('Failed to record: ' + err.message)
+    }
+    setSaving(false)
+  }
+
+  const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl w-full max-w-sm shadow-xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2"><Wallet size={16} className="text-violet-600" /> Record Distribution</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <p className="text-xs text-gray-500 -mt-1">Money taken out of {entityName} for personal use — reduces Cash and Owner's Draws.</p>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className={inp + ' pl-6'} autoFocus />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inp} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Memo (optional)</label>
+            <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="What was this for?" className={inp} />
+          </div>
+          <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+            <button type="submit" disabled={saving}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              Record
+            </button>
           </div>
         </form>
       </div>
