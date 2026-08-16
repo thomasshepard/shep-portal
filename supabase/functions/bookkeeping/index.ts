@@ -700,8 +700,13 @@ async function actionSuggestCategory(payload: any) {
   const rawTransactionId = String(payload?.rawTransactionId || '')
   if (!rawTransactionId) throw new Error('rawTransactionId is required')
 
-  const anthKey = Deno.env.get('ANTHROPIC_API_KEY')
-  if (!anthKey) return { ok: true, suggested: null }
+  // Gemini over Claude specifically for this action — Thomas's call, cost:
+  // gemini-2.5-flash-lite runs ~10x cheaper than claude-haiku-4-5 per token
+  // (confirmed against Google's pricing page, 2026-08), and this is the one
+  // Bookkeeping AI call with real per-transaction volume (every other AI
+  // call in this codebase is one-shot per document/nudge, not per row).
+  const geminiKey = Deno.env.get('GEMINI_API_KEY')
+  if (!geminiKey) return { ok: true, suggested: null }
 
   const { data: raw } = await sb.from('bk_raw_transactions')
     .select('id, amount, description, bk_bank_accounts!inner(entity_id)')
@@ -717,22 +722,26 @@ async function actionSuggestCategory(payload: any) {
   // Same suggest-and-confirm shape as src/lib/documentLinks.js's
   // extractLinkedFields() — closed list injected into the prompt so the
   // model can never suggest a code outside the entity's real chart of
-  // accounts, JSON-only response, never throws (fails soft to null).
+  // accounts. Never throws (fails soft to null) — a suggestion is a nice-
+  // to-have, never load-bearing.
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': anthKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 100,
-        system: `You categorize one bank transaction for a small business ledger. Return ONLY JSON, no markdown, no preamble. Shape: {"code":string|null}. "code" must be exactly one of these account codes, or null if genuinely unsure: ${JSON.stringify(closedList.map(a => a.code))}. Reference (code → name): ${JSON.stringify(closedList)}. Never invent a code outside that list.`,
-        messages: [{ role: 'user', content: `Amount: ${raw.amount} (positive = deposit, negative = withdrawal). Description: ${raw.description}` }],
-      }),
-    })
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Amount: ${raw.amount} (positive = deposit, negative = withdrawal). Description: ${raw.description}` }] }],
+          systemInstruction: {
+            parts: [{ text: `You categorize one bank transaction for a small business ledger. Return ONLY JSON. Shape: {"code":string|null}. "code" must be exactly one of these account codes, or null if genuinely unsure: ${JSON.stringify(closedList.map(a => a.code))}. Reference (code → name): ${JSON.stringify(closedList)}. Never invent a code outside that list.` }],
+          },
+          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 50 },
+        }),
+      },
+    )
     if (!res.ok) return { ok: true, suggested: null }
     const json = await res.json()
-    let text = json?.content?.[0]?.text || '{}'
-    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
     const parsed = JSON.parse(text)
     const match = closedList.find(a => a.code === parsed.code)
     return { ok: true, suggested: match || null }
