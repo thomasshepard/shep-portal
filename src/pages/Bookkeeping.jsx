@@ -33,7 +33,15 @@ function parseDocLite(record) {
 // Live, clickable entities. LeadsCompanion joined Happy Cuts in Phase 0b;
 // Ridge & Anchor LLC joined in Phase 3 as the first partnership entity —
 // UCHB was originally paired with it in the spec but Thomas said to skip it.
-const ACTIVE_ENTITIES = ['Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC']
+// Personal / Shepard Holdings LLC / Virginia Holdings LLC joined together —
+// "East Meadow Properties" (the name the build order used) turned out not
+// to be a real title-holder anywhere; the real ones are these three plus
+// Ridge & Anchor, per the actual Property Owner values checked against the
+// Airtable API before this was built.
+const ACTIVE_ENTITIES = [
+  'Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC',
+  'Personal', 'Shepard Holdings LLC', 'Virginia Holdings LLC',
+]
 
 // Partnership entities get partner-aware equity UI (Partner Capital card,
 // partner picker on distributions/contributions) instead of the flat
@@ -45,9 +53,7 @@ const PARTNERSHIP_ENTITIES = new Set(['Ridge & Anchor LLC'])
 // Entities the spec has planned but hasn't built yet — shown as locked pills
 // so the roadmap is visible without implying they're clickable.
 const LOCKED_ENTITIES = [
-  { name: 'East Meadow Properties', phase: 'Phase 4' },
   { name: 'UCHB', phase: 'Phase 3' },
-  { name: 'Personal', phase: 'Phase 6' },
 ]
 
 async function callBookkeeping(action, payload = {}) {
