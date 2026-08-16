@@ -1037,8 +1037,27 @@ const OBLIGATION_KIND_ACCOUNT: Record<string, string> = {
   'Insurance': '5010',
 }
 
+// Insurance.jsx's Entity field and Property's Owner field both use the real
+// legal title-holder name — but "Thomas Shepard" and "Thomas Shepard and
+// Gabrielle Shepard" are two different strings that both mean the Personal
+// entity. Resolve through this map before getEntityId(); anything not
+// listed falls through unchanged, so the existing silent-skip-if-not-
+// onboarded behavior still applies to any entity that isn't live yet.
+const PROPERTY_OWNER_TO_BK_ENTITY: Record<string, string> = {
+  'Thomas Shepard': 'Personal',
+  'Thomas Shepard and Gabrielle Shepard': 'Personal',
+  'Shepard Holdings LLC': 'Shepard Holdings LLC',
+  'Virginia Holdings LLC': 'Virginia Holdings LLC',
+  'Ridge & Anchor LLC': 'Ridge & Anchor LLC',
+  'Happy Cuts LLC': 'Happy Cuts LLC',
+  'East Meadow Consulting LLC': 'East Meadow Consulting LLC',
+}
+function resolveBkEntityName(rawName: string): string {
+  return PROPERTY_OWNER_TO_BK_ENTITY[rawName] || rawName
+}
+
 async function actionPostObligationPayment(payload: any, userId: string) {
-  const entityName = String(payload?.entityName || '')
+  const entityName = resolveBkEntityName(String(payload?.entityName || ''))
   if (!entityName) throw new Error('entityName is required')
   const kind = String(payload?.kind || '')
   const code = OBLIGATION_KIND_ACCOUNT[kind]
@@ -1074,7 +1093,7 @@ const BILLS_CATEGORY_ACCOUNT: Record<string, string> = {
 }
 
 async function actionPostBillsPayment(payload: any, userId: string) {
-  const propertyOwner = String(payload?.propertyOwner || '')
+  const propertyOwner = resolveBkEntityName(String(payload?.propertyOwner || ''))
   if (!propertyOwner) throw new Error('propertyOwner is required')
   const category = String(payload?.category || '')
   const code = BILLS_CATEGORY_ACCOUNT[category]
