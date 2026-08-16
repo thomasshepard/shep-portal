@@ -46,6 +46,26 @@ function json(body: unknown, status = 200) {
 // target a different entity (Phase 0b: LeadsCompanion).
 const DEFAULT_ENTITY = 'Happy Cuts LLC'
 
+// Per-request caller context, built once in Deno.serve and passed as the
+// third arg to every action handler. scope === null means unrestricted
+// (admin); scope === [] means "granted Bookkeeping access but zero entities
+// picked yet" — deliberately locked out, not open, until an admin picks
+// entities via Admin > Users' Edit Access Settings modal.
+type BkContext = { userId: string; isAdmin: boolean; scope: string[] | null }
+
+// See the DUAL_WRITE_ONLY_ACTIONS comment at the Deno.serve allow-check for
+// why these bypass can_view_bookkeeping entirely (valid session only).
+const DUAL_WRITE_ONLY_ACTIONS = new Set([
+  'post_mow_completion', 'post_mow_payment', 'post_crew_payout',
+  'post_obligation_payment', 'post_bills_payment',
+])
+
+function assertEntityScope(entityName: string, ctx?: BkContext) {
+  if (ctx && ctx.scope !== null && !ctx.scope.includes(entityName)) {
+    throw new Error(`You do not have access to ${entityName} in Bookkeeping`)
+  }
+}
+
 async function getEntityId(name: string): Promise<string> {
   const { data, error } = await sb.from('bk_entities').select('id').eq('name', name).single()
   if (error || !data) throw new Error(`Entity "${name}" not found — has its migration run?`)
@@ -419,7 +439,7 @@ async function actionPostCrewPayout(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
-async function actionCreateManualEntry(payload: any, userId: string) {
+async function actionCreateManualEntry(payload: any, userId: string, ctx?: BkContext) {
   const date = String(payload?.date || new Date().toISOString().slice(0, 10))
   const memo = String(payload?.memo || '').trim()
   if (!memo) throw new Error('memo is required')
@@ -427,6 +447,7 @@ async function actionCreateManualEntry(payload: any, userId: string) {
   if (rawLines.length < 2) throw new Error('An entry needs at least two lines')
 
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const entityId = await getEntityId(entityName)
   const codes = [...new Set(rawLines.map((l: any) => String(l.accountCode)))]
   const acct = await getAccountIds(entityId, codes)
@@ -454,8 +475,9 @@ async function actionCreateManualEntry(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
-async function actionGetSummary(payload: any) {
+async function actionGetSummary(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const entityId = await getEntityId(entityName)
   const monthStart = new Date().toISOString().slice(0, 8) + '01'
 
@@ -508,10 +530,14 @@ async function actionGetSummary(payload: any) {
   }
 }
 
-async function actionListEntries(payload: any) {
+async function actionListEntries(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const entityId = await getEntityId(entityName)
-  const limit = Math.min(Number(payload?.limit) || 25, 100)
+  // CSV export needs the full range, not the on-screen page size — the cap
+  // still exists (5000, not literally unbounded) so a single export can't
+  // become a runaway query.
+  const limit = Math.min(Number(payload?.limit) || 25, payload?.forExport ? 5000 : 100)
 
   const { data: entries, error } = await sb
     .from('bk_journal_entries')
@@ -525,26 +551,38 @@ async function actionListEntries(payload: any) {
   return { ok: true, entries: entries || [] }
 }
 
-async function actionAttachReceipt(payload: any) {
+// Entity is resolved indirectly here (via the entry's own entity_id), not
+// supplied by the caller — assertEntryScope looks it up before acting.
+async function assertEntryScope(entryId: string, ctx?: BkContext) {
+  if (!ctx || ctx.scope === null) return
+  const { data } = await sb.from('bk_journal_entries').select('bk_entities(name)').eq('id', entryId).single()
+  const entityName = (data as any)?.bk_entities?.name
+  if (!entityName || !ctx.scope.includes(entityName)) throw new Error('You do not have access to this entry')
+}
+
+async function actionAttachReceipt(payload: any, _userId?: string, ctx?: BkContext) {
   const entryId = String(payload?.entryId || '')
   if (!entryId) throw new Error('entryId is required')
   const documentId = String(payload?.documentId || '')
   if (!documentId) throw new Error('documentId is required')
+  await assertEntryScope(entryId, ctx)
   const { error } = await sb.from('bk_journal_entries').update({ receipt_document_id: documentId }).eq('id', entryId)
   if (error) throw new Error(error.message)
   return { ok: true }
 }
 
-async function actionDetachReceipt(payload: any) {
+async function actionDetachReceipt(payload: any, _userId?: string, ctx?: BkContext) {
   const entryId = String(payload?.entryId || '')
   if (!entryId) throw new Error('entryId is required')
+  await assertEntryScope(entryId, ctx)
   const { error } = await sb.from('bk_journal_entries').update({ receipt_document_id: null }).eq('id', entryId)
   if (error) throw new Error(error.message)
   return { ok: true }
 }
 
-async function actionGetBankCheck(payload: any) {
+async function actionGetBankCheck(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const entityId = await getEntityId(entityName)
   const { data, error } = await sb.from('bk_bank_checks').select('*').eq('entity_id', entityId).maybeSingle()
   if (error) throw new Error(error.message)
@@ -583,9 +621,10 @@ async function actionGetBankCheck(payload: any) {
   }
 }
 
-async function actionSetBankCheck(payload: any, userId: string) {
+async function actionSetBankCheck(payload: any, userId: string, ctx?: BkContext) {
   const statementBalance = num(payload?.statementBalance)
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const entityId = await getEntityId(entityName)
   const { error } = await sb.from('bk_bank_checks').upsert({
     entity_id: entityId,
@@ -647,32 +686,47 @@ async function actionSyncFeedTransactions(payload: any) {
   return { ok: true, synced: results.length, autoPosted: totalAutoPosted, results }
 }
 
-async function actionListFeedAccounts(payload: any) {
+async function actionListFeedAccounts(payload: any, _userId?: string, ctx?: BkContext) {
   let q = sb.from('bk_bank_accounts')
     .select('id, claim_id, display_name, conn_name, currency, entity_id, ledger_account_id, last_balance, last_balance_date, status')
-  q = payload?.entityName
-    ? q.eq('entity_id', await getEntityId(String(payload.entityName)))
-    // Ignored accounts (e.g. an unused savings account) never need mapping,
-    // so they'd otherwise sit in this "needs mapping" listing permanently.
-    : q.is('entity_id', null).neq('status', 'ignored')
+  if (payload?.entityName) {
+    const entityName = String(payload.entityName)
+    assertEntityScope(entityName, ctx)
+    q = q.eq('entity_id', await getEntityId(entityName))
+  } else {
+    // Unmapped accounts aren't part of any entity's books yet — connect-time
+    // housekeeping (same posture as claim/sync), not scoped per-entity.
+    q = q.is('entity_id', null).neq('status', 'ignored')
+  }
   const { data, error } = await q.order('display_name')
   if (error) throw new Error(error.message)
   return { ok: true, accounts: data || [] }
 }
 
-async function actionIgnoreFeedAccount(payload: any) {
+async function assertBankAccountScope(bankAccountId: string, ctx?: BkContext) {
+  if (!ctx || ctx.scope === null) return
+  const { data } = await sb.from('bk_bank_accounts').select('bk_entities(name)').eq('id', bankAccountId).single()
+  const entityName = (data as any)?.bk_entities?.name
+  // Not yet mapped to any entity — connect-time housekeeping, not scoped.
+  if (!entityName) return
+  if (!ctx.scope.includes(entityName)) throw new Error('You do not have access to this account')
+}
+
+async function actionIgnoreFeedAccount(payload: any, _userId?: string, ctx?: BkContext) {
   const bankAccountId = String(payload?.bankAccountId || '')
   if (!bankAccountId) throw new Error('bankAccountId is required')
+  await assertBankAccountScope(bankAccountId, ctx)
   const { error } = await sb.from('bk_bank_accounts').update({ status: 'ignored' }).eq('id', bankAccountId)
   if (error) throw new Error(error.message)
   return { ok: true }
 }
 
-async function actionMapFeedAccount(payload: any) {
+async function actionMapFeedAccount(payload: any, _userId?: string, ctx?: BkContext) {
   const bankAccountId = String(payload?.bankAccountId || '')
   if (!bankAccountId) throw new Error('bankAccountId is required')
   const entityName = String(payload?.entityName || '')
   if (!entityName) throw new Error('entityName is required')
+  assertEntityScope(entityName, ctx)
   const ledgerAccountCode = String(payload?.ledgerAccountCode || '')
   if (!ledgerAccountCode) throw new Error('ledgerAccountCode is required')
 
@@ -686,8 +740,9 @@ async function actionMapFeedAccount(payload: any) {
   return { ok: true }
 }
 
-async function actionListRawTransactions(payload: any) {
+async function actionListRawTransactions(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const unmatchedOnly = payload?.unmatchedOnly !== false
   const entityId = await getEntityId(entityName)
 
@@ -703,14 +758,14 @@ async function actionListRawTransactions(payload: any) {
   return { ok: true, transactions: data || [] }
 }
 
-async function actionQuickCategorizeTransaction(payload: any, userId: string) {
+async function actionQuickCategorizeTransaction(payload: any, userId: string, ctx?: BkContext) {
   const rawTransactionId = String(payload?.rawTransactionId || '')
   if (!rawTransactionId) throw new Error('rawTransactionId is required')
   const accountCode = String(payload?.accountCode || '')
   if (!accountCode) throw new Error('accountCode is required')
 
   const { data: raw, error: rawErr } = await sb.from('bk_raw_transactions')
-    .select('id, amount, description, posted_at, matched_journal_entry_id, bk_bank_accounts!inner(entity_id, ledger_account_id)')
+    .select('id, amount, description, posted_at, matched_journal_entry_id, bk_bank_accounts!inner(entity_id, ledger_account_id, bk_entities(name))')
     .eq('id', rawTransactionId).single()
   if (rawErr || !raw) throw new Error('Transaction not found')
   if (raw.matched_journal_entry_id) throw new Error('This transaction has already been categorized')
@@ -718,6 +773,9 @@ async function actionQuickCategorizeTransaction(payload: any, userId: string) {
   const bankAccount = (raw as any).bk_bank_accounts
   if (!bankAccount?.entity_id || !bankAccount?.ledger_account_id) {
     throw new Error("This bank account isn't mapped to an entity/ledger account yet")
+  }
+  if (ctx && ctx.scope !== null && !ctx.scope.includes(bankAccount.bk_entities?.name)) {
+    throw new Error('You do not have access to this transaction')
   }
 
   const amount = num(raw.amount)
@@ -769,7 +827,7 @@ async function actionQuickCategorizeTransaction(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
-async function actionSuggestCategory(payload: any) {
+async function actionSuggestCategory(payload: any, _userId?: string, ctx?: BkContext) {
   const rawTransactionId = String(payload?.rawTransactionId || '')
   if (!rawTransactionId) throw new Error('rawTransactionId is required')
 
@@ -787,6 +845,7 @@ async function actionSuggestCategory(payload: any) {
   const entityId = (raw as any)?.bk_bank_accounts?.entity_id
   const entityName = (raw as any)?.bk_bank_accounts?.bk_entities?.name || 'this business'
   if (!raw || !entityId) return { ok: true, suggested: null }
+  if (ctx && ctx.scope !== null && !ctx.scope.includes(entityName)) return { ok: true, suggested: null }
 
   const { data: accounts } = await sb.from('bk_accounts')
     .select('code, name').eq('entity_id', entityId).in('account_type', ['income', 'expense'])
@@ -840,8 +899,9 @@ async function actionSuggestCategory(payload: any) {
   }
 }
 
-async function actionRecordDistribution(payload: any, userId: string) {
+async function actionRecordDistribution(payload: any, userId: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const amount = num(payload?.amount)
   if (amount <= 0) throw new Error('Amount must be greater than zero')
   const date = String(payload?.date || new Date().toISOString().slice(0, 10))
@@ -872,16 +932,18 @@ async function actionRecordDistribution(payload: any, userId: string) {
 // what makes the capital statement a plain group-by-partner_id query, and
 // it means a third partner later costs zero new accounts.
 
-async function actionListPartners(payload: any) {
+async function actionListPartners(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const entityId = await getEntityId(entityName)
   const { data, error } = await sb.from('bk_partners').select('id, name, ownership_pct').eq('entity_id', entityId).order('name')
   if (error) throw new Error(error.message)
   return { ok: true, partners: data || [] }
 }
 
-async function actionRecordPartnerDistribution(payload: any, userId: string) {
+async function actionRecordPartnerDistribution(payload: any, userId: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const partnerId = String(payload?.partnerId || '')
   if (!partnerId) throw new Error('partnerId is required')
   const amount = num(payload?.amount)
@@ -906,8 +968,9 @@ async function actionRecordPartnerDistribution(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
-async function actionRecordPartnerContribution(payload: any, userId: string) {
+async function actionRecordPartnerContribution(payload: any, userId: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const partnerId = String(payload?.partnerId || '')
   if (!partnerId) throw new Error('partnerId is required')
   const amount = num(payload?.amount)
@@ -937,8 +1000,9 @@ async function actionRecordPartnerContribution(payload: any, userId: string) {
 // ownership_pct x the entity's period net income, shown as a preview of
 // what capital would be if this period were closed, never written back
 // into the ledger.
-async function actionGetPartnerCapitalStatement(payload: any) {
+async function actionGetPartnerCapitalStatement(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
   const periodStart = String(payload?.periodStart || '')
   const periodEnd = String(payload?.periodEnd || '')
   if (!periodStart || !periodEnd) throw new Error('periodStart and periodEnd are required')
@@ -1104,11 +1168,12 @@ async function actionPostBillsPayment(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
-async function actionRecategorizeTransaction(payload: any, userId: string) {
+async function actionRecategorizeTransaction(payload: any, userId: string, ctx?: BkContext) {
   const entryId = String(payload?.entryId || '')
   if (!entryId) throw new Error('entryId is required')
   const accountCode = String(payload?.accountCode || '')
   if (!accountCode) throw new Error('accountCode is required')
+  await assertEntryScope(entryId, ctx)
 
   const { data: entry, error: entryErr } = await sb.from('bk_journal_entries')
     .select('id, source_module, source_record_id').eq('id', entryId).single()
@@ -1134,9 +1199,10 @@ async function actionRecategorizeTransaction(payload: any, userId: string) {
   return actionQuickCategorizeTransaction({ rawTransactionId, accountCode }, userId)
 }
 
-async function actionVoidEntry(payload: any) {
+async function actionVoidEntry(payload: any, _userId?: string, ctx?: BkContext) {
   const entryId = String(payload?.entryId || '')
   if (!entryId) throw new Error('entryId is required')
+  await assertEntryScope(entryId, ctx)
   const { error: voidErr } = await sb.from('bk_journal_entries').update({ status: 'void' }).eq('id', entryId)
   if (voidErr) throw new Error(voidErr.message)
   const { error: clearErr } = await sb.from('bk_raw_transactions').update({ matched_journal_entry_id: null }).eq('matched_journal_entry_id', entryId)
@@ -1156,7 +1222,7 @@ async function actionRemoveFeedClaim(payload: any) {
 // Bookkeeping action is scoped to one entity at a time, matching the
 // Bookkeeping page's own UI; Triage needs the opposite — everything that
 // needs attention, across every entity, in one call.
-async function actionListTriageCandidates(_payload: any) {
+async function actionListTriageCandidates(_payload: any, _userId?: string, ctx?: BkContext) {
   // Reauth: whole-connection claims first (blocks every account under
   // them), then only account-specific issues NOT already covered by a
   // reauth claim — an act.-level error on an otherwise-active connection,
@@ -1203,12 +1269,59 @@ async function actionListTriageCandidates(_payload: any) {
     if (posted < byEntity[entityName].oldest) byEntity[entityName].oldest = posted
   }
   const THREE_DAYS_MS = 3 * 86400000
-  const unreviewedBacklog = Object.values(byEntity).filter(e => Date.now() - new Date(e.oldest).getTime() >= THREE_DAYS_MS)
+  let unreviewedBacklog = Object.values(byEntity).filter(e => Date.now() - new Date(e.oldest).getTime() >= THREE_DAYS_MS)
 
-  return { ok: true, reauthCandidates: [...claimCandidates, ...accountCandidates], unreviewedBacklog }
+  let reauthCandidates = [...claimCandidates, ...accountCandidates]
+
+  // Cross-entity by design (this is the one action that IS), so it's the
+  // one place scope filtering has to happen after the fact rather than up
+  // front — a scoped VA's Triage view should never surface another
+  // entity's reauth/backlog card, or even that entity's name inside a
+  // shared claim's label.
+  if (ctx && ctx.scope !== null) {
+    const scope = ctx.scope
+    unreviewedBacklog = unreviewedBacklog.filter(e => scope.includes(e.entityName))
+    reauthCandidates = reauthCandidates
+      .map((c: any) => {
+        const scopedNames = c.entityNames.filter((n: string) => scope.includes(n))
+        // The label was built from the full entity list before filtering —
+        // rebuild it (claim candidates only; account candidates' label
+        // already names just their one entity) so a scoped viewer's card
+        // never shows another entity's name even inside the label string.
+        const label = c.kind === 'claim' && scopedNames.length
+          ? c.label.split(' — ')[0] + (scopedNames.length ? ` — ${scopedNames.join(', ')}` : '')
+          : c.label
+        return { ...c, entityNames: scopedNames, label }
+      })
+      .filter((c: any) => c.entityNames.length > 0)
+  }
+
+  return { ok: true, reauthCandidates, unreviewedBacklog }
 }
 
-const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>> = {
+// Admin-only (enforced in Deno.serve before this runs, not just here) —
+// dumps every entity's full ledger as one JSON object for a manual,
+// off-Supabase backup. Deliberately excludes bk_feed_claims: that table's
+// access_url has the SimpleFin Basic Auth credentials baked into it (see
+// its own migration comment) — a downloadable backup file must never
+// contain a live bank credential. Reconnecting after a real restore is a
+// 30-second re-paste of a fresh Setup Token, not worth the exposure.
+async function actionExportBackup(_payload: any) {
+  const tables = [
+    'bk_entities', 'bk_accounts', 'bk_journal_entries', 'bk_journal_lines',
+    'bk_partners', 'bk_bank_accounts', 'bk_raw_transactions',
+    'bk_categorization_rules', 'bk_bank_checks', 'bk_period_locks',
+  ]
+  const dump: Record<string, unknown> = { exportedAt: new Date().toISOString() }
+  for (const table of tables) {
+    const { data, error } = await sb.from(table).select('*')
+    if (error) throw new Error(`${table}: ${error.message}`)
+    dump[table] = data || []
+  }
+  return { ok: true, backup: dump }
+}
+
+const ACTIONS: Record<string, (payload: any, userId: string, ctx?: BkContext) => Promise<unknown>> = {
   post_mow_completion: actionPostMowCompletion,
   post_mow_payment:    actionPostMowPayment,
   post_crew_payout:    actionPostCrewPayout,
@@ -1238,6 +1351,7 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   get_partner_capital_statement:    actionGetPartnerCapitalStatement,
   post_obligation_payment:          actionPostObligationPayment,
   post_bills_payment:               actionPostBillsPayment,
+  export_backup:                    actionExportBackup,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
@@ -1254,10 +1368,6 @@ Deno.serve(async (req) => {
   const { data: userData, error: userErr } = await authClient.auth.getUser(jwt)
   if (userErr || !userData?.user) return json({ ok: false, error: 'Unauthorized' }, 401)
 
-  const { data: profile } = await sb.from('profiles').select('role, can_view_bookkeeping').eq('id', userData.user.id).single()
-  const allowed = profile?.role === 'admin' || profile?.can_view_bookkeeping === true
-  if (!allowed) return json({ ok: false, error: 'You do not have access to Bookkeeping' }, 403)
-
   let body: any
   try {
     body = await req.json()
@@ -1269,8 +1379,32 @@ Deno.serve(async (req) => {
   const handler = ACTIONS[action]
   if (!handler) return json({ ok: false, error: `Unknown action: ${action}. Valid: ${Object.keys(ACTIONS).join(', ')}` }, 400)
 
+  const { data: profile } = await sb.from('profiles').select('role, can_view_bookkeeping, bookkeeping_entities').eq('id', userData.user.id).single()
+  const isAdmin = profile?.role === 'admin'
+
+  // Dual-write actions (Happy Cuts mow/crew payout, Insurance obligation
+  // payments, Bills Payment suggestions) are triggered from OTHER pages
+  // gated by THEIR OWN permission (can_view_happy_cuts / can_view_insurance
+  // / can_view_properties) — requiring can_view_bookkeeping on top of that
+  // was a real gap: anyone without it (e.g. Tony, can_view_happy_cuts=true
+  // but can_view_bookkeeping=false) would silently never get a ledger
+  // posting when they mark a mow paid. These actions never return ledger
+  // data to the caller and only ever post an entry the caller already had
+  // legitimate reason to trigger — a valid session is enough.
+  const allowed = isAdmin || profile?.can_view_bookkeeping === true || DUAL_WRITE_ONLY_ACTIONS.has(action)
+  if (!allowed) return json({ ok: false, error: 'You do not have access to Bookkeeping' }, 403)
+
+  // export_backup dumps every entity's full ledger — admin only, not just
+  // can_view_bookkeeping, regardless of entity scope.
+  if (action === 'export_backup' && !isAdmin) return json({ ok: false, error: 'Admin only' }, 403)
+
+  // Admins are unrestricted (scope = null). Everyone else is scoped to
+  // whichever entities an admin has explicitly granted via Admin > Users'
+  // "Edit Access Settings" — empty array by default, not "everything."
+  const ctx: BkContext = { userId: userData.user.id, isAdmin, scope: isAdmin ? null : (profile?.bookkeeping_entities || []) }
+
   try {
-    const result = await handler(body, userData.user.id)
+    const result = await handler(body, ctx.userId, ctx)
     return json(result)
   } catch (err: any) {
     const message = err?.message || String(err)
