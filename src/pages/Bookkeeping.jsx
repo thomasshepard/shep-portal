@@ -250,7 +250,7 @@ export default function Bookkeeping() {
         ) : (
           <div className="space-y-2">
             {entries.map(entry => (
-              <EntryRow key={entry.id} entry={entry} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} />
+              <EntryRow key={entry.id} entry={entry} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} accounts={expenseIncomeAccounts} />
             ))}
           </div>
         )}
@@ -301,8 +301,16 @@ function Badge({ tone, children }) {
   return <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{children}</span>
 }
 
-function EntryRow({ entry, expanded, onToggle, onVoided }) {
+// Only entries posted from a specific bank transaction (quick-categorize or
+// learned auto-post) can be re-categorized in place — bk_journal_entries.
+// source_record_id is the raw transaction's id for exactly those two
+// source_modules, which is what recategorize_transaction needs to void the
+// old posting and repost with the corrected account.
+const RECATEGORIZABLE_MODULES = new Set(['bookkeeping_bank_feed', 'bookkeeping_bank_feed_auto'])
+
+function EntryRow({ entry, expanded, onToggle, onVoided, accounts }) {
   const [voiding, setVoiding] = useState(false)
+  const [recategorizing, setRecategorizing] = useState(false)
   const total = (entry.bk_journal_lines || []).reduce((s, l) => s + Number(l.debit || 0), 0)
   // Bank-feed entries (Phase 1a manual quick-categorize, Phase 1b learned
   // auto-post) are posted by the module the same way dual-write is —
@@ -315,6 +323,7 @@ function EntryRow({ entry, expanded, onToggle, onVoided }) {
     bookkeeping_bank_feed: 'Bank Feed',
     bookkeeping_bank_feed_auto: 'Bank Feed · Learned',
   }[entry.source_module] || entry.source_module
+  const canRecategorize = RECATEGORIZABLE_MODULES.has(entry.source_module) && accounts?.length > 0
 
   async function handleVoid() {
     if (!confirm('Void this entry? It will drop out of every report, and the transaction (if from the bank feed) becomes re-categorizable.')) return
@@ -329,43 +338,78 @@ function EntryRow({ entry, expanded, onToggle, onVoided }) {
     setVoiding(false)
   }
 
+  async function handleRecategorize(accountCode) {
+    if (!accountCode) return
+    setRecategorizing(true)
+    try {
+      await callBookkeeping('recategorize_transaction', { entryId: entry.id, accountCode })
+      toast.success('Recategorized')
+      onVoided?.() // same "refresh everything" callback works for either correction
+    } catch (e) {
+      toast.error('Failed to recategorize: ' + e.message)
+    }
+    setRecategorizing(false)
+  }
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="px-4 py-3 flex items-center gap-3 cursor-pointer" onClick={onToggle}>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-800 truncate">{entry.memo || 'Journal entry'}</p>
-          <p className="text-xs text-gray-400">{entry.entry_date}</p>
+      <div className="px-4 py-3 cursor-pointer" onClick={onToggle}>
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm font-semibold text-gray-800 flex-1 min-w-0 break-words">{entry.memo || 'Journal entry'}</p>
+          <span className="text-sm font-bold text-gray-900 tabular-nums flex-shrink-0">{fmtCurrency(total)}</span>
         </div>
-        {isAuto ? (
-          <Badge tone="auto"><Link2 size={10} /> Auto &middot; {sourceLabel}</Badge>
-        ) : (
-          <Badge tone="manual">Manual</Badge>
-        )}
-        <Badge tone="posted"><CheckCircle2 size={10} /> Posted</Badge>
-        <span className="text-sm font-bold text-gray-900 tabular-nums w-24 text-right flex-shrink-0">{fmtCurrency(total)}</span>
-        {expanded ? <ChevronUp size={16} className="text-gray-400 flex-shrink-0" /> : <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />}
+        <div className="flex items-center gap-2 flex-wrap mt-1.5">
+          <span className="text-xs text-gray-400">{entry.entry_date}</span>
+          {isAuto ? (
+            <Badge tone="auto"><Link2 size={10} /> Auto &middot; {sourceLabel}</Badge>
+          ) : (
+            <Badge tone="manual">Manual</Badge>
+          )}
+          <Badge tone="posted"><CheckCircle2 size={10} /> Posted</Badge>
+          <span className="ml-auto">
+            {expanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+          </span>
+        </div>
       </div>
       {expanded && (
         <div className="border-t border-gray-100 px-4 py-3">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                <th className="text-left pb-1.5">Account</th>
-                <th className="text-right pb-1.5">Debit</th>
-                <th className="text-right pb-1.5">Credit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(entry.bk_journal_lines || []).map(line => (
-                <tr key={line.id} className="border-t border-gray-50">
-                  <td className="py-1.5 font-medium text-gray-700">{line.bk_accounts?.name}</td>
-                  <td className="py-1.5 text-right tabular-nums">{Number(line.debit) > 0 ? fmtCurrency(line.debit) : '—'}</td>
-                  <td className="py-1.5 text-right tabular-nums">{Number(line.credit) > 0 ? fmtCurrency(line.credit) : '—'}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                  <th className="text-left pb-1.5">Account</th>
+                  <th className="text-right pb-1.5">Debit</th>
+                  <th className="text-right pb-1.5">Credit</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="flex items-center justify-between mt-2">
+              </thead>
+              <tbody>
+                {(entry.bk_journal_lines || []).map(line => (
+                  <tr key={line.id} className="border-t border-gray-50">
+                    <td className="py-1.5 font-medium text-gray-700">{line.bk_accounts?.name}</td>
+                    <td className="py-1.5 text-right tabular-nums">{Number(line.debit) > 0 ? fmtCurrency(line.debit) : '—'}</td>
+                    <td className="py-1.5 text-right tabular-nums">{Number(line.credit) > 0 ? fmtCurrency(line.credit) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {canRecategorize && (
+            <div className="mt-3 pt-2 border-t border-gray-100">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Wrong category?</label>
+              <select
+                defaultValue=""
+                disabled={recategorizing}
+                onChange={e => handleRecategorize(e.target.value)}
+                className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
+              >
+                <option value="" disabled>Change to…</option>
+                {accounts.map(a => <option key={a.code} value={a.code}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mt-3">
             <p className="text-[11px] text-gray-400">source_record_id: {entry.source_record_id || '—'}</p>
             <button
               onClick={handleVoid} disabled={voiding}
@@ -624,6 +668,18 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
     setBusyId(null)
   }
 
+  async function ignoreAccount(bankAccountId) {
+    if (!confirm("Ignore this account? It'll stop showing up here — nothing else changes.")) return
+    setBusyId(bankAccountId)
+    try {
+      await callBookkeeping('ignore_feed_account', { bankAccountId })
+      load()
+    } catch (e) {
+      toast.error('Failed to ignore: ' + e.message)
+    }
+    setBusyId(null)
+  }
+
   async function sync() {
     setSyncing(true)
     try {
@@ -702,7 +758,15 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Needs mapping to {entityName}</p>
             {unmappedForThisEntity.map(a => (
               <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg p-3 space-y-2">
-                <p className="text-sm text-gray-700">{a.displayName || a.display_name}{a.connName || a.conn_name ? ` · ${a.connName || a.conn_name}` : ''}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm text-gray-700">{a.displayName || a.display_name}{a.connName || a.conn_name ? ` · ${a.connName || a.conn_name}` : ''}</p>
+                  <button
+                    onClick={() => ignoreAccount(a.id)} disabled={busyId === a.id}
+                    className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50 flex-shrink-0 py-1"
+                  >
+                    Ignore
+                  </button>
+                </div>
                 <select
                   defaultValue=""
                   disabled={busyId === a.id}

@@ -233,7 +233,7 @@ async function syncOneClaim(claim: { id: string; access_url: string; last_synced
       status,
     }
 
-    const { data: existing } = await sb.from('bk_bank_accounts').select('id, entity_id, ledger_account_id')
+    const { data: existing } = await sb.from('bk_bank_accounts').select('id, entity_id, ledger_account_id, status')
       .eq('claim_id', claim.id).eq('simplefin_account_id', acct.id).maybeSingle()
 
     let bankAccountId: string
@@ -241,7 +241,11 @@ async function syncOneClaim(claim: { id: string; access_url: string; last_synced
     let mappingLedgerAccountId: string | null = existing?.ledger_account_id ?? null
     if (existing) {
       bankAccountId = existing.id
-      const { error: updErr } = await sb.from('bk_bank_accounts').update(fields).eq('id', bankAccountId)
+      // A sync must never resurrect a status the user deliberately set —
+      // 'ignored' means "stop bothering me about this one," not "reset on
+      // the next refresh."
+      const updateFields = existing.status === 'ignored' ? { ...fields, status: 'ignored' } : fields
+      const { error: updErr } = await sb.from('bk_bank_accounts').update(updateFields).eq('id', bankAccountId)
       if (updErr) throw new Error(updErr.message)
     } else {
       const { data: inserted, error: insErr } = await sb.from('bk_bank_accounts')
@@ -599,10 +603,20 @@ async function actionListFeedAccounts(payload: any) {
     .select('id, claim_id, display_name, conn_name, currency, entity_id, ledger_account_id, last_balance, last_balance_date, status')
   q = payload?.entityName
     ? q.eq('entity_id', await getEntityId(String(payload.entityName)))
-    : q.is('entity_id', null)
+    // Ignored accounts (e.g. an unused savings account) never need mapping,
+    // so they'd otherwise sit in this "needs mapping" listing permanently.
+    : q.is('entity_id', null).neq('status', 'ignored')
   const { data, error } = await q.order('display_name')
   if (error) throw new Error(error.message)
   return { ok: true, accounts: data || [] }
+}
+
+async function actionIgnoreFeedAccount(payload: any) {
+  const bankAccountId = String(payload?.bankAccountId || '')
+  if (!bankAccountId) throw new Error('bankAccountId is required')
+  const { error } = await sb.from('bk_bank_accounts').update({ status: 'ignored' }).eq('id', bankAccountId)
+  if (error) throw new Error(error.message)
+  return { ok: true }
 }
 
 async function actionMapFeedAccount(payload: any) {
@@ -801,6 +815,36 @@ async function actionRecordDistribution(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
+async function actionRecategorizeTransaction(payload: any, userId: string) {
+  const entryId = String(payload?.entryId || '')
+  if (!entryId) throw new Error('entryId is required')
+  const accountCode = String(payload?.accountCode || '')
+  if (!accountCode) throw new Error('accountCode is required')
+
+  const { data: entry, error: entryErr } = await sb.from('bk_journal_entries')
+    .select('id, source_module, source_record_id').eq('id', entryId).single()
+  if (entryErr || !entry) throw new Error('Entry not found')
+  // Only entries tied to a specific bank transaction can be edited in
+  // place — source_record_id is that transaction's id for exactly these
+  // two source_modules (quick-categorize and learned auto-post). A manual
+  // or dual-write entry has to be voided and re-entered instead.
+  if (!['bookkeeping_bank_feed', 'bookkeeping_bank_feed_auto'].includes(entry.source_module || '')) {
+    throw new Error("This entry isn't linked to a bank transaction — void it and re-enter manually instead")
+  }
+  const rawTransactionId = String(entry.source_record_id || '')
+  if (!rawTransactionId) throw new Error('No linked transaction found for this entry')
+
+  // Void the old posting, clear the transaction's match, then repost with
+  // the corrected account — same logic actionQuickCategorizeTransaction
+  // already uses (sign handling, dedup, categorization_rules confirmation).
+  const { error: voidErr } = await sb.from('bk_journal_entries').update({ status: 'void' }).eq('id', entryId)
+  if (voidErr) throw new Error(voidErr.message)
+  const { error: clearErr } = await sb.from('bk_raw_transactions').update({ matched_journal_entry_id: null }).eq('id', rawTransactionId)
+  if (clearErr) throw new Error(clearErr.message)
+
+  return actionQuickCategorizeTransaction({ rawTransactionId, accountCode }, userId)
+}
+
 async function actionVoidEntry(payload: any) {
   const entryId = String(payload?.entryId || '')
   if (!entryId) throw new Error('entryId is required')
@@ -838,6 +882,8 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   suggest_category:       actionSuggestCategory,
   void_entry:             actionVoidEntry,
   record_distribution:    actionRecordDistribution,
+  recategorize_transaction: actionRecategorizeTransaction,
+  ignore_feed_account:      actionIgnoreFeedAccount,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
