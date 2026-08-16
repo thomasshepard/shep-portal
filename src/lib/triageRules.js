@@ -619,7 +619,7 @@ export const TRIAGE_RULES = [
       sourceBaseId: null,
       sourceTable: null,
       identifier: candidate.label,
-      whatShouldBeTrue: 'Bank connection reconnected — sync stopped working for it',
+      whatShouldBeTrue: 'Bank connection reconnected',
       expectedDate: null,
       lastObservedDate: null,
       daysLate: null,
@@ -629,6 +629,9 @@ export const TRIAGE_RULES = [
       handler: 'Thomas',
       consequence: 'Transactions stop syncing for this account until reconnected',
       detailRoute: '/bookkeeping',
+      // Triage.jsx always renders a hardcoded "Open" button for
+      // navigateToSource items — this label is never actually displayed,
+      // kept only as in-code documentation of intent.
       resolveAction: { label: 'Reconnect', handler: 'navigateToSource' },
       ruleId: 'bookkeeping-needs-reauth',
       isManual: false,
@@ -670,6 +673,8 @@ export const TRIAGE_RULES = [
         handler: 'Thomas',
         consequence: 'Books drift further from the real bank balance the longer this sits',
         detailRoute: '/bookkeeping',
+        // Same note as bookkeeping-needs-reauth — this label isn't
+        // actually rendered, Triage.jsx always shows "Open".
         resolveAction: { label: 'Review', handler: 'navigateToSource' },
         ruleId: 'bookkeeping-unreviewed-backlog',
         isManual: false,
