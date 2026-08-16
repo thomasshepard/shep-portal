@@ -236,7 +236,7 @@ export default function Bookkeeping() {
         ) : (
           <div className="space-y-2">
             {entries.map(entry => (
-              <EntryRow key={entry.id} entry={entry} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} />
+              <EntryRow key={entry.id} entry={entry} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} />
             ))}
           </div>
         )}
@@ -279,14 +279,33 @@ function Badge({ tone, children }) {
   return <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{children}</span>
 }
 
-function EntryRow({ entry, expanded, onToggle }) {
+function EntryRow({ entry, expanded, onToggle, onVoided }) {
+  const [voiding, setVoiding] = useState(false)
   const total = (entry.bk_journal_lines || []).reduce((s, l) => s + Number(l.debit || 0), 0)
-  const isAuto = entry.source === 'dual_write'
+  // Bank-feed entries (Phase 1a manual quick-categorize, Phase 1b learned
+  // auto-post) are posted by the module the same way dual-write is —
+  // 'dual_write' alone under-counted what actually counts as "Auto".
+  const isAuto = entry.source === 'dual_write' || entry.source === 'bank_feed'
   const sourceLabel = {
     happy_cuts_schedule_complete: 'Schedule',
     happy_cuts_schedule_paid: 'Schedule',
     happy_cuts_crew_payout: 'Crew',
+    bookkeeping_bank_feed: 'Bank Feed',
+    bookkeeping_bank_feed_auto: 'Bank Feed · Learned',
   }[entry.source_module] || entry.source_module
+
+  async function handleVoid() {
+    if (!confirm('Void this entry? It will drop out of every report, and the transaction (if from the bank feed) becomes re-categorizable.')) return
+    setVoiding(true)
+    try {
+      await callBookkeeping('void_entry', { entryId: entry.id })
+      toast.success('Voided')
+      onVoided?.()
+    } catch (e) {
+      toast.error('Failed to void: ' + e.message)
+    }
+    setVoiding(false)
+  }
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -324,7 +343,16 @@ function EntryRow({ entry, expanded, onToggle }) {
               ))}
             </tbody>
           </table>
-          <p className="text-[11px] text-gray-400 mt-2">source_record_id: {entry.source_record_id || '—'}</p>
+          <div className="flex items-center justify-between mt-2">
+            <p className="text-[11px] text-gray-400">source_record_id: {entry.source_record_id || '—'}</p>
+            <button
+              onClick={handleVoid} disabled={voiding}
+              className="text-[11px] font-medium text-red-500 hover:text-red-700 disabled:opacity-50 flex items-center gap-1"
+            >
+              {voiding && <Loader2 size={11} className="animate-spin" />}
+              Void
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -432,11 +460,13 @@ function NewEntryModal({ entityName, accounts, onClose, onSaved }) {
   )
 }
 
-// Phase 1a bank feed — SimpleFin only, manual sync + manual quick-categorize
-// (no AI yet, that's Phase 1b). Self-contained: remounts fresh whenever the
-// parent's `key={entityName}` changes rather than threading feed state
-// through Bookkeeping()'s own load(). `onPosted` lets a successful
-// quick-categorize refresh the parent's P&L/balance sheet.
+// Bank feed — SimpleFin only. Phase 1a shipped connect/sync/manual quick-
+// categorize; Phase 1b adds a starred AI-suggested category per transaction
+// (still one click to confirm, never auto-selected) and reflects learned-
+// pattern auto-posts in the sync toast. Self-contained: remounts fresh
+// whenever the parent's `key={entityName}` changes rather than threading
+// feed state through Bookkeeping()'s own load(). `onPosted` lets a
+// successful quick-categorize refresh the parent's P&L/balance sheet.
 function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, onPosted }) {
   const [loading, setLoading] = useState(true)
   const [mappedAccounts, setMappedAccounts] = useState([])
@@ -446,6 +476,7 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
   const [connecting, setConnecting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [busyId, setBusyId] = useState(null)
+  const [suggestions, setSuggestions] = useState({}) // rawTransactionId -> { code, name }
 
   useEffect(() => { load() }, [])
 
@@ -459,7 +490,18 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
       ])
       setMappedAccounts(mapped.accounts || [])
       setUnmappedAccounts(unmapped.accounts || [])
-      setTransactions(txs.transactions || [])
+      const list = txs.transactions || []
+      setTransactions(list)
+      // Best-effort AI starting-category suggestion per transaction — never
+      // blocks the list from rendering, never posts anything on its own.
+      // Still a real Claude call per row, so only worth firing for whatever's
+      // actually unreviewed (already the case — list_raw_transactions
+      // defaults to unmatchedOnly).
+      list.forEach(t => {
+        callBookkeeping('suggest_category', { rawTransactionId: t.id })
+          .then(r => { if (r.suggested) setSuggestions(prev => ({ ...prev, [t.id]: r.suggested })) })
+          .catch(() => {})
+      })
     } catch (e) {
       toast.error('Failed to load bank feed: ' + e.message)
     } finally {
@@ -501,6 +543,7 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
       const result = await callBookkeeping('sync_feed_transactions', {})
       const failed = (result.results || []).filter(r => r.error)
       if (failed.length > 0) toast.error(`Sync had ${failed.length} issue(s) — see console`)
+      else if (result.autoPosted > 0) toast.success(`Synced — ${result.autoPosted} auto-categorized from learned patterns`)
       else toast.success('Synced')
       load()
     } catch (e) {
@@ -620,7 +663,10 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
                   className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 max-w-[160px]"
                 >
                   <option value="" disabled>Categorize…</option>
-                  {expenseIncomeAccounts.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                  {suggestions[t.id] && (
+                    <option value={suggestions[t.id].code}>★ {suggestions[t.id].name} (suggested)</option>
+                  )}
+                  {expenseIncomeAccounts.filter(c => c.code !== suggestions[t.id]?.code).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                 </select>
               </div>
             ))}

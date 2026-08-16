@@ -1,8 +1,11 @@
 // bookkeeping — double-entry ledger for Shep Portal's businesses. See
 // bookkeeping-module-spec.md (workspace root) for the full design. Phase 1a
-// adds a SimpleFin bank feed (connect + sync + manual quick-categorize) on
-// top of Phase 0's dual-write/manual-entry core — no AI categorization or
-// automatic sync yet, that's Phase 1b.
+// added a SimpleFin bank feed (connect + sync + manual quick-categorize) on
+// top of Phase 0's dual-write/manual-entry core. Phase 1b adds learned
+// auto-post (bk_categorization_rules — a vendor needs AUTO_POST_THRESHOLD
+// human confirmations before it posts unattended) and AI-suggested
+// categories for brand-new vendors (suggest_category, still one click to
+// confirm — never posts anything itself).
 //
 // Auth: deployed WITH jwt verification (no --no-verify-jwt) — the caller must
 // be a logged-in Shep Portal user. Every action additionally checks the
@@ -64,6 +67,28 @@ const num = (v: unknown) => {
   const n = Number(v)
   if (!Number.isFinite(n)) throw new Error(`Expected a number, got ${JSON.stringify(v)}`)
   return Math.round(n * 100) / 100
+}
+
+// A vendor needs this many human confirmations of the same category before
+// later occurrences auto-post with no click at all (see bk_categorization_rules,
+// Phase 1b). Confirmed with Thomas at 2 — fast enough to feel like it's
+// learning, still requires a real repeat before being trusted unattended.
+const AUTO_POST_THRESHOLD = 2
+
+// Normalizes a transaction description into a stable lookup key for
+// bk_categorization_rules — e.g. "SHELL OIL 5732801 SEATTLE WA" and
+// "SHELL OIL 8834521 SEATTLE WA" both key to "shell oil seattle", so the
+// store-number noise doesn't prevent matching the same vendor twice.
+function vendorKey(description: string): string {
+  return String(description || '')
+    .toLowerCase()
+    .replace(/[^a-z ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' ')
 }
 
 /** Inserts a journal entry + its lines, then posts it via bk_post_journal_entry
@@ -195,6 +220,7 @@ async function syncOneClaim(claim: { id: string; access_url: string; last_synced
   const hasConnReauth = errlist.some(e => String(e.code || '').startsWith('con.'))
 
   const discoveredAccounts: any[] = []
+  let autoPosted = 0
   for (const acct of data.accounts || []) {
     const status = reauthAccountIds.has(acct.id) ? 'needs_reauth' : 'active'
     const fields = {
@@ -207,10 +233,12 @@ async function syncOneClaim(claim: { id: string; access_url: string; last_synced
       status,
     }
 
-    const { data: existing } = await sb.from('bk_bank_accounts').select('id')
+    const { data: existing } = await sb.from('bk_bank_accounts').select('id, entity_id, ledger_account_id')
       .eq('claim_id', claim.id).eq('simplefin_account_id', acct.id).maybeSingle()
 
     let bankAccountId: string
+    let mappingEntityId: string | null = existing?.entity_id ?? null
+    let mappingLedgerAccountId: string | null = existing?.ledger_account_id ?? null
     if (existing) {
       bankAccountId = existing.id
       const { error: updErr } = await sb.from('bk_bank_accounts').update(fields).eq('id', bankAccountId)
@@ -233,9 +261,50 @@ async function syncOneClaim(claim: { id: string; access_url: string; last_synced
       pending: !!t.pending,
     }))
     if (txRows.length > 0) {
+      // matched_journal_entry_id is deliberately absent from these rows, so
+      // an already-categorized transaction re-fetched inside the overlap
+      // window keeps its match on conflict rather than being reset to null.
       const { error: txErr } = await sb.from('bk_raw_transactions')
         .upsert(txRows, { onConflict: 'bank_account_id,simplefin_transaction_id' })
       if (txErr) throw new Error(txErr.message)
+    }
+
+    // Auto-post anything matching a learned vendor pattern (Phase 1b) — only
+    // once this account is mapped to an entity/ledger account, and only for
+    // transactions still sitting unmatched (new this sync, or left over from
+    // before the pattern crossed AUTO_POST_THRESHOLD).
+    if (mappingEntityId && mappingLedgerAccountId && txRows.length > 0) {
+      const { data: unmatched } = await sb.from('bk_raw_transactions')
+        .select('id, amount, description, posted_at')
+        .eq('bank_account_id', bankAccountId)
+        .is('matched_journal_entry_id', null)
+        .in('simplefin_transaction_id', txRows.map(t => t.simplefin_transaction_id))
+
+      for (const raw of unmatched || []) {
+        const key = vendorKey(raw.description)
+        const { data: rule } = await sb.from('bk_categorization_rules')
+          .select('account_id, times_confirmed').eq('entity_id', mappingEntityId).eq('vendor_key', key).maybeSingle()
+        if (!rule || rule.times_confirmed < AUTO_POST_THRESHOLD) continue
+
+        const amt = num(raw.amount)
+        const lines = amt > 0
+          ? [{ accountId: mappingLedgerAccountId, debit: Math.abs(amt) }, { accountId: rule.account_id, credit: Math.abs(amt) }]
+          : [{ accountId: rule.account_id, debit: Math.abs(amt) }, { accountId: mappingLedgerAccountId, credit: Math.abs(amt) }]
+
+        const result = await postEntry({
+          entityId: mappingEntityId,
+          entryDate: String(raw.posted_at).slice(0, 10),
+          memo: `Auto-categorized (learned pattern): ${raw.description}`,
+          source: 'bank_feed',
+          sourceModule: 'bookkeeping_bank_feed_auto',
+          sourceRecordId: raw.id,
+          lines,
+        })
+        if (result.posted && result.entryId) {
+          await sb.from('bk_raw_transactions').update({ matched_journal_entry_id: result.entryId }).eq('id', raw.id)
+          autoPosted++
+        }
+      }
     }
   }
 
@@ -246,7 +315,7 @@ async function syncOneClaim(claim: { id: string; access_url: string; last_synced
 
   if (hasConnReauth || reauthAccountIds.size > 0) await notifyReauth(claim.id)
 
-  return { discoveredAccounts, errlist }
+  return { discoveredAccounts, errlist, autoPosted }
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────
@@ -502,14 +571,17 @@ async function actionSyncFeedTransactions(payload: any) {
   if (!claims || claims.length === 0) return { ok: true, synced: 0, results: [] }
 
   const results = []
+  let totalAutoPosted = 0
   for (const claim of claims) {
     try {
-      results.push({ claimId: claim.id, ...(await syncOneClaim(claim)) })
+      const r = await syncOneClaim(claim)
+      totalAutoPosted += r.autoPosted || 0
+      results.push({ claimId: claim.id, ...r })
     } catch (err: any) {
       results.push({ claimId: claim.id, error: err?.message || String(err) })
     }
   }
-  return { ok: true, synced: results.length, results }
+  return { ok: true, synced: results.length, autoPosted: totalAutoPosted, results }
 }
 
 async function actionListFeedAccounts(payload: any) {
@@ -599,8 +671,93 @@ async function actionQuickCategorizeTransaction(payload: any, userId: string) {
 
   if (result.posted && result.entryId) {
     await sb.from('bk_raw_transactions').update({ matched_journal_entry_id: result.entryId }).eq('id', rawTransactionId)
+
+    // Record this confirmation for auto-post (Phase 1b) — best-effort, a
+    // hiccup here shouldn't undo the categorization that already succeeded.
+    try {
+      const key = vendorKey(raw.description)
+      const { data: existingRule } = await sb.from('bk_categorization_rules')
+        .select('id, account_id, times_confirmed')
+        .eq('entity_id', bankAccount.entity_id).eq('vendor_key', key).maybeSingle()
+      if (existingRule) {
+        const sameAccount = existingRule.account_id === otherAccountId
+        await sb.from('bk_categorization_rules').update({
+          account_id: otherAccountId,
+          times_confirmed: sameAccount ? existingRule.times_confirmed + 1 : 1,
+          last_confirmed_at: new Date().toISOString(),
+        }).eq('id', existingRule.id)
+      } else {
+        await sb.from('bk_categorization_rules').insert({ entity_id: bankAccount.entity_id, vendor_key: key, account_id: otherAccountId })
+      }
+    } catch (err) {
+      console.error('[bookkeeping] categorization_rules update failed:', err)
+    }
   }
   return { ok: true, ...result }
+}
+
+async function actionSuggestCategory(payload: any) {
+  const rawTransactionId = String(payload?.rawTransactionId || '')
+  if (!rawTransactionId) throw new Error('rawTransactionId is required')
+
+  // Gemini over Claude specifically for this action — Thomas's call, cost:
+  // gemini-2.5-flash-lite runs ~10x cheaper than claude-haiku-4-5 per token
+  // (confirmed against Google's pricing page, 2026-08), and this is the one
+  // Bookkeeping AI call with real per-transaction volume (every other AI
+  // call in this codebase is one-shot per document/nudge, not per row).
+  const geminiKey = Deno.env.get('GEMINI_API_KEY')
+  if (!geminiKey) return { ok: true, suggested: null }
+
+  const { data: raw } = await sb.from('bk_raw_transactions')
+    .select('id, amount, description, bk_bank_accounts!inner(entity_id)')
+    .eq('id', rawTransactionId).maybeSingle()
+  const entityId = (raw as any)?.bk_bank_accounts?.entity_id
+  if (!raw || !entityId) return { ok: true, suggested: null }
+
+  const { data: accounts } = await sb.from('bk_accounts')
+    .select('code, name').eq('entity_id', entityId).in('account_type', ['income', 'expense'])
+  const closedList = accounts || []
+  if (closedList.length === 0) return { ok: true, suggested: null }
+
+  // Same suggest-and-confirm shape as src/lib/documentLinks.js's
+  // extractLinkedFields() — closed list injected into the prompt so the
+  // model can never suggest a code outside the entity's real chart of
+  // accounts. Never throws (fails soft to null) — a suggestion is a nice-
+  // to-have, never load-bearing.
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Amount: ${raw.amount} (positive = deposit, negative = withdrawal). Description: ${raw.description}` }] }],
+          systemInstruction: {
+            parts: [{ text: `You categorize one bank transaction for a small business ledger. Return ONLY JSON. Shape: {"code":string|null}. "code" must be exactly one of these account codes, or null if genuinely unsure: ${JSON.stringify(closedList.map(a => a.code))}. Reference (code → name): ${JSON.stringify(closedList)}. Never invent a code outside that list.` }],
+          },
+          generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 50 },
+        }),
+      },
+    )
+    if (!res.ok) return { ok: true, suggested: null }
+    const json = await res.json()
+    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    const parsed = JSON.parse(text)
+    const match = closedList.find(a => a.code === parsed.code)
+    return { ok: true, suggested: match || null }
+  } catch {
+    return { ok: true, suggested: null }
+  }
+}
+
+async function actionVoidEntry(payload: any) {
+  const entryId = String(payload?.entryId || '')
+  if (!entryId) throw new Error('entryId is required')
+  const { error: voidErr } = await sb.from('bk_journal_entries').update({ status: 'void' }).eq('id', entryId)
+  if (voidErr) throw new Error(voidErr.message)
+  const { error: clearErr } = await sb.from('bk_raw_transactions').update({ matched_journal_entry_id: null }).eq('matched_journal_entry_id', entryId)
+  if (clearErr) throw new Error(clearErr.message)
+  return { ok: true }
 }
 
 async function actionRemoveFeedClaim(payload: any) {
@@ -627,6 +784,8 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   list_raw_transactions:  actionListRawTransactions,
   quick_categorize_transaction: actionQuickCategorizeTransaction,
   remove_feed_claim:      actionRemoveFeedClaim,
+  suggest_category:       actionSuggestCategory,
+  void_entry:             actionVoidEntry,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
