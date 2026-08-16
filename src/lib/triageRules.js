@@ -44,6 +44,21 @@ async function fetchAll(table, params, baseId) {
   return data || []
 }
 
+// bk_* tables have zero RLS policies (by design — see supabase/functions/
+// bookkeeping/index.ts) so this goes through the edge function like every
+// other Bookkeeping read. A viewer without can_view_bookkeeping gets a 403
+// here, which resolves to an empty object below — same "quietly nothing to
+// report" outcome as any other rule whose fetch fails.
+async function fetchBookkeepingTriageCandidates() {
+  try {
+    const { data, error } = await supabase.functions.invoke('bookkeeping', { body: { action: 'list_triage_candidates' } })
+    if (error || data?.ok === false) return {}
+    return data
+  } catch {
+    return {}
+  }
+}
+
 function daysBetween(earlier, later) {
   return Math.floor((later - earlier) / 86400000)
 }
@@ -572,6 +587,91 @@ export const TRIAGE_RULES = [
         detailRoute: '/properties',
         resolveAction: { label: 'View Properties', handler: 'navigateToSource' },
         ruleId: 'alert-active-stale',
+        isManual: false,
+      }
+    },
+  },
+
+  /**
+   * Rule 11 — bookkeeping-needs-reauth
+   * Triggers when a SimpleFin bank connection (or a specific account on an
+   * otherwise-active one) needs re-authentication — sync silently stops
+   * working for it until reconnected. First Supabase-sourced rule in this
+   * engine — bk_* tables have zero RLS policies by design, so this goes
+   * through the bookkeeping edge function like every other Bookkeeping
+   * read, not a direct Supabase query. A 403 (viewer lacks
+   * can_view_bookkeeping) is treated the same as "nothing to report" —
+   * no card, no error, consistent with how every other rule here fails
+   * gracefully into an empty result.
+   */
+  {
+    id: 'bookkeeping-needs-reauth',
+    label: 'Bookkeeping bank connection needs re-auth',
+    enabled: true,
+    fetch: async (cache) => {
+      const data = await cache.get('bookkeeping:triage-candidates', () => fetchBookkeepingTriageCandidates())
+      return data.reauthCandidates || []
+    },
+    evaluate: (candidate) => ({
+      id: `rule:bookkeeping-needs-reauth:${candidate.id}`,
+      source: 'Bookkeeping',
+      sourceRecordId: candidate.id,
+      sourceBaseId: null,
+      sourceTable: null,
+      identifier: candidate.label,
+      whatShouldBeTrue: 'Bank connection reconnected — sync stopped working for it',
+      expectedDate: null,
+      lastObservedDate: null,
+      daysLate: null,
+      daysUntil: null,
+      daysSinceObserved: null,
+      bucket: 'late',
+      handler: 'Thomas',
+      consequence: 'Transactions stop syncing for this account until reconnected',
+      detailRoute: '/bookkeeping',
+      resolveAction: { label: 'Reconnect', handler: 'navigateToSource' },
+      ruleId: 'bookkeeping-needs-reauth',
+      isManual: false,
+    }),
+  },
+
+  /**
+   * Rule 12 — bookkeeping-unreviewed-backlog
+   * Triggers per entity once its oldest unreviewed bank transaction has sat
+   * for 3+ days — aggregated (one card per entity, not one per
+   * transaction) so this stays a "you have a backlog building up" flag,
+   * not a duplicate of the Bookkeeping page's own transaction list.
+   */
+  {
+    id: 'bookkeeping-unreviewed-backlog',
+    label: 'Bookkeeping unreviewed transaction backlog',
+    enabled: true,
+    fetch: async (cache) => {
+      const data = await cache.get('bookkeeping:triage-candidates', () => fetchBookkeepingTriageCandidates())
+      return data.unreviewedBacklog || []
+    },
+    evaluate: (entry, today) => {
+      const oldest = new Date(entry.oldest)
+      const daysSince = daysBetween(oldest, today)
+      return {
+        id: `rule:bookkeeping-unreviewed-backlog:${entry.entityName}`,
+        source: 'Bookkeeping',
+        sourceRecordId: entry.entityName,
+        sourceBaseId: null,
+        sourceTable: null,
+        identifier: entry.entityName,
+        whatShouldBeTrue: `${entry.count} bank transaction${entry.count === 1 ? '' : 's'} categorized`,
+        expectedDate: null,
+        lastObservedDate: oldest,
+        daysLate: null,
+        daysUntil: null,
+        daysSinceObserved: daysSince,
+        bucket: daysSince > 14 ? 'stale' : 'dueSoon',
+        handler: 'Thomas',
+        consequence: 'Books drift further from the real bank balance the longer this sits',
+        detailRoute: '/bookkeeping',
+        resolveAction: { label: 'Review', handler: 'navigateToSource' },
+        ruleId: 'bookkeeping-unreviewed-backlog',
         isManual: false,
       }
     },

@@ -894,6 +894,62 @@ async function actionRemoveFeedClaim(payload: any) {
   return { ok: true }
 }
 
+// Phase 2 — powers the Triage rule (src/lib/triageRules.js). Every other
+// Bookkeeping action is scoped to one entity at a time, matching the
+// Bookkeeping page's own UI; Triage needs the opposite — everything that
+// needs attention, across every entity, in one call.
+async function actionListTriageCandidates(_payload: any) {
+  // Reauth: whole-connection claims first (blocks every account under
+  // them), then only account-specific issues NOT already covered by a
+  // reauth claim — an act.-level error on an otherwise-active connection,
+  // per syncOneClaim's con./act. distinction.
+  const { data: reauthClaims } = await sb.from('bk_feed_claims').select('id').eq('status', 'needs_reauth')
+  const reauthClaimIds = new Set((reauthClaims || []).map((c: any) => c.id))
+
+  const { data: claimAccounts } = reauthClaimIds.size > 0
+    ? await sb.from('bk_bank_accounts').select('claim_id, display_name, bk_entities(name)').in('claim_id', [...reauthClaimIds])
+    : { data: [] as any[] }
+
+  const claimCandidates = (reauthClaims || []).map((c: any) => {
+    const accts = (claimAccounts || []).filter((a: any) => a.claim_id === c.id)
+    const entityNames = [...new Set(accts.map((a: any) => a.bk_entities?.name).filter(Boolean))]
+    const names = accts.map((a: any) => a.display_name).join(', ') || 'Bank connection'
+    return { kind: 'claim', id: c.id, label: entityNames.length ? `${names} — ${entityNames.join(', ')}` : names, entityNames }
+  })
+
+  const { data: reauthAccounts } = await sb.from('bk_bank_accounts')
+    .select('id, display_name, claim_id, bk_entities(name)').eq('status', 'needs_reauth')
+  const accountCandidates = (reauthAccounts || [])
+    .filter((a: any) => !reauthClaimIds.has(a.claim_id))
+    .map((a: any) => ({
+      kind: 'account', id: a.id,
+      label: a.bk_entities?.name ? `${a.display_name} — ${a.bk_entities.name}` : a.display_name,
+      entityNames: a.bk_entities?.name ? [a.bk_entities.name] : [],
+    }))
+
+  // Unreviewed backlog, aggregated per entity — one row per entity, not one
+  // per transaction, so this stays a summary card, not a flood. Only
+  // entities whose oldest unreviewed transaction is 3+ days old; same-day
+  // review is the Bookkeeping page's job, not Triage's.
+  const { data: unmatched } = await sb.from('bk_raw_transactions')
+    .select('posted_at, bk_bank_accounts!inner(bk_entities(name))')
+    .is('matched_journal_entry_id', null)
+
+  const byEntity: Record<string, { entityName: string; count: number; oldest: string }> = {}
+  for (const t of unmatched || []) {
+    const entityName = (t as any).bk_bank_accounts?.bk_entities?.name
+    if (!entityName) continue
+    const posted = String(t.posted_at)
+    if (!byEntity[entityName]) byEntity[entityName] = { entityName, count: 0, oldest: posted }
+    byEntity[entityName].count++
+    if (posted < byEntity[entityName].oldest) byEntity[entityName].oldest = posted
+  }
+  const THREE_DAYS_MS = 3 * 86400000
+  const unreviewedBacklog = Object.values(byEntity).filter(e => Date.now() - new Date(e.oldest).getTime() >= THREE_DAYS_MS)
+
+  return { ok: true, reauthCandidates: [...claimCandidates, ...accountCandidates], unreviewedBacklog }
+}
+
 const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>> = {
   post_mow_completion: actionPostMowCompletion,
   post_mow_payment:    actionPostMowPayment,
@@ -915,6 +971,7 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   record_distribution:    actionRecordDistribution,
   recategorize_transaction: actionRecategorizeTransaction,
   ignore_feed_account:      actionIgnoreFeedAccount,
+  list_triage_candidates:   actionListTriageCandidates,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
