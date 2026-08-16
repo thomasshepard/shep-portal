@@ -582,7 +582,7 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
           <Landmark size={15} className="text-violet-600" /> Bank Feed
         </h2>
         {mappedAccounts.length > 0 && (
-          <button onClick={sync} disabled={syncing} className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50">
+          <button onClick={sync} disabled={syncing} className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50 py-2 px-1 -my-2 -mx-1">
             <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
           </button>
         )}
@@ -598,12 +598,12 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
             <textarea
               value={setupToken} onChange={e => setSetupToken(e.target.value)}
               placeholder="Paste Setup Token"
-              rows={1}
+              rows={2}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <button type="submit" disabled={connecting || !setupToken.trim()}
-            className="h-9 px-3.5 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
+            className="h-11 px-4 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
             {connecting && <Loader2 size={14} className="animate-spin" />}
             Connect
           </button>
@@ -611,16 +611,16 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
 
         {/* Unmapped accounts needing a Cash/liability account picked */}
         {unmappedForThisEntity.length > 0 && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Needs mapping to {entityName}</p>
             {unmappedForThisEntity.map(a => (
-              <div key={a.id} className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                <span className="flex-1 text-sm text-gray-700 truncate">{a.displayName || a.display_name}{a.connName || a.conn_name ? ` · ${a.connName || a.conn_name}` : ''}</span>
+              <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg p-3 space-y-2">
+                <p className="text-sm text-gray-700">{a.displayName || a.display_name}{a.connName || a.conn_name ? ` · ${a.connName || a.conn_name}` : ''}</p>
                 <select
                   defaultValue=""
                   disabled={busyId === a.id}
                   onChange={e => mapAccount(a.id, e.target.value)}
-                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5"
+                  className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
                 >
                   <option value="" disabled>Map to account…</option>
                   {cashLikeAccounts.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
@@ -647,20 +647,27 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
           </div>
         )}
 
-        {/* Unreviewed transactions */}
+        {/* Unreviewed transactions — stacked cards, not a cramped single-line
+            row: on a phone a fixed-width date + truncating description +
+            amount + text-xs select all on one line was unusable. Full-width,
+            real-height (44px+) selects instead. */}
         {transactions.length > 0 && (
-          <div className="space-y-1.5 pt-1 border-t border-gray-100">
+          <div className="space-y-2 pt-1 border-t border-gray-100">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-2">Unreviewed transactions</p>
             {transactions.map(t => (
-              <div key={t.id} className="flex items-center gap-2 py-1">
-                <span className="text-xs text-gray-400 w-20 flex-shrink-0">{String(t.posted_at).slice(0, 10)}</span>
-                <span className="flex-1 text-sm text-gray-700 truncate">{t.description}{t.pending ? ' (pending)' : ''}</span>
-                <span className="text-sm font-medium text-gray-800 tabular-nums w-24 text-right flex-shrink-0">{fmtCurrency(t.amount)}</span>
+              <div key={t.id} className="border border-gray-100 rounded-lg p-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-gray-700 break-words">{t.description}{t.pending ? ' (pending)' : ''}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{String(t.posted_at).slice(0, 10)}</p>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-900 tabular-nums flex-shrink-0">{fmtCurrency(t.amount)}</span>
+                </div>
                 <select
                   defaultValue=""
                   disabled={busyId === t.id}
                   onChange={e => categorize(t.id, e.target.value)}
-                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 max-w-[160px]"
+                  className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
                 >
                   <option value="" disabled>Categorize…</option>
                   {suggestions[t.id] && (
