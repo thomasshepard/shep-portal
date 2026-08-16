@@ -27,6 +27,7 @@ const emptyForm = {
   can_view_insurance: false,
   can_view_health_policies: false,
   can_view_fleet: false,
+  can_view_bookkeeping: false,
   allowed_tags: '',
 }
 
@@ -37,8 +38,6 @@ export default function AdminUsers() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [editingUser, setEditingUser] = useState(null)  // user being edited for allowed_tags
-
-  useEffect(() => { load() }, [])
 
   function load() {
     supabase
@@ -51,6 +50,8 @@ export default function AdminUsers() {
         setLoading(false)
       })
   }
+
+  useEffect(() => { load() }, [])
 
   function setField(key, val) { setForm(f => ({ ...f, [key]: val })) }
 
@@ -107,6 +108,7 @@ export default function AdminUsers() {
           can_view_insurance: form.can_view_insurance,
           can_view_health_policies: form.can_view_health_policies,
           can_view_fleet: form.can_view_fleet,
+          can_view_bookkeeping: form.can_view_bookkeeping,
           allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         })
         .eq('id', newUserId)
@@ -210,6 +212,7 @@ export default function AdminUsers() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Happy Cuts</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Finances</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Bank Dashboard</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Bookkeeping</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -340,6 +343,13 @@ export default function AdminUsers() {
                         onChange={() => togglePerm(u, 'can_view_bank_dashboard')}
                       />
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_bookkeeping}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_bookkeeping')}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -373,16 +383,17 @@ export default function AdminUsers() {
         <p>• <strong>Delete</strong> permanently removes the account. Requires the <code>delete-user</code> edge function to be deployed.</p>
       </div>
 
-      {/* Edit Access Settings Modal (document tags + property visibility) */}
+      {/* Edit Access Settings Modal (document tags + property visibility + bookkeeping entities) */}
       {editingUser && (
         <EditTagsModal
           user={editingUser}
           onClose={() => setEditingUser(null)}
-          onSave={async (userId, { tags, propertyOwnerFilter }) => {
+          onSave={async (userId, { tags, propertyOwnerFilter, bookkeepingEntities }) => {
             const tagArray = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : null
             const ok = await updateUser(userId, {
               allowed_tags: tagArray,
               property_owner_filter: propertyOwnerFilter.trim() || null,
+              bookkeeping_entities: bookkeepingEntities || [],
             })
             if (ok) { toast.success('Access settings updated'); setEditingUser(null) }
           }}
@@ -613,6 +624,15 @@ export default function AdminUsers() {
                       />
                       <span className="text-sm text-gray-700">Fleet &amp; Equipment</span>
                     </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_bookkeeping}
+                        onChange={e => setField('can_view_bookkeeping', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Bookkeeping</span>
+                    </label>
                   </div>
                 </div>
               )}
@@ -641,6 +661,12 @@ export default function AdminUsers() {
   )
 }
 
+// Mirrors Bookkeeping.jsx's ACTIVE_ENTITIES — kept as a separate constant
+// here (same duplication pattern as this app's per-page safeStr/safeNum
+// helpers) since Admin doesn't otherwise import from the Bookkeeping page.
+// Add a new entity to both lists when Bookkeeping onboards one.
+const BOOKKEEPING_ENTITIES = ['Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC']
+
 function EditTagsModal({ user, onClose, onSave }) {
   const [tags, setTags] = useState(
     Array.isArray(user.allowed_tags)
@@ -648,12 +674,21 @@ function EditTagsModal({ user, onClose, onSave }) {
       : (user.allowed_tags || '')
   )
   const [propertyOwnerFilter, setPropertyOwnerFilter] = useState(user.property_owner_filter || '')
+  const [bkEntities, setBkEntities] = useState(new Set(user.bookkeeping_entities || []))
   const [saving, setSaving] = useState(false)
+
+  function toggleBkEntity(name) {
+    setBkEntities(prev => {
+      const next = new Set(prev)
+      next.has(name) ? next.delete(name) : next.add(name)
+      return next
+    })
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
-    await onSave(user.id, { tags: tags.trim() || null, propertyOwnerFilter })
+    await onSave(user.id, { tags: tags.trim() || null, propertyOwnerFilter, bookkeepingEntities: [...bkEntities] })
     setSaving(false)
   }
 
@@ -686,6 +721,19 @@ function EditTagsModal({ user, onClose, onSave }) {
             />
             <p className="text-xs text-gray-400 mt-1">
               Must match a property's "Owner" value in Airtable exactly. When set, this user (unless admin) only sees properties — and their maintenance/leases/projects — owned by this value. Leave blank for no restriction.
+            </p>
+          </Field>
+          <Field label="Bookkeeping Entities">
+            <div className="space-y-1.5">
+              {BOOKKEEPING_ENTITIES.map(name => (
+                <label key={name} className="flex items-center gap-2.5 cursor-pointer">
+                  <input type="checkbox" checked={bkEntities.has(name)} onChange={() => toggleBkEntity(name)} className="rounded" />
+                  <span className="text-sm text-gray-700">{name}</span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Only matters if this user also has the Bookkeeping toggle enabled below. None checked = Bookkeeping access but zero entities visible, not "everything."
             </p>
           </Field>
           <div className="flex justify-end gap-3 pt-2">

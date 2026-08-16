@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip, BookOpen } from 'lucide-react'
+import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip, BookOpen, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
 import { fmtCurrency, fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
 import { suggestReceiptForTransaction } from '../lib/documentLinks'
+import { downloadCsv, downloadJson } from '../lib/csv'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 // Local field-name access for Documents records — this page doesn't own the
@@ -83,10 +85,20 @@ function accountsFromSummary(summary) {
 
 export default function Bookkeeping() {
   const navigate = useNavigate()
+  const { profile, isAdmin } = useAuth()
+  // Admins see every active entity. Everyone else is scoped to whichever
+  // entities an admin has explicitly granted via Admin > Users' "Edit
+  // Access Settings" — empty by default, not "everything." Mirrors the
+  // same enforcement server-side (assertEntityScope in the edge function);
+  // this is the UI-side half, not the security boundary itself.
+  const myEntities = isAdmin ? ACTIVE_ENTITIES : ACTIVE_ENTITIES.filter(e => (profile?.bookkeeping_entities || []).includes(e))
+
   const [selectedEntity, setSelectedEntity] = useState('Happy Cuts LLC')
   const [loading, setLoading] = useState(true)
   const [summary, setSummary] = useState(null)
   const [entries, setEntries] = useState([])
+  const [entriesLimit, setEntriesLimit] = useState(25)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [bankCheck, setBankCheck] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -96,14 +108,25 @@ export default function Bookkeeping() {
   const [partnerRefresh, setPartnerRefresh] = useState(0)
   const isPartnership = PARTNERSHIP_ENTITIES.has(selectedEntity)
 
-  useEffect(() => { load() }, [selectedEntity])
+  // Once we know which entities this user can actually see, make sure the
+  // selected one is one of them — the hardcoded 'Happy Cuts LLC' default
+  // breaks for a Ridge-Anchor-only user.
+  const myEntitiesKey = myEntities.join('|')
+  useEffect(() => {
+    if (myEntities.length && !myEntities.includes(selectedEntity)) setSelectedEntity(myEntities[0])
+  }, [myEntitiesKey])
 
-  async function load() {
+  useEffect(() => {
+    if (myEntities.length === 0) { setLoading(false); return }
+    setEntriesLimit(25); load(25)
+  }, [selectedEntity, myEntities.length])
+
+  async function load(limit = entriesLimit) {
     setLoading(true)
     try {
       const [s, e, b] = await Promise.all([
         callBookkeeping('get_summary', { entityName: selectedEntity }),
-        callBookkeeping('list_entries', { entityName: selectedEntity, limit: 25 }),
+        callBookkeeping('list_entries', { entityName: selectedEntity, limit }),
         callBookkeeping('get_bank_check', { entityName: selectedEntity }),
       ])
       setSummary(s)
@@ -117,6 +140,19 @@ export default function Bookkeeping() {
     }
   }
 
+  async function loadMoreEntries() {
+    const next = Math.min(entriesLimit + 25, 100)
+    setLoadingMore(true)
+    try {
+      const e = await callBookkeeping('list_entries', { entityName: selectedEntity, limit: next })
+      setEntries(e.entries || [])
+      setEntriesLimit(next)
+    } catch (err) {
+      toast.error('Failed to load more: ' + err.message)
+    }
+    setLoadingMore(false)
+  }
+
   async function saveBankCheck() {
     const val = Number(statementInput)
     if (!Number.isFinite(val)) return toast.error('Enter a number')
@@ -126,6 +162,49 @@ export default function Bookkeeping() {
       load()
     } catch (e) {
       toast.error('Failed to save: ' + e.message)
+    }
+  }
+
+  async function exportEntriesCsv() {
+    try {
+      const res = await callBookkeeping('list_entries', { entityName: selectedEntity, limit: 5000, forExport: true })
+      const rows = []
+      for (const entry of res.entries || []) {
+        for (const line of entry.bk_journal_lines || []) {
+          rows.push([
+            entry.entry_date, entry.memo, line.bk_accounts?.name || '',
+            line.debit > 0 ? line.debit.toFixed(2) : '', line.credit > 0 ? line.credit.toFixed(2) : '',
+            entry.source_module || entry.source,
+          ])
+        }
+      }
+      downloadCsv(`${selectedEntity} - Journal Entries.csv`, ['Date', 'Memo', 'Account', 'Debit', 'Credit', 'Source'], rows)
+    } catch (e) {
+      toast.error('Export failed: ' + e.message)
+    }
+  }
+
+  function exportPnlCsv() {
+    const rows = [
+      ...(summary?.pnl?.income || []).map(l => ['Income', l.name, l.amount.toFixed(2)]),
+      ...(summary?.pnl?.expenses || []).map(l => ['Expense', l.name, l.amount.toFixed(2)]),
+      ['', 'Net Income', (summary?.pnl?.netIncome || 0).toFixed(2)],
+    ]
+    downloadCsv(`${selectedEntity} - P&L.csv`, ['Type', 'Account', 'Amount'], rows)
+  }
+
+  function exportBalanceSheetCsv() {
+    const rows = (summary?.balanceSheet || []).map(a => [a.accountType, a.name, a.balance.toFixed(2)])
+    downloadCsv(`${selectedEntity} - Balance Sheet.csv`, ['Type', 'Account', 'Balance'], rows)
+  }
+
+  async function downloadBackup() {
+    try {
+      const res = await callBookkeeping('export_backup', {})
+      downloadJson(`bookkeeping-backup-${new Date().toISOString().slice(0, 10)}.json`, res.backup)
+      toast.success('Backup downloaded')
+    } catch (e) {
+      toast.error('Backup failed: ' + e.message)
     }
   }
 
@@ -143,6 +222,18 @@ export default function Bookkeeping() {
   const expenseIncomeAccounts = [...(summary?.pnl?.income || []), ...(summary?.pnl?.expenses || []), ...equityAccounts]
 
   if (loading) return <LoadingSpinner />
+
+  if (myEntities.length === 0) {
+    return (
+      <div className="max-w-lg mx-auto mt-12 text-center">
+        <Calculator size={28} className="text-violet-300 mx-auto mb-3" />
+        <h1 className="text-lg font-bold text-gray-900 mb-1">No entities assigned yet</h1>
+        <p className="text-sm text-gray-500">
+          You have Bookkeeping access, but no entity has been picked for you to see. Ask an admin to choose which entities you can view — Admin &gt; Users &gt; the pencil icon &gt; Edit Access Settings.
+        </p>
+      </div>
+    )
+  }
 
   const matchDiff = bankCheck ? Math.round((Number(bankCheck.statementBalance || 0) - Number(bankCheck.ledgerCashBalance || 0)) * 100) / 100 : null
   const isClean = bankCheck?.statementBalance != null && matchDiff === 0
@@ -164,6 +255,15 @@ export default function Bookkeeping() {
           >
             <BookOpen size={15} /> Guide
           </button>
+          {isAdmin && (
+            <button
+              onClick={downloadBackup}
+              title="Download a full JSON backup of every entity's ledger (excludes bank credentials)"
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 font-medium px-1"
+            >
+              <Download size={15} /> Backup
+            </button>
+          )}
           {isPartnership && (
             <button
               onClick={() => setContributionModalOpen(true)}
@@ -187,9 +287,9 @@ export default function Bookkeeping() {
         </div>
       </div>
 
-      {/* Entity rail */}
+      {/* Entity rail — scoped to what this user can actually see */}
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {ACTIVE_ENTITIES.map(name => (
+        {myEntities.map(name => (
           <button
             key={name}
             onClick={() => setSelectedEntity(name)}
@@ -200,7 +300,8 @@ export default function Bookkeeping() {
             {name}
           </button>
         ))}
-        {LOCKED_ENTITIES.map(e => (
+        {/* Roadmap pills — admin-only, not useful noise for a scoped VA */}
+        {isAdmin && LOCKED_ENTITIES.map(e => (
           <div key={e.name} className="flex-shrink-0 flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium border border-gray-200 text-gray-400">
             {e.name}
             <span className="text-[10px] font-bold uppercase tracking-wide bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded">{e.phase}</span>
@@ -230,7 +331,12 @@ export default function Bookkeeping() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
             <h2 className="font-semibold text-gray-800 text-sm">Profit &amp; Loss</h2>
-            <span className="text-xs text-gray-400">Month to date</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400">Month to date</span>
+              <button onClick={exportPnlCsv} className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800">
+                <Download size={11} /> CSV
+              </button>
+            </div>
           </div>
           <div className="px-4 py-3 space-y-1">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-1">Income</p>
@@ -248,7 +354,12 @@ export default function Bookkeeping() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
             <h2 className="font-semibold text-gray-800 text-sm">Balance Sheet</h2>
-            <span className="text-xs text-gray-400">As of today</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400">As of today</span>
+              <button onClick={exportBalanceSheetCsv} className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800">
+                <Download size={11} /> CSV
+              </button>
+            </div>
           </div>
           <div className="px-4 py-3 space-y-1">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 pt-1">Assets</p>
@@ -312,7 +423,14 @@ export default function Bookkeeping() {
 
       {/* Entries */}
       <div>
-        <h2 className="text-base font-bold text-gray-900 mb-2">Journal Entries</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-base font-bold text-gray-900">Journal Entries</h2>
+          {entries.length > 0 && (
+            <button onClick={exportEntriesCsv} className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800">
+              <Download size={11} /> Export CSV
+            </button>
+          )}
+        </div>
         {entries.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-400">
             No entries yet. Complete a mow in Happy Cuts, or add one manually.
@@ -322,6 +440,14 @@ export default function Bookkeeping() {
             {entries.map(entry => (
               <EntryRow key={entry.id} entry={entry} entries={entries} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} accounts={expenseIncomeAccounts} />
             ))}
+            {entriesLimit < 100 && entries.length >= entriesLimit && (
+              <button
+                onClick={loadMoreEntries} disabled={loadingMore}
+                className="w-full py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {loadingMore && <Loader2 size={13} className="animate-spin" />} Load more
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -949,14 +1075,33 @@ function PartnerCapitalCard({ entityName, refreshSignal }) {
     return () => { cancelled = true }
   }, [entityName, refreshSignal])
 
-  if (loading) return null
+  function exportCsv() {
+    const rows = (data?.partners || []).map(p => [
+      p.name, `${p.ownershipPct}%`, p.contributionsPeriod.toFixed(2), p.drawsPeriod.toFixed(2),
+      p.allocatedIncomePeriod.toFixed(2), p.endingBalance.toFixed(2),
+    ])
+    downloadCsv(`${entityName} - Partner Capital.csv`, ['Partner', 'Ownership', 'Contributions (Q)', 'Draws (Q)', 'Allocated Income (Q)', 'Ending Capital'], rows)
+  }
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-        <h2 className="font-semibold text-gray-800 text-sm">Partner Capital &middot; Quarterly K-1 Preview</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-gray-800 text-sm">Partner Capital &middot; Quarterly K-1 Preview</h2>
+          {!loading && (
+            <button onClick={exportCsv} className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800 flex-shrink-0">
+              <Download size={11} /> CSV
+            </button>
+          )}
+        </div>
         <p className="text-xs text-gray-400 mt-0.5">Contributions/Draws/Allocated Income for {data?.periodStart} to {data?.periodEnd} &middot; Ending Capital is life-to-date &middot; a computed preview, not a posted closing entry</p>
       </div>
+      {loading ? (
+        <div className="px-4 py-6 space-y-2 animate-pulse">
+          <div className="h-3 bg-gray-100 rounded w-full" />
+          <div className="h-3 bg-gray-100 rounded w-full" />
+        </div>
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -981,6 +1126,7 @@ function PartnerCapitalCard({ entityName, refreshSignal }) {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   )
 }
