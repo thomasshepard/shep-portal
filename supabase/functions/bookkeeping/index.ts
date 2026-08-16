@@ -35,6 +35,16 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 }
 
+// Redact known-sensitive payload fields before they ever reach bk_error_log —
+// setupToken is single-use and typically already burned by a failed claim
+// attempt, but there's no reason to keep a copy around either way.
+function redactPayload(body: any): any {
+  if (!body || typeof body !== 'object') return body
+  const clone = { ...body }
+  if (clone.setupToken) clone.setupToken = '[redacted]'
+  return clone
+}
+
 // ── Shared helpers ──────────────────────────────────────────────────────
 
 // Dual-write callers (HappyCuts.jsx) never send an entityName — they only
@@ -664,6 +674,14 @@ Deno.serve(async (req) => {
   } catch (err: any) {
     const message = err?.message || String(err)
     console.error(`[bookkeeping] ${action} failed:`, message)
+    // Best-effort — a logging failure must never mask the real error, and
+    // must never block the response the caller is waiting on.
+    sb.from('bk_error_log').insert({
+      action,
+      error_message: message,
+      payload: redactPayload(body),
+      user_id: userData.user.id,
+    }).then(() => {}, () => {})
     return json({ ok: false, error: message }, 400)
   }
 })
