@@ -103,7 +103,7 @@ async function postEntry(opts: {
   sourceModule?: string
   sourceRecordId?: string
   createdBy?: string
-  lines: Array<{ accountId: string; debit?: number; credit?: number }>
+  lines: Array<{ accountId: string; debit?: number; credit?: number; partnerId?: string }>
 }): Promise<{ posted: boolean; alreadyPosted?: boolean; entryId?: string }> {
   const { data: entry, error: entryErr } = await sb.from('bk_journal_entries').insert({
     entity_id: opts.entityId,
@@ -124,7 +124,7 @@ async function postEntry(opts: {
   const entryId = entry.id
   const lineRows = opts.lines
     .filter(l => (l.debit ?? 0) !== 0 || (l.credit ?? 0) !== 0)
-    .map(l => ({ journal_entry_id: entryId, account_id: l.accountId, debit: l.debit ?? 0, credit: l.credit ?? 0 }))
+    .map(l => ({ journal_entry_id: entryId, account_id: l.accountId, debit: l.debit ?? 0, credit: l.credit ?? 0, partner_id: l.partnerId ?? null }))
 
   const { error: linesErr } = await sb.from('bk_journal_lines').insert(lineRows)
   if (linesErr) throw new Error(linesErr.message)
@@ -864,6 +864,232 @@ async function actionRecordDistribution(payload: any, userId: string) {
   return { ok: true, ...result }
 }
 
+// ── Phase 3 — partner equity (Ridge & Anchor LLC) ───────────────────────
+//
+// Equity design: 3 SHARED accounts per entity (Partner Capital / Partner
+// Draws / Partner Contributions) rather than one set per partner —
+// bk_journal_lines.partner_id tags which partner a line belongs to. This is
+// what makes the capital statement a plain group-by-partner_id query, and
+// it means a third partner later costs zero new accounts.
+
+async function actionListPartners(payload: any) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const entityId = await getEntityId(entityName)
+  const { data, error } = await sb.from('bk_partners').select('id, name, ownership_pct').eq('entity_id', entityId).order('name')
+  if (error) throw new Error(error.message)
+  return { ok: true, partners: data || [] }
+}
+
+async function actionRecordPartnerDistribution(payload: any, userId: string) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const partnerId = String(payload?.partnerId || '')
+  if (!partnerId) throw new Error('partnerId is required')
+  const amount = num(payload?.amount)
+  if (amount <= 0) throw new Error('Amount must be greater than zero')
+  const date = String(payload?.date || new Date().toISOString().slice(0, 10))
+  const memo = String(payload?.memo || '').trim() || 'Partner distribution'
+
+  const entityId = await getEntityId(entityName)
+  const acct = await getAccountIds(entityId, ['1000', '3010'])
+
+  const result = await postEntry({
+    entityId,
+    entryDate: date,
+    memo,
+    source: 'manual',
+    createdBy: userId,
+    lines: [
+      { accountId: acct['3010'], debit: amount, partnerId },  // Partner Draws
+      { accountId: acct['1000'], credit: amount },            // Cash
+    ],
+  })
+  return { ok: true, ...result }
+}
+
+async function actionRecordPartnerContribution(payload: any, userId: string) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const partnerId = String(payload?.partnerId || '')
+  if (!partnerId) throw new Error('partnerId is required')
+  const amount = num(payload?.amount)
+  if (amount <= 0) throw new Error('Amount must be greater than zero')
+  const date = String(payload?.date || new Date().toISOString().slice(0, 10))
+  const memo = String(payload?.memo || '').trim() || 'Partner contribution'
+
+  const entityId = await getEntityId(entityName)
+  const acct = await getAccountIds(entityId, ['1000', '3020'])
+
+  const result = await postEntry({
+    entityId,
+    entryDate: date,
+    memo,
+    source: 'manual',
+    createdBy: userId,
+    lines: [
+      { accountId: acct['1000'], debit: amount },                // Cash
+      { accountId: acct['3020'], credit: amount, partnerId },    // Partner Contributions
+    ],
+  })
+  return { ok: true, ...result }
+}
+
+// Query-time computation, not a posted closing entry — real partnership
+// closes are a deliberate CPA-driven step. "Allocated income" here is
+// ownership_pct x the entity's period net income, shown as a preview of
+// what capital would be if this period were closed, never written back
+// into the ledger.
+async function actionGetPartnerCapitalStatement(payload: any) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  const periodStart = String(payload?.periodStart || '')
+  const periodEnd = String(payload?.periodEnd || '')
+  if (!periodStart || !periodEnd) throw new Error('periodStart and periodEnd are required')
+
+  const entityId = await getEntityId(entityName)
+
+  const { data: partners, error: partnersErr } = await sb.from('bk_partners')
+    .select('id, name, ownership_pct').eq('entity_id', entityId).order('name')
+  if (partnersErr) throw new Error(partnersErr.message)
+
+  const { data: accounts, error: acctErr } = await sb.from('bk_accounts')
+    .select('id, code, account_type').eq('entity_id', entityId)
+  if (acctErr) throw new Error(acctErr.message)
+  const acctById = new Map((accounts || []).map(a => [a.id, a]))
+  const drawsAcctId = (accounts || []).find(a => a.code === '3010')?.id
+  const contribAcctId = (accounts || []).find(a => a.code === '3020')?.id
+
+  const { data: allLines, error: linesErr } = await sb
+    .from('bk_journal_lines')
+    .select('account_id, debit, credit, partner_id, bk_journal_entries!inner(entry_date, status, entity_id)')
+    .eq('bk_journal_entries.entity_id', entityId)
+    .eq('bk_journal_entries.status', 'posted')
+  if (linesErr) throw new Error(linesErr.message)
+
+  let periodNetIncome = 0
+  const byPartner: Record<string, { contributionsAllTime: number; drawsAllTime: number; contributionsPeriod: number; drawsPeriod: number }> = {}
+  for (const p of partners || []) byPartner[p.id] = { contributionsAllTime: 0, drawsAllTime: 0, contributionsPeriod: 0, drawsPeriod: 0 }
+
+  for (const line of allLines || []) {
+    const entry = (line as any).bk_journal_entries
+    const inPeriod = entry.entry_date >= periodStart && entry.entry_date <= periodEnd
+    const acct = acctById.get(line.account_id)
+    const net = Number(line.debit) - Number(line.credit)
+
+    // Income is credit-normal, expense is debit-normal.
+    if (acct && inPeriod) {
+      if (acct.account_type === 'income') periodNetIncome += -net
+      else if (acct.account_type === 'expense') periodNetIncome -= net
+    }
+
+    if (line.partner_id && byPartner[line.partner_id]) {
+      if (line.account_id === contribAcctId) {
+        const amt = Number(line.credit) - Number(line.debit)
+        byPartner[line.partner_id].contributionsAllTime += amt
+        if (inPeriod) byPartner[line.partner_id].contributionsPeriod += amt
+      } else if (line.account_id === drawsAcctId) {
+        const amt = Number(line.debit) - Number(line.credit)
+        byPartner[line.partner_id].drawsAllTime += amt
+        if (inPeriod) byPartner[line.partner_id].drawsPeriod += amt
+      }
+    }
+  }
+
+  const result = (partners || []).map(p => {
+    const b = byPartner[p.id]
+    const allocatedIncome = Math.round(periodNetIncome * (Number(p.ownership_pct) / 100) * 100) / 100
+    return {
+      id: p.id,
+      name: p.name,
+      ownershipPct: Number(p.ownership_pct),
+      contributionsPeriod: b.contributionsPeriod,
+      drawsPeriod: b.drawsPeriod,
+      contributionsAllTime: b.contributionsAllTime,
+      drawsAllTime: b.drawsAllTime,
+      allocatedIncome,
+      endingBalance: b.contributionsAllTime - b.drawsAllTime + allocatedIncome,
+    }
+  })
+
+  return { ok: true, periodStart, periodEnd, periodNetIncome, partners: result }
+}
+
+// ── Phase 3 — dual-write from Bills Payment and Insurance/Obligation
+// Payments (Insurance.jsx, PropertyDetail.jsx). Both are best-effort from
+// the caller's side: getEntityId() throws when the resolved entity name
+// isn't onboarded to Bookkeeping yet, and the frontend call sites catch
+// that silently — same "never block the primary action" posture as the
+// existing categorization_rules best-effort write.
+
+const OBLIGATION_KIND_ACCOUNT: Record<string, string> = {
+  'Property Tax': '5000',
+  'Insurance': '5010',
+}
+
+async function actionPostObligationPayment(payload: any, userId: string) {
+  const entityName = String(payload?.entityName || '')
+  if (!entityName) throw new Error('entityName is required')
+  const kind = String(payload?.kind || '')
+  const code = OBLIGATION_KIND_ACCOUNT[kind]
+  if (!code) throw new Error(`Unsupported obligation kind: ${kind}`)
+  const amount = num(payload?.amount)
+  if (amount <= 0) throw new Error('Amount must be greater than zero')
+  const date = String(payload?.date || new Date().toISOString().slice(0, 10))
+  const memo = String(payload?.memo || '').trim() || `${kind} payment`
+  const paymentRecordId = String(payload?.paymentRecordId || '')
+
+  const entityId = await getEntityId(entityName)
+  const acct = await getAccountIds(entityId, ['1000', code])
+
+  const result = await postEntry({
+    entityId,
+    entryDate: date,
+    memo,
+    source: 'dual_write',
+    sourceModule: 'bookkeeping_obligation_payment',
+    sourceRecordId: paymentRecordId || undefined,
+    createdBy: userId,
+    lines: [
+      { accountId: acct[code], debit: amount },
+      { accountId: acct['1000'], credit: amount },
+    ],
+  })
+  return { ok: true, ...result }
+}
+
+const BILLS_CATEGORY_ACCOUNT: Record<string, string> = {
+  Insurance: '5010', Utilities: '5020', Maintenance: '5030', Internet: '5040',
+  Mortgage: '5050', Cleaning: '5060', Handyman: '5070', Others: '5080',
+}
+
+async function actionPostBillsPayment(payload: any, userId: string) {
+  const propertyOwner = String(payload?.propertyOwner || '')
+  if (!propertyOwner) throw new Error('propertyOwner is required')
+  const category = String(payload?.category || '')
+  const code = BILLS_CATEGORY_ACCOUNT[category]
+  if (!code) throw new Error(`Unsupported bill category: ${category}`)
+  const amount = num(payload?.amount)
+  if (amount <= 0) throw new Error('Amount must be greater than zero')
+  const date = String(payload?.date || new Date().toISOString().slice(0, 10))
+  const memo = String(payload?.memo || '').trim() || 'Bill payment'
+  const billRecordId = String(payload?.billRecordId || '')
+
+  const entityId = await getEntityId(propertyOwner)
+  const acct = await getAccountIds(entityId, ['1000', code])
+
+  const result = await postEntry({
+    entityId,
+    entryDate: date,
+    memo,
+    source: 'dual_write',
+    sourceModule: 'bookkeeping_bills_payment',
+    sourceRecordId: billRecordId || undefined,
+    createdBy: userId,
+    lines: [
+      { accountId: acct[code], debit: amount },
+      { accountId: acct['1000'], credit: amount },
+    ],
+  })
+  return { ok: true, ...result }
+}
+
 async function actionRecategorizeTransaction(payload: any, userId: string) {
   const entryId = String(payload?.entryId || '')
   if (!entryId) throw new Error('entryId is required')
@@ -992,6 +1218,12 @@ const ACTIONS: Record<string, (payload: any, userId: string) => Promise<unknown>
   list_triage_candidates:   actionListTriageCandidates,
   attach_receipt:           actionAttachReceipt,
   detach_receipt:           actionDetachReceipt,
+  list_partners:                    actionListPartners,
+  record_partner_distribution:      actionRecordPartnerDistribution,
+  record_partner_contribution:      actionRecordPartnerContribution,
+  get_partner_capital_statement:    actionGetPartnerCapitalStatement,
+  post_obligation_payment:          actionPostObligationPayment,
+  post_bills_payment:               actionPostBillsPayment,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────

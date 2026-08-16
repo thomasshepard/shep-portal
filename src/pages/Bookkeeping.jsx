@@ -28,15 +28,22 @@ function parseDocLite(record) {
   }
 }
 
-// Live, clickable entities. LeadsCompanion joined Happy Cuts in Phase 0b —
-// both are real manual-entry-capable entities now.
-const ACTIVE_ENTITIES = ['Happy Cuts LLC', 'East Meadow Consulting LLC']
+// Live, clickable entities. LeadsCompanion joined Happy Cuts in Phase 0b;
+// Ridge & Anchor LLC joined in Phase 3 as the first partnership entity —
+// UCHB was originally paired with it in the spec but Thomas said to skip it.
+const ACTIVE_ENTITIES = ['Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC']
+
+// Partnership entities get partner-aware equity UI (Partner Capital card,
+// partner picker on distributions/contributions) instead of the flat
+// single-owner Owner's Draws flow. Client-side set rather than threading
+// entity_type through get_summary's response — revisit if a second
+// partnership entity is ever onboarded.
+const PARTNERSHIP_ENTITIES = new Set(['Ridge & Anchor LLC'])
 
 // Entities the spec has planned but hasn't built yet — shown as locked pills
 // so the roadmap is visible without implying they're clickable.
 const LOCKED_ENTITIES = [
   { name: 'East Meadow Properties', phase: 'Phase 4' },
-  { name: 'Ridge & Anchor LLC', phase: 'Phase 3' },
   { name: 'UCHB', phase: 'Phase 3' },
   { name: 'Personal', phase: 'Phase 6' },
 ]
@@ -78,7 +85,10 @@ export default function Bookkeeping() {
   const [expandedId, setExpandedId] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [distributionModalOpen, setDistributionModalOpen] = useState(false)
+  const [contributionModalOpen, setContributionModalOpen] = useState(false)
   const [statementInput, setStatementInput] = useState('')
+  const [partnerRefresh, setPartnerRefresh] = useState(0)
+  const isPartnership = PARTNERSHIP_ENTITIES.has(selectedEntity)
 
   useEffect(() => { load() }, [selectedEntity])
 
@@ -148,6 +158,14 @@ export default function Bookkeeping() {
           >
             <BookOpen size={15} /> Guide
           </button>
+          {isPartnership && (
+            <button
+              onClick={() => setContributionModalOpen(true)}
+              className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <Wallet size={15} /> Record Contribution
+            </button>
+          )}
           <button
             onClick={() => setDistributionModalOpen(true)}
             className="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-3.5 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
@@ -235,6 +253,8 @@ export default function Bookkeeping() {
         </div>
       </div>
 
+      {isPartnership && <PartnerCapitalCard entityName={selectedEntity} refreshSignal={partnerRefresh} />}
+
       {/* Bank check — auto once a bank feed is mapped to Cash (its synced
           balance is used directly, no need to type in what the feed
           already told us); manual entry stays as the fallback for entities
@@ -310,10 +330,26 @@ export default function Bookkeeping() {
       )}
 
       {distributionModalOpen && (
-        <DistributionModal
-          entityName={selectedEntity}
-          onClose={() => setDistributionModalOpen(false)}
-          onSaved={() => { setDistributionModalOpen(false); load() }}
+        isPartnership ? (
+          <PartnerFlowModal
+            entityName={selectedEntity} direction="distribution"
+            onClose={() => setDistributionModalOpen(false)}
+            onSaved={() => { setDistributionModalOpen(false); load(); setPartnerRefresh(n => n + 1) }}
+          />
+        ) : (
+          <DistributionModal
+            entityName={selectedEntity}
+            onClose={() => setDistributionModalOpen(false)}
+            onSaved={() => { setDistributionModalOpen(false); load() }}
+          />
+        )
+      )}
+
+      {contributionModalOpen && (
+        <PartnerFlowModal
+          entityName={selectedEntity} direction="contribution"
+          onClose={() => setContributionModalOpen(false)}
+          onSaved={() => { setContributionModalOpen(false); load(); setPartnerRefresh(n => n + 1) }}
         />
       )}
     </div>
@@ -785,6 +821,159 @@ function DistributionModal({ entityName, onClose, onSaved }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+// Partnership entities (Phase 3) — distributions AND contributions both need
+// a partner picker, so this replaces DistributionModal for those entities
+// rather than bolting a conditional partner field onto it. Same form shape
+// either direction, just the copy/action/account differ.
+function PartnerFlowModal({ entityName, direction, onClose, onSaved }) {
+  const isDistribution = direction === 'distribution'
+  const [partners, setPartners] = useState([])
+  const [partnerId, setPartnerId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [loadingPartners, setLoadingPartners] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    callBookkeeping('list_partners', { entityName })
+      .then(r => { setPartners(r.partners || []); setPartnerId(r.partners?.[0]?.id || '') })
+      .catch(e => toast.error('Failed to load partners: ' + e.message))
+      .finally(() => setLoadingPartners(false))
+  }, [entityName])
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!partnerId) return toast.error('Pick a partner')
+    const amt = Number(amount)
+    if (!Number.isFinite(amt) || amt <= 0) return toast.error('Enter an amount')
+    setSaving(true)
+    try {
+      await callBookkeeping(isDistribution ? 'record_partner_distribution' : 'record_partner_contribution', { entityName, partnerId, amount: amt, memo: memo.trim(), date })
+      toast.success(isDistribution ? 'Distribution recorded' : 'Contribution recorded')
+      onSaved()
+    } catch (err) {
+      toast.error('Failed to record: ' + err.message)
+    }
+    setSaving(false)
+  }
+
+  const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl w-full max-w-sm shadow-xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <Wallet size={16} className="text-violet-600" /> Record {isDistribution ? 'Distribution' : 'Contribution'}
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X size={20} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <p className="text-xs text-gray-500 -mt-1">
+            {isDistribution
+              ? `Money taken out of ${entityName} to a partner — reduces Cash, increases that partner's Draws.`
+              : `Money a partner put into ${entityName} — increases Cash and that partner's Contributions.`}
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Partner</label>
+            <select value={partnerId} onChange={e => setPartnerId(e.target.value)} disabled={loadingPartners} className={inp}>
+              {partners.map(p => <option key={p.id} value={p.id}>{p.name} ({p.ownership_pct}%)</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+              <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className={inp + ' pl-6'} autoFocus />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inp} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Memo (optional)</label>
+            <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="What was this for?" className={inp} />
+          </div>
+          <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+            <button type="submit" disabled={saving || loadingPartners}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              Record
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// Partner Capital / quarterly K-1 preview — read-only, computed at query
+// time from bk_journal_lines.partner_id, never a posted closing entry (real
+// partnership closes are a deliberate CPA-driven step, not automated here).
+function PartnerCapitalCard({ entityName, refreshSignal }) {
+  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      const now = new Date()
+      const q = Math.floor(now.getMonth() / 3)
+      const periodStart = new Date(now.getFullYear(), q * 3, 1).toISOString().slice(0, 10)
+      const periodEnd = new Date(now.getFullYear(), q * 3 + 3, 0).toISOString().slice(0, 10)
+      try {
+        const result = await callBookkeeping('get_partner_capital_statement', { entityName, periodStart, periodEnd })
+        if (!cancelled) setData(result)
+      } catch (e) {
+        if (!cancelled) toast.error('Failed to load partner capital: ' + e.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [entityName, refreshSignal])
+
+  if (loading) return null
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+        <h2 className="font-semibold text-gray-800 text-sm">Partner Capital &middot; Quarterly K-1 Preview</h2>
+        <p className="text-xs text-gray-400 mt-0.5">{data?.periodStart} to {data?.periodEnd} &middot; a computed preview, not a posted closing entry</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100">
+              <th className="px-4 py-2">Partner</th>
+              <th className="px-4 py-2 text-right">Contributions (Q)</th>
+              <th className="px-4 py-2 text-right">Draws (Q)</th>
+              <th className="px-4 py-2 text-right">Allocated Income</th>
+              <th className="px-4 py-2 text-right">Ending Capital</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.partners || []).map(p => (
+              <tr key={p.id} className="border-b border-gray-50 last:border-0">
+                <td className="px-4 py-2.5 font-medium text-gray-800">{p.name} <span className="text-xs text-gray-400">({p.ownershipPct}%)</span></td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{fmtCurrency(p.contributionsPeriod)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{fmtCurrency(p.drawsPeriod)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{fmtCurrency(p.allocatedIncome)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmtCurrency(p.endingBalance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )

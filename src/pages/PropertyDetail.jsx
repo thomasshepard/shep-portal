@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ChevronDown, ChevronUp, Edit2, X, Plus, ExternalLink, Phone, Mail, TrendingUp, Shield, Landmark, AlertTriangle, FileText } from 'lucide-react'
 import { fetchAllRecords, createRecord, updateRecord, fmtCurrency, fmtPercent, fmtDate, PM_BASE_ID, DOCS_BASE_ID } from '../lib/airtable'
+import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PaymentForm from '../components/PaymentForm'
@@ -34,6 +35,20 @@ const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ou
 // Always returns an array — Airtable linked/rollup/lookup fields can return
 // non-array values (objects, null) when a record has no linked items.
 const arr = v => Array.isArray(v) ? v : []
+
+// Bookkeeping Phase 3 dual-write — best-effort, silent-skip. getEntityId()
+// on the edge function throws when the property's Owner isn't onboarded to
+// Bookkeeping yet (everything except Ridge & Anchor, to start) — expected,
+// not an error. A dual-write failure must never surface to the user or
+// block the primary "Added to Bills" action.
+async function postBookkeepingBillsPayment(payload) {
+  try {
+    const { error } = await supabase.functions.invoke('bookkeeping', { body: { action: 'post_bills_payment', ...payload } })
+    if (error) console.warn('[bookkeeping] post_bills_payment skipped:', error.message)
+  } catch (e) {
+    console.warn('[bookkeeping] post_bills_payment skipped:', e.message)
+  }
+}
 
 // Documents suggested by the linked-record check (see lib/documentLinks.js) —
 // Kind='Property Bill', Status='Suggested', matched to this property.
@@ -116,7 +131,7 @@ export default function PropertyDetail() {
         PM_BASE_ID
       )
       if (!error) setPastAnalyses(data || [])
-    } catch (e) {
+    } catch {
       setPastAnalyses([])
     }
     setPastAnalysesLoading(false)
@@ -228,10 +243,18 @@ export default function PropertyDetail() {
       'Property / Project': [id],
     }
     if (flds.category) fields.Category = flds.category
-    const { error } = await createRecord('Bills Payment', fields, PM_BASE_ID)
+    const { data, error } = await createRecord('Bills Payment', fields, PM_BASE_ID)
     if (error) return toast.error('Failed to add bill: ' + error)
     await updateRecord('Documents', doc.id, { 'Link Status': 'Applied' }, DOCS_BASE_ID)
     toast.success('Added to Bills')
+    postBookkeepingBillsPayment({
+      propertyOwner: property.fields?.Owner || '',
+      category: flds.category || '',
+      amount: flds.amountPaid,
+      date: flds.paymentDate,
+      memo: flds.billName || flds.vendorPayee || 'Bill',
+      billRecordId: data?.id,
+    })
     load()
   }
 
