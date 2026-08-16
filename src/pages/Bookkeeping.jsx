@@ -93,9 +93,14 @@ export default function Bookkeeping() {
   // Bank Feed's two dropdowns need different slices of the chart of accounts:
   // mapping a bank account to the ledger only makes sense against Cash/liability
   // accounts, while quick-categorizing a transaction picks the "other side" —
-  // an income or expense account, same as every dual-write posting does.
+  // usually income/expense, same as every dual-write posting does, but also
+  // equity (Owner's Draws) — a bank transaction that's really the owner
+  // moving money to themselves (e.g. an ACH push with no merchant signal)
+  // needs to land there too, not just via the separate Record Distribution
+  // flow, or the raw transaction never gets marked reviewed.
   const cashLikeAccounts = (summary?.balanceSheet || []).filter(a => a.accountType === 'asset' || a.accountType === 'liability')
-  const expenseIncomeAccounts = [...(summary?.pnl?.income || []), ...(summary?.pnl?.expenses || [])]
+  const equityAccounts = (summary?.balanceSheet || []).filter(a => a.accountType === 'equity')
+  const expenseIncomeAccounts = [...(summary?.pnl?.income || []), ...(summary?.pnl?.expenses || []), ...equityAccounts]
 
   if (loading) return <LoadingSpinner />
 

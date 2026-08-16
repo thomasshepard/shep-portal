@@ -719,9 +719,10 @@ async function actionSuggestCategory(payload: any) {
   if (!geminiKey) return { ok: true, suggested: null }
 
   const { data: raw } = await sb.from('bk_raw_transactions')
-    .select('id, amount, description, bk_bank_accounts!inner(entity_id)')
+    .select('id, amount, description, bk_bank_accounts!inner(entity_id, bk_entities!inner(name))')
     .eq('id', rawTransactionId).maybeSingle()
   const entityId = (raw as any)?.bk_bank_accounts?.entity_id
+  const entityName = (raw as any)?.bk_bank_accounts?.bk_entities?.name || 'this business'
   if (!raw || !entityId) return { ok: true, suggested: null }
 
   const { data: accounts } = await sb.from('bk_accounts')
@@ -749,7 +750,7 @@ async function actionSuggestCategory(payload: any) {
         body: JSON.stringify({
           contents: [{ parts: [{ text: `Amount: ${raw.amount} (positive = deposit, negative = withdrawal). Description: ${raw.description}` }] }],
           systemInstruction: {
-            parts: [{ text: `You categorize one bank transaction for a small business ledger. Return ONLY JSON. Shape: {"code":string|null}. "code" must be exactly one of these account codes, or null if genuinely unsure: ${JSON.stringify(closedList.map(a => a.code))}. Reference (code → name): ${JSON.stringify(closedList)}. Never invent a code outside that list.` }],
+            parts: [{ text: `You categorize one bank transaction for ${entityName}'s small business ledger. Return ONLY JSON. Shape: {"code":string|null}. "code" must be exactly one of these account codes, or null if genuinely unsure: ${JSON.stringify(closedList.map(a => a.code))}. Reference (code → name): ${JSON.stringify(closedList)}. Never invent a code outside that list. Generic bank operations — ATM withdrawals, "cashback", ACH pushes/transfers, anything where the description names a bank action rather than a merchant or purpose — carry no real signal about what the money was for. Return null for those rather than guessing; a wrong guess is worse than no suggestion.` }],
           },
           generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 50 },
         }),
