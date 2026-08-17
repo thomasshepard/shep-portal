@@ -253,8 +253,29 @@ async function syncOneClaim(claim: { id: string; access_url: string; last_synced
       status,
     }
 
-    const { data: existing } = await sb.from('bk_bank_accounts').select('id, entity_id, ledger_account_id, status')
+    let { data: existing } = await sb.from('bk_bank_accounts').select('id, entity_id, ledger_account_id, status')
       .eq('claim_id', claim.id).eq('simplefin_account_id', acct.id).maybeSingle()
+
+    if (!existing) {
+      // Same real account seen under an older claim (e.g. a prior reconnect
+      // after re-auth) — a fresh claim_id never matches the row above, which
+      // was silently creating a duplicate bk_bank_accounts row (and a fresh
+      // re-sync of its transactions) every single time a connection needed
+      // reconnecting. Migrate the existing row's claim_id forward instead.
+      // Some accounts already have multiple duplicates from before this fix
+      // existed, so this can't assume at most one match — an already-mapped
+      // duplicate wins over an ignored/unmapped one.
+      const { data: elsewhere } = await sb.from('bk_bank_accounts')
+        .select('id, entity_id, ledger_account_id, status')
+        .eq('simplefin_account_id', acct.id).neq('claim_id', claim.id)
+        .order('entity_id', { ascending: false, nullsFirst: false })
+        .limit(1)
+      if (elsewhere?.[0]) {
+        existing = elsewhere[0]
+        const { error: migrateErr } = await sb.from('bk_bank_accounts').update({ claim_id: claim.id }).eq('id', existing.id)
+        if (migrateErr) throw new Error(migrateErr.message)
+      }
+    }
 
     let bankAccountId: string
     let mappingEntityId: string | null = existing?.entity_id ?? null

@@ -209,15 +209,14 @@ export default function Bookkeeping() {
   }
 
   const accounts = accountsFromSummary(summary)
-  // Bank Feed's two dropdowns need different slices of the chart of accounts:
-  // mapping a bank account to the ledger only makes sense against Cash/liability
-  // accounts, while quick-categorizing a transaction picks the "other side" —
+  // Quick-categorizing a transaction picks the "other side" of the entry —
   // usually income/expense, same as every dual-write posting does, but also
   // equity (Owner's Draws) — a bank transaction that's really the owner
   // moving money to themselves (e.g. an ACH push with no merchant signal)
   // needs to land there too, not just via the separate Record Distribution
-  // flow, or the raw transaction never gets marked reviewed.
-  const cashLikeAccounts = (summary?.balanceSheet || []).filter(a => a.accountType === 'asset' || a.accountType === 'liability')
+  // flow, or the raw transaction never gets marked reviewed. (Cash/liability
+  // account mapping for a newly-connected bank account now lives entirely
+  // in BankConnectionsPanel, which fetches per-entity accounts itself.)
   const equityAccounts = (summary?.balanceSheet || []).filter(a => a.accountType === 'equity')
   const expenseIncomeAccounts = [...(summary?.pnl?.income || []), ...(summary?.pnl?.expenses || []), ...equityAccounts]
 
@@ -286,6 +285,10 @@ export default function Bookkeeping() {
           </button>
         </div>
       </div>
+
+      {/* Bank Connections — entity-agnostic, admin-only, shown once regardless
+          of which entity is selected below (not per-entity clutter). */}
+      {isAdmin && <BankConnectionsPanel myEntities={myEntities} />}
 
       {/* Entity rail — scoped to what this user can actually see */}
       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -409,7 +412,6 @@ export default function Bookkeeping() {
       <BankFeedPanel
         key={selectedEntity}
         entityName={selectedEntity}
-        cashLikeAccounts={cashLikeAccounts}
         expenseIncomeAccounts={expenseIncomeAccounts}
         onPosted={load}
       />
@@ -1138,43 +1140,35 @@ function PartnerCapitalCard({ entityName, refreshSignal }) {
 // whenever the parent's `key={entityName}` changes rather than threading
 // feed state through Bookkeeping()'s own load(). `onPosted` lets a
 // successful quick-categorize refresh the parent's P&L/balance sheet.
-function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, onPosted }) {
+// Entity-agnostic, rendered once at the top of the page — not per-entity,
+// not remounted on entity switch. Was previously duplicated inline inside
+// every entity's BankFeedPanel (list_feed_accounts({}) with no entityName
+// returns EVERY unmapped account across every claim), which meant one
+// leftover unmapped account cluttered all six entities' pages at once.
+// Admin-only, same gate as Download Backup — connecting a new bank and
+// deciding which entity an account belongs to is a structural decision,
+// not a routine VA task. Collapses to a small link when there's nothing to
+// map, so it stays out of the way once setup is done.
+function BankConnectionsPanel({ myEntities }) {
   const [loading, setLoading] = useState(true)
-  const [mappedAccounts, setMappedAccounts] = useState([])
   const [unmappedAccounts, setUnmappedAccounts] = useState([])
-  const [transactions, setTransactions] = useState([])
   const [setupToken, setSetupToken] = useState('')
   const [connecting, setConnecting] = useState(false)
-  const [syncing, setSyncing] = useState(false)
   const [busyId, setBusyId] = useState(null)
-  const [suggestions, setSuggestions] = useState({}) // rawTransactionId -> { code, name }
+  const [showConnectForm, setShowConnectForm] = useState(false)
+  const [entityChoice, setEntityChoice] = useState({}) // bankAccountId -> entityName
+  const [entityAccounts, setEntityAccounts] = useState({}) // entityName -> cashLikeAccounts[]
+  const [loadingEntityAccounts, setLoadingEntityAccounts] = useState({}) // entityName -> bool
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
     try {
-      const [mapped, unmapped, txs] = await Promise.all([
-        callBookkeeping('list_feed_accounts', { entityName }),
-        callBookkeeping('list_feed_accounts', {}),
-        callBookkeeping('list_raw_transactions', { entityName }),
-      ])
-      setMappedAccounts(mapped.accounts || [])
+      const unmapped = await callBookkeeping('list_feed_accounts', {})
       setUnmappedAccounts(unmapped.accounts || [])
-      const list = txs.transactions || []
-      setTransactions(list)
-      // Best-effort AI starting-category suggestion per transaction — never
-      // blocks the list from rendering, never posts anything on its own.
-      // Still a real Claude call per row, so only worth firing for whatever's
-      // actually unreviewed (already the case — list_raw_transactions
-      // defaults to unmatchedOnly).
-      list.forEach(t => {
-        callBookkeeping('suggest_category', { rawTransactionId: t.id })
-          .then(r => { if (r.suggested) setSuggestions(prev => ({ ...prev, [t.id]: r.suggested })) })
-          .catch(() => {})
-      })
     } catch (e) {
-      toast.error('Failed to load bank feed: ' + e.message)
+      toast.error('Failed to load bank connections: ' + e.message)
     } finally {
       setLoading(false)
     }
@@ -1188,6 +1182,7 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
       await callBookkeeping('claim_setup_token', { setupToken: setupToken.trim() })
       toast.success('Connected — map each account below to finish setup')
       setSetupToken('')
+      setShowConnectForm(false)
       load()
     } catch (e) {
       toast.error('Failed to connect: ' + e.message)
@@ -1195,8 +1190,26 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
     setConnecting(false)
   }
 
-  async function mapAccount(bankAccountId, ledgerAccountCode) {
-    if (!ledgerAccountCode) return
+  // Which entity an unmapped account belongs to isn't implicit here (unlike
+  // the old per-entity version) — picking one lazily loads that entity's
+  // own Cash/liability accounts for the second dropdown, cached per entity
+  // name so picking the same entity for a second account is instant.
+  async function pickEntity(bankAccountId, entityName) {
+    setEntityChoice(prev => ({ ...prev, [bankAccountId]: entityName }))
+    if (!entityName || entityAccounts[entityName]) return
+    setLoadingEntityAccounts(prev => ({ ...prev, [entityName]: true }))
+    try {
+      const summary = await callBookkeeping('get_summary', { entityName })
+      const accounts = (summary.balanceSheet || []).filter(a => a.accountType === 'asset' || a.accountType === 'liability')
+      setEntityAccounts(prev => ({ ...prev, [entityName]: accounts }))
+    } catch (e) {
+      toast.error(`Failed to load accounts for ${entityName}: ` + e.message)
+    }
+    setLoadingEntityAccounts(prev => ({ ...prev, [entityName]: false }))
+  }
+
+  async function mapAccount(bankAccountId, entityName, ledgerAccountCode) {
+    if (!entityName || !ledgerAccountCode) return
     setBusyId(bankAccountId)
     try {
       await callBookkeeping('map_feed_account', { bankAccountId, entityName, ledgerAccountCode })
@@ -1218,6 +1231,130 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
       toast.error('Failed to ignore: ' + e.message)
     }
     setBusyId(null)
+  }
+
+  if (loading) return null
+
+  const hasPending = unmappedAccounts.length > 0
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <h2 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+          <Landmark size={15} className="text-violet-600" /> Bank Connections
+          {hasPending && <Badge tone="bad">{unmappedAccounts.length} need{unmappedAccounts.length === 1 ? 's' : ''} mapping</Badge>}
+        </h2>
+        {!hasPending && (
+          <button onClick={() => setShowConnectForm(s => !s)} className="text-xs font-medium text-violet-600 hover:text-violet-800">
+            {showConnectForm ? 'Cancel' : '+ Connect a bank'}
+          </button>
+        )}
+      </div>
+
+      {(hasPending || showConnectForm) && (
+        <div className="p-4 space-y-4">
+          <form onSubmit={connect} className="flex items-end gap-2 flex-wrap">
+            <div className="flex-1 min-w-[240px]">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Connect a bank &mdash; <a href="https://bridge.simplefin.org/simplefin/create" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">get a Setup Token here</a>, then paste it below
+              </label>
+              <textarea
+                value={setupToken} onChange={e => setSetupToken(e.target.value)}
+                placeholder="Paste Setup Token"
+                rows={2}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button type="submit" disabled={connecting || !setupToken.trim()}
+              className="h-11 px-4 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
+              {connecting && <Loader2 size={14} className="animate-spin" />}
+              Connect
+            </button>
+          </form>
+
+          {hasPending && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Needs mapping to an entity</p>
+              {unmappedAccounts.map(a => (
+                <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm text-gray-700">{a.displayName || a.display_name}{a.connName || a.conn_name ? ` · ${a.connName || a.conn_name}` : ''}</p>
+                    <button
+                      onClick={() => ignoreAccount(a.id)} disabled={busyId === a.id}
+                      className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50 flex-shrink-0 py-1"
+                    >
+                      Ignore
+                    </button>
+                  </div>
+                  <select
+                    value={entityChoice[a.id] || ''}
+                    disabled={busyId === a.id}
+                    onChange={e => pickEntity(a.id, e.target.value)}
+                    className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
+                  >
+                    <option value="" disabled>Which entity?</option>
+                    {myEntities.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  {entityChoice[a.id] && (
+                    loadingEntityAccounts[entityChoice[a.id]] ? (
+                      <p className="text-xs text-gray-400 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Loading accounts…</p>
+                    ) : (
+                      <select
+                        defaultValue=""
+                        disabled={busyId === a.id}
+                        onChange={e => mapAccount(a.id, entityChoice[a.id], e.target.value)}
+                        className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
+                      >
+                        <option value="" disabled>Map to account…</option>
+                        {(entityAccounts[entityChoice[a.id]] || []).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                      </select>
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
+  const [loading, setLoading] = useState(true)
+  const [mappedAccounts, setMappedAccounts] = useState([])
+  const [transactions, setTransactions] = useState([])
+  const [syncing, setSyncing] = useState(false)
+  const [busyId, setBusyId] = useState(null)
+  const [suggestions, setSuggestions] = useState({}) // rawTransactionId -> { code, name }
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    try {
+      const [mapped, txs] = await Promise.all([
+        callBookkeeping('list_feed_accounts', { entityName }),
+        callBookkeeping('list_raw_transactions', { entityName }),
+      ])
+      setMappedAccounts(mapped.accounts || [])
+      const list = txs.transactions || []
+      setTransactions(list)
+      // Best-effort AI starting-category suggestion per transaction — never
+      // blocks the list from rendering, never posts anything on its own.
+      // Still a real Claude call per row, so only worth firing for whatever's
+      // actually unreviewed (already the case — list_raw_transactions
+      // defaults to unmatchedOnly).
+      list.forEach(t => {
+        callBookkeeping('suggest_category', { rawTransactionId: t.id })
+          .then(r => { if (r.suggested) setSuggestions(prev => ({ ...prev, [t.id]: r.suggested })) })
+          .catch(() => {})
+      })
+    } catch (e) {
+      toast.error('Failed to load bank feed: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function sync() {
@@ -1256,8 +1393,6 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
     )
   }
 
-  const unmappedForThisEntity = unmappedAccounts // any claimed-but-unmapped account can be mapped to whichever entity is open right now
-
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
@@ -1272,55 +1407,6 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Connect form */}
-        <form onSubmit={connect} className="flex items-end gap-2 flex-wrap">
-          <div className="flex-1 min-w-[240px]">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Connect a bank &mdash; <a href="https://bridge.simplefin.org/simplefin/create" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">get a Setup Token here</a>, then paste it below
-            </label>
-            <textarea
-              value={setupToken} onChange={e => setSetupToken(e.target.value)}
-              placeholder="Paste Setup Token"
-              rows={2}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <button type="submit" disabled={connecting || !setupToken.trim()}
-            className="h-11 px-4 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2">
-            {connecting && <Loader2 size={14} className="animate-spin" />}
-            Connect
-          </button>
-        </form>
-
-        {/* Unmapped accounts needing a Cash/liability account picked */}
-        {unmappedForThisEntity.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Needs mapping to {entityName}</p>
-            {unmappedForThisEntity.map(a => (
-              <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-lg p-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm text-gray-700">{a.displayName || a.display_name}{a.connName || a.conn_name ? ` · ${a.connName || a.conn_name}` : ''}</p>
-                  <button
-                    onClick={() => ignoreAccount(a.id)} disabled={busyId === a.id}
-                    className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50 flex-shrink-0 py-1"
-                  >
-                    Ignore
-                  </button>
-                </div>
-                <select
-                  defaultValue=""
-                  disabled={busyId === a.id}
-                  onChange={e => mapAccount(a.id, e.target.value)}
-                  className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
-                >
-                  <option value="" disabled>Map to account…</option>
-                  {cashLikeAccounts.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                </select>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* Mapped accounts summary */}
         {mappedAccounts.length > 0 && (
           <div className="space-y-1">
@@ -1371,7 +1457,7 @@ function BankFeedPanel({ entityName, cashLikeAccounts, expenseIncomeAccounts, on
           </div>
         )}
 
-        {mappedAccounts.length === 0 && unmappedForThisEntity.length === 0 && (
+        {mappedAccounts.length === 0 && (
           <p className="text-xs text-gray-400">No bank accounts connected for {entityName} yet.</p>
         )}
       </div>
