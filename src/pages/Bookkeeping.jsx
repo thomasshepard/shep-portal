@@ -1400,9 +1400,12 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
           <Landmark size={15} className="text-violet-600" /> Bank Feed
         </h2>
         {mappedAccounts.length > 0 && (
-          <button onClick={sync} disabled={syncing} className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50 py-2 px-1 -my-2 -mx-1">
-            <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
-          </button>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-gray-400" title="A daily scheduled sync also runs automatically — this button is only for pulling in new transactions right now">Auto-syncs daily</span>
+            <button onClick={sync} disabled={syncing} className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50 py-2 px-1 -my-2 -mx-1">
+              <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Sync now
+            </button>
+          </div>
         )}
       </div>
 
