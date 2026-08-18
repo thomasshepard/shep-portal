@@ -35,6 +35,19 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 }
 
+// A Plaid API error carries a structured error_code ("ITEM_LOGIN_REQUIRED",
+// "PRODUCT_NOT_READY", "RATE_LIMIT_EXCEEDED", etc.) alongside its message —
+// attach it to the thrown Error so callers can tell "genuinely needs
+// re-linking" apart from "transient, try again" instead of collapsing every
+// failure into one indistinguishable message.
+class PlaidError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.code = code
+  }
+}
+
 async function plaid(path: string, body: Record<string, unknown>) {
   const res = await fetch(`${PLAID_BASE}${path}`, {
     method: 'POST',
@@ -46,7 +59,7 @@ async function plaid(path: string, body: Record<string, unknown>) {
     body: JSON.stringify(body),
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(data?.error_message || `Plaid ${path} failed: ${res.status}`)
+  if (!res.ok) throw new PlaidError(data?.error_message || `Plaid ${path} failed: ${res.status}`, data?.error_code)
   return data
 }
 
@@ -127,11 +140,20 @@ async function actionGetBalances() {
         })
       }
     } catch (err: any) {
-      console.error(`[bank-dashboard] balance fetch failed for ${item.institution_name}:`, err.message)
+      console.error(`[bank-dashboard] balance fetch failed for ${item.institution_name}:`, err.code || '', err.message)
+      // Only ITEM_LOGIN_REQUIRED (and the item-error family) actually means
+      // "re-link this" — everything else (PRODUCT_NOT_READY right after a
+      // fresh link, RATE_LIMIT_EXCEEDED, a transient network/institution
+      // hiccup) is worth showing as what it really is instead of always
+      // pointing at re-linking, which isn't the fix and just trains you to
+      // ignore the message.
+      const needsRelink = err.code === 'ITEM_LOGIN_REQUIRED'
       results.push({
         itemId: item.item_id,
         institutionName: item.institution_name,
-        error: 'Could not fetch balance (re-link may be required)',
+        error: needsRelink
+          ? 'Needs re-link — the bank requires you to sign in again'
+          : (err.message || 'Could not fetch balance') + (err.code ? ` (${err.code})` : ''),
       })
     }
   }
