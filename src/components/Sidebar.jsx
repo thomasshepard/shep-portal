@@ -3,11 +3,13 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
   Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield, UserCog, Wrench, Calculator,
+  ChevronDown, Star, MessageSquare,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
 import { useAccessLog } from '../hooks/useAccessLog'
+import { useChannelList } from '../hooks/useMessages'
 import toast from 'react-hot-toast'
 
 const adminItems = [
@@ -37,11 +39,127 @@ function useDocsActionCount(enabled) {
   return count
 }
 
+// ── Pin persistence ─────────────────────────────────────────────────────────
+function loadPinned(storageKey) {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'))
+  } catch {
+    return new Set()
+  }
+}
+
+function usePinnedNav(userId) {
+  const storageKey = `shep_pinned_nav_v1_${userId || 'anon'}`
+  const [loadedKey, setLoadedKey] = useState(storageKey)
+  const [pinned, setPinned] = useState(() => loadPinned(storageKey))
+
+  // profile.id resolves asynchronously after mount — re-sync from storage
+  // once the real key is known, rather than in an effect (React-recommended
+  // "adjust state during render" pattern instead of a setState-in-effect).
+  if (storageKey !== loadedKey) {
+    setLoadedKey(storageKey)
+    setPinned(loadPinned(storageKey))
+  }
+
+  function togglePin(to) {
+    setPinned(prev => {
+      const next = new Set(prev)
+      next.has(to) ? next.delete(to) : next.add(to)
+      localStorage.setItem(storageKey, JSON.stringify([...next]))
+      return next
+    })
+  }
+
+  return [pinned, togglePin]
+}
+
+// ── Group collapse persistence ──────────────────────────────────────────────
+function useCollapsedGroups() {
+  const storageKey = 'shep_nav_collapsed_v1'
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) || '{}')
+    } catch {
+      return {}
+    }
+  })
+
+  function toggleGroup(key) {
+    setCollapsed(prev => {
+      const next = { ...prev, [key]: !prev[key] }
+      localStorage.setItem(storageKey, JSON.stringify(next))
+      return next
+    })
+  }
+
+  return [collapsed, toggleGroup]
+}
+
+function NavRow({ to, icon: NavIcon, label, badge, onClose, pinned, onTogglePin, pinnable = true }) {
+  return (
+    <div className="flex items-center">
+      <NavLink to={to} className={linkClass} onClick={onClose}>
+        <NavIcon size={18} />
+        <span className="flex-1 truncate">{label}</span>
+        {badge ? (
+          <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center">
+            {badge}
+          </span>
+        ) : null}
+        {pinnable && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePin(to) }}
+            className={`ml-1 flex-shrink-0 p-0.5 rounded transition-opacity ${
+              pinned ? 'opacity-100 text-amber-400' : 'opacity-50 hover:opacity-100 text-slate-300'
+            }`}
+            title={pinned ? 'Unpin' : 'Pin to top'}
+          >
+            <Star size={13} fill={pinned ? 'currentColor' : 'none'} />
+          </button>
+        )}
+      </NavLink>
+    </div>
+  )
+}
+
+function NavGroup({ groupKey, label, items, collapsed, onToggle, onClose, pinned, onTogglePin }) {
+  if (items.length === 0) return null
+  const isCollapsed = !!collapsed[groupKey]
+  return (
+    <div className="pt-3">
+      <button
+        onClick={() => onToggle(groupKey)}
+        className="flex items-center justify-between w-full px-4 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider hover:text-slate-300 transition-colors"
+      >
+        {label}
+        <ChevronDown size={13} className={`transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+      </button>
+      {!isCollapsed && (
+        <div className="space-y-1 mt-1">
+          {items.map(item => (
+            <NavRow
+              key={item.to}
+              {...item}
+              onClose={onClose}
+              pinned={pinned.has(item.to)}
+              onTogglePin={onTogglePin}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Sidebar({ open, onClose }) {
-  const { isAdmin, permissions } = useAuth()
+  const { isAdmin, permissions, profile } = useAuth()
   const { log } = useAccessLog()
   const navigate = useNavigate()
   const docsActionCount = useDocsActionCount(!!(permissions.documents || isAdmin))
+  const { totalUnread: messagesUnread } = useChannelList(permissions.can_view_messages ? profile?.id : null)
+  const [pinned, togglePin] = usePinnedNav(profile?.id)
+  const [collapsed, toggleGroup] = useCollapsedGroups()
 
   async function handleLogout() {
     await log('logout', '/login')
@@ -50,26 +168,65 @@ export default function Sidebar({ open, onClose }) {
     navigate('/login')
   }
 
-  const navItems = [
-    permissions.can_view_triage && { to: '/triage', icon: Activity, label: 'Triage' },
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    (isAdmin || permissions.can_view_tasks) && { to: '/tasks', icon: ListTodo, label: 'Tasks' },
-    permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },
-    permissions.can_view_insurance && { to: '/insurance', icon: Shield, label: 'Insurance & Taxes' },
-    permissions.deals && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
-    permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
-    permissions.chickens && { to: '/chickens', icon: Egg, label: 'Chickens' },
-    (isAdmin || permissions.can_view_recipes) && { to: '/recipes', icon: ChefHat, label: 'Recipes' },
-    (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
-    permissions.can_view_happy_cuts && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
-    permissions.can_view_fleet && { to: '/fleet', icon: Wrench, label: 'Fleet' },
-    isAdmin && { to: '/bitcoin', icon: Bitcoin, label: 'Bitcoin' },
-    permissions.can_view_finances && { to: '/finances', icon: Wallet, label: 'Finances' },
-    permissions.can_view_bank_dashboard && { to: '/bank-dashboard', icon: PiggyBank, label: 'Bank Dashboard' },
-    permissions.can_view_bookkeeping && { to: '/bookkeeping', icon: Calculator, label: 'Bookkeeping' },
-    permissions.documents && { to: '/documents', icon: FileText, label: 'Documents', badge: docsActionCount || null },
-    permissions.can_view_backlog && { to: '/backlog', icon: Clipboard, label: 'Backlog' },
+  // Always-visible core items — used constantly across every role, not grouped
+  const topItems = [
+    permissions.can_view_triage && { to: '/triage', icon: Activity, label: 'Triage', pinnable: false },
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', pinnable: false },
+    (isAdmin || permissions.can_view_tasks) && { to: '/tasks', icon: ListTodo, label: 'Tasks', pinnable: false },
+    permissions.can_view_messages && { to: '/messages', icon: MessageSquare, label: 'Messages', pinnable: false, badge: messagesUnread || null },
   ].filter(Boolean)
+
+  const groups = [
+    {
+      key: 'property',
+      label: 'Property Ops',
+      items: [
+        permissions.properties && { to: '/properties', icon: Building2, label: 'Properties' },
+        permissions.can_view_insurance && { to: '/insurance', icon: Shield, label: 'Insurance & Taxes' },
+        permissions.llcs && { to: '/llcs', icon: Landmark, label: 'LLCs' },
+        permissions.can_view_fleet && { to: '/fleet', icon: Wrench, label: 'Fleet' },
+      ].filter(Boolean),
+    },
+    {
+      key: 'deals',
+      label: 'Deals & Listings',
+      items: [
+        permissions.deals && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
+        (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
+      ].filter(Boolean),
+    },
+    {
+      key: 'money',
+      label: 'Money',
+      items: [
+        permissions.can_view_finances && { to: '/finances', icon: Wallet, label: 'Finances' },
+        permissions.can_view_bank_dashboard && { to: '/bank-dashboard', icon: PiggyBank, label: 'Bank Dashboard' },
+        permissions.can_view_bookkeeping && { to: '/bookkeeping', icon: Calculator, label: 'Bookkeeping' },
+        isAdmin && { to: '/bitcoin', icon: Bitcoin, label: 'Bitcoin' },
+      ].filter(Boolean),
+    },
+    {
+      key: 'sidebiz',
+      label: 'Side Business',
+      items: [
+        permissions.chickens && { to: '/chickens', icon: Egg, label: 'Chickens' },
+        permissions.can_view_happy_cuts && { to: '/happy-cuts', icon: Leaf, label: 'Happy Cuts' },
+      ].filter(Boolean),
+    },
+    {
+      key: 'reference',
+      label: 'Reference',
+      items: [
+        (isAdmin || permissions.can_view_recipes) && { to: '/recipes', icon: ChefHat, label: 'Recipes' },
+        permissions.documents && { to: '/documents', icon: FileText, label: 'Documents', badge: docsActionCount || null },
+        permissions.can_view_backlog && { to: '/backlog', icon: Clipboard, label: 'Backlog' },
+      ].filter(Boolean),
+    },
+  ]
+
+  // Flatten every pinnable item so the Pinned section can look up icon/label/badge
+  const allPinnable = groups.flatMap(g => g.items)
+  const pinnedItems = allPinnable.filter(i => pinned.has(i.to))
 
   return (
     <>
@@ -95,31 +252,51 @@ export default function Sidebar({ open, onClose }) {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map(({ to, icon: Icon, label, badge }) => (
-            <NavLink key={to} to={to} className={linkClass} onClick={onClose}>
-              <Icon size={18} />
-              <span className="flex-1">{label}</span>
-              {badge ? (
-                <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none min-w-[18px] text-center">
-                  {badge}
-                </span>
-              ) : null}
-            </NavLink>
+        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          <div className="space-y-1">
+            {topItems.map(item => (
+              <NavRow key={item.to} {...item} onClose={onClose} pinned={false} onTogglePin={togglePin} />
+            ))}
+          </div>
+
+          {pinnedItems.length > 0 && (
+            <div className="pt-3">
+              <div className="px-4 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Pinned
+              </div>
+              <div className="space-y-1 mt-1">
+                {pinnedItems.map(item => (
+                  <NavRow key={item.to} {...item} onClose={onClose} pinned={true} onTogglePin={togglePin} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {groups.map(g => (
+            <NavGroup
+              key={g.key}
+              groupKey={g.key}
+              label={g.label}
+              items={g.items}
+              collapsed={collapsed}
+              onToggle={toggleGroup}
+              onClose={onClose}
+              pinned={pinned}
+              onTogglePin={togglePin}
+            />
           ))}
 
           {isAdmin && (
-            <>
-              <div className="pt-4 pb-1 px-4">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Admin</span>
-              </div>
-              {adminItems.map(({ to, icon: Icon, label }) => (
-                <NavLink key={to} to={to} className={linkClass} onClick={onClose}>
-                  <Icon size={18} />
-                  {label}
-                </NavLink>
-              ))}
-            </>
+            <NavGroup
+              groupKey="admin"
+              label="Admin"
+              items={adminItems.map(i => ({ ...i, pinnable: false }))}
+              collapsed={collapsed}
+              onToggle={toggleGroup}
+              onClose={onClose}
+              pinned={pinned}
+              onTogglePin={togglePin}
+            />
           )}
         </nav>
 

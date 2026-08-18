@@ -37,6 +37,7 @@ import NotificationSettings from './pages/NotificationSettings'
 import DigestGuide from './pages/DigestGuide'
 import Tasks from './pages/Tasks'
 import TaskDetail from './pages/TaskDetail'
+import Messages from './pages/Messages'
 import Recipes from './pages/Recipes'
 import Triage from './pages/Triage'
 import TriageSetup from './pages/TriageSetup'
@@ -101,6 +102,8 @@ export default function App() {
             <Route path="tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="tasks/:taskId" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="tasks/:taskId/full" element={<ProtectedRoute><TaskDetail /></ProtectedRoute>} />
+            <Route path="messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
+            <Route path="messages/:channelId" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
             <Route path="recipes" element={<ProtectedRoute><Recipes /></ProtectedRoute>} />
             <Route path="triage" element={<PermRoute permission="can_view_triage"><Triage /></PermRoute>} />
             <Route path="triage/setup" element={<AdminRoute><TriageSetup /></AdminRoute>} />

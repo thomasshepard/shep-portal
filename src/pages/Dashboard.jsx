@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, PM_BASE_ID, CHICKENS_BASE_ID } from '../lib/airtable'
 import { FLEET_BASE_ID, EQUIPMENT_TABLE, MAINT_TABLE, maintenanceUrgency } from '../lib/fleet'
+import { createTask } from '../lib/tasks'
 import { useAuth } from '../hooks/useAuth'
+import toast from 'react-hot-toast'
 import {
   Building2, FileText, Egg, Tag, ListTodo, ChefHat, Wrench, FolderOpen, MapPin,
+  ChevronDown, Plus, Activity, FileSearch,
 } from 'lucide-react'
 
 // ── Local helpers ─────────────────────────────────────────────────────────────
@@ -76,12 +79,19 @@ function formatBatchName(name) {
 }
 
 // ── Happy Cuts schedule fetcher (uses returnFieldsByFieldId) ──────────────────
-async function fetchHCSchedule() {
+// `sinceISO` narrows the fetch to records on/after that date — the dashboard only
+// ever needs the current month forward, so there's no reason to pull the whole
+// mow history on every load.
+async function fetchHCSchedule(sinceISO) {
   if (!HC_BASE || !HC_PAT) return []
   const HC_URL = `https://api.airtable.com/v0/${HC_BASE}`
+  const formula = sinceISO
+    ? `OR(IS_SAME({${SF.date}}, "${sinceISO}", 'day'), IS_AFTER({${SF.date}}, "${sinceISO}"))`
+    : null
   const records = []; let offset = null
   do {
     let qs = '?returnFieldsByFieldId=true'
+    if (formula) qs += `&filterByFormula=${encodeURIComponent(formula)}`
     if (offset) qs += `&offset=${offset}`
     const res = await fetch(`${HC_URL}/${SCHEDULE_TABLE}${qs}`, {
       headers: { Authorization: `Bearer ${HC_PAT}` },
@@ -92,6 +102,32 @@ async function fetchHCSchedule() {
     offset = json.offset || null
   } while (offset)
   return records
+}
+
+// ── Dashboard data cache (sessionStorage, short TTL) ───────────────────────────
+// The dashboard is the app's most-revisited page — cache each fetch group so a
+// return visit paints instantly with last-known data while a fresh copy loads
+// silently in the background, instead of re-running every query from zero.
+const DASH_CACHE_TTL = 3 * 60 * 1000 // 3 minutes
+
+function dashCacheGet(key) {
+  try {
+    const raw = sessionStorage.getItem(`shep_dash_cache_${key}`)
+    if (!raw) return undefined
+    const { data, ts } = JSON.parse(raw)
+    if (Date.now() - ts > DASH_CACHE_TTL) return undefined
+    return data
+  } catch {
+    return undefined
+  }
+}
+
+function dashCacheSet(key, data) {
+  try {
+    sessionStorage.setItem(`shep_dash_cache_${key}`, JSON.stringify({ data, ts: Date.now() }))
+  } catch {
+    // sessionStorage full/unavailable — just skip caching, no functional impact
+  }
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -106,82 +142,124 @@ function fmtDateShort(str) {
   return isNaN(d) ? str : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+// ── Collapsible card state (persisted per-device) ─────────────────────────────
+function useCollapsed(id, defaultOpen = true) {
+  const key = `shep_dash_collapse_${id}`
+  const [open, setOpen] = useState(() => {
+    const stored = localStorage.getItem(key)
+    return stored === null ? defaultOpen : stored === '1'
+  })
+  useEffect(() => { localStorage.setItem(key, open ? '1' : '0') }, [open, key])
+  return [open, setOpen]
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { profile, isAdmin, isVA, permissions } = useAuth()
+  const { session, profile, isAdmin, isVA, permissions } = useAuth()
 
-  const [propData, setPropData]           = useState(null)
-  const [propLoading, setPropLoading]     = useState(true)
+  const [propData, setPropData]           = useState(() => dashCacheGet('props') ?? null)
+  const [propLoading, setPropLoading]     = useState(() => dashCacheGet('props') === undefined)
 
-  const [complianceData, setComplianceData]       = useState([])
-  const [complianceLoading, setComplianceLoading] = useState(true)
+  const [complianceData, setComplianceData]       = useState(() => dashCacheGet('compliance') ?? [])
+  const [complianceLoading, setComplianceLoading] = useState(() => dashCacheGet('compliance') === undefined)
 
-  const [incubatorData, setIncubatorData]       = useState([])
-  const [incubatorLoading, setIncubatorLoading] = useState(true)
+  const [incubatorData, setIncubatorData]       = useState(() => dashCacheGet('incubator') ?? [])
+  const [incubatorLoading, setIncubatorLoading] = useState(() => dashCacheGet('incubator') === undefined)
 
-  const [hcData, setHcData]       = useState([])
-  const [hcLoading, setHcLoading] = useState(true)
+  const [hcData, setHcData]       = useState(() => dashCacheGet('hc') ?? [])
+  const [hcLoading, setHcLoading] = useState(() => dashCacheGet('hc') === undefined)
 
-  const [fleetData, setFleetData]       = useState([])
-  const [fleetLoading, setFleetLoading] = useState(true)
-  const [fleetMaintData, setFleetMaintData] = useState([])
+  const [fleetData, setFleetData]       = useState(() => dashCacheGet('fleet') ?? [])
+  const [fleetLoading, setFleetLoading] = useState(() => dashCacheGet('fleet') === undefined)
+  const [fleetMaintData, setFleetMaintData] = useState(() => dashCacheGet('fleetMaint') ?? [])
 
-  const [activityLogs, setActivityLogs]       = useState([])
-  const [activityLoading, setActivityLoading] = useState(true)
+  const [activityLogs, setActivityLogs]       = useState(() => dashCacheGet('activity') ?? [])
+  const [activityLoading, setActivityLoading] = useState(() => dashCacheGet('activity') === undefined)
 
   useEffect(() => {
-    // Properties + related — run as one parallel group; each sub-result fails independently
+    // Anchor for narrowing queries to "current + relevant" instead of a table's full history.
+    const monthStartISO = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+      .toISOString().slice(0, 10)
+
+    // Properties + related — run as one parallel group; each sub-result fails independently.
+    // Filtered server-side to the subset the dashboard actually reads (open/unpaid/active),
+    // so payment and maintenance history that's already resolved never gets pulled down.
     Promise.allSettled([
       fetchAllRecords('Property', {}, PM_BASE_ID),
       fetchAllRecords('Rental Units', {}, PM_BASE_ID),
-      fetchAllRecords('Lease Agreements', {}, PM_BASE_ID),
-      fetchAllRecords('Invoices Payments', {}, PM_BASE_ID),
-      fetchAllRecords('Maintenance Requests', {}, PM_BASE_ID),
+      fetchAllRecords('Lease Agreements', { filterByFormula: `LOWER({Status})!='closed'` }, PM_BASE_ID),
+      fetchAllRecords('Invoices Payments', { filterByFormula: `AND({Status}!='Paid', NOT({Due Date}=BLANK()), IS_BEFORE({Due Date}, TODAY()))` }, PM_BASE_ID),
+      fetchAllRecords('Maintenance Requests', { filterByFormula: `NOT(OR(LOWER({Status})='completed', LOWER({Status})='resolved'))` }, PM_BASE_ID),
     ]).then(([propRes, unitsRes, leasesRes, invRes, maintRes]) => {
       const get = (r) => r.status === 'fulfilled' ? (r.value?.data || []) : []
-      setPropData({
+      const result = {
         properties:     get(propRes),
         rentalUnits:    get(unitsRes),
         leases:         get(leasesRes),
         invoicePayments:get(invRes),
         maintenance:    get(maintRes),
-      })
+      }
+      setPropData(result)
       setPropLoading(false)
+      dashCacheSet('props', result)
     })
 
     // LLC compliance (uses default Airtable base — Shepard Owned Companies)
-    fetchAllRecords('Compliance Log')
-      .then(res => setComplianceData(res.data || []))
+    fetchAllRecords('Compliance Log', { filterByFormula: `{Status}='Pending'` })
+      .then(res => {
+        const data = res.data || []
+        setComplianceData(data)
+        dashCacheSet('compliance', data)
+      })
       .catch(() => {})
       .finally(() => setComplianceLoading(false))
 
     // Incubator active batches
-    fetchAllRecords(BATCHES_TABLE, {}, CHICKENS_BASE_ID)
-      .then(res => setIncubatorData((res.data || []).filter(b => b.fields?.Status === 'Active')))
+    fetchAllRecords(BATCHES_TABLE, { filterByFormula: `{Status}='Active'` }, CHICKENS_BASE_ID)
+      .then(res => {
+        const data = res.data || []
+        setIncubatorData(data)
+        dashCacheSet('incubator', data)
+      })
       .catch(() => {})
       .finally(() => setIncubatorLoading(false))
 
-    // Happy Cuts schedule (field-ID-based fetch)
-    fetchHCSchedule()
-      .then(records => setHcData(records))
+    // Happy Cuts schedule — current month forward only (field-ID-based fetch)
+    fetchHCSchedule(monthStartISO)
+      .then(records => {
+        setHcData(records)
+        dashCacheSet('hc', records)
+      })
       .catch(() => {})
       .finally(() => setHcLoading(false))
 
     // Fleet equipment
     fetchAllRecords(EQUIPMENT_TABLE, {}, FLEET_BASE_ID)
-      .then(res => setFleetData(res.data || []))
+      .then(res => {
+        const data = res.data || []
+        setFleetData(data)
+        dashCacheSet('fleet', data)
+      })
       .catch(() => {})
       .finally(() => setFleetLoading(false))
 
-    // Fleet maintenance — just for the one due-count line on the Fleet widget
-    fetchAllRecords(MAINT_TABLE, {}, FLEET_BASE_ID)
-      .then(res => setFleetMaintData(res.data || []))
+    // Fleet maintenance — just for the one due-count line on the Fleet widget.
+    // Done/Watch List items never register as overdue/dueSoon, so they're excluded server-side.
+    fetchAllRecords(MAINT_TABLE, { filterByFormula: `{Status}='Active'` }, FLEET_BASE_ID)
+      .then(res => {
+        const data = res.data || []
+        setFleetMaintData(data)
+        dashCacheSet('fleetMaint', data)
+      })
       .catch(() => {})
 
     // Recent activity
     supabase.from('access_logs')
       .select('*').order('created_at', { ascending: false }).limit(10)
-      .then(({ data }) => setActivityLogs(data || []))
+      .then(({ data }) => {
+        setActivityLogs(data || [])
+        dashCacheSet('activity', data || [])
+      })
       .finally(() => setActivityLoading(false))
   }, [])
 
@@ -312,6 +390,12 @@ export default function Dashboard() {
     }).length,
   }
 
+  // Collapsible module cards — state persisted per-device, called unconditionally
+  const [incubatorOpen, setIncubatorOpen] = useCollapsed('incubator')
+  const [fleetOpen, setFleetOpen]         = useCollapsed('fleet')
+  const [mowsOpen, setMowsOpen]           = useCollapsed('mows')
+  const [activityOpen, setActivityOpen]   = useCollapsed('activity')
+
   if (!isAdmin && !isVA) {
     return <MemberDashboard profile={profile} permissions={permissions} />
   }
@@ -326,6 +410,11 @@ export default function Dashboard() {
         </h1>
         <p className="text-gray-500 mt-1 text-sm">Here's what's going on.</p>
       </div>
+
+      {/* ── Quick Actions ──────────────────────────────────────────────────── */}
+      {(isAdmin || isVA) && (
+        <QuickActions userId={session?.user?.id} permissions={permissions} isAdmin={isAdmin} />
+      )}
 
       {/* ── Section 1 — Action Items ───────────────────────────────────────── */}
       {(isAdmin || isVA) && (
@@ -396,131 +485,136 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* ── Section 3 — Incubator Active Batches ──────────────────────────── */}
-      {isAdmin && !incubatorLoading && incubatorData.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <SectionHeader title="Incubator" hash="#/chickens" />
-            <span className="text-xs text-gray-400">
-              {incubatorData.length} active batch{incubatorData.length > 1 ? 'es' : ''}
-            </span>
-          </div>
-          <div className="space-y-3">
-            {incubatorData.map(batch => {
-              const { day }                     = getBatchPhase(batch)
-              const { label: nextLabel, urgent } = getNextActionInfo(batch)
-              const batchName = formatBatchName(safeStr(batch.fields?.['Batch Name'], 'Untitled'))
-              const pct = Math.min(Math.max((day / 21) * 100, 0), 100)
-              return (
-                <div
-                  key={batch.id}
-                  className={`rounded-lg px-4 py-3 border ${
-                    urgent ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-900 text-sm">{batchName}</span>
-                      <span className="text-xs text-gray-400">Day {day}</span>
+      {/* ── Modules — most-urgent card first ───────────────────────────────── */}
+      {[
+        {
+          key: 'incubator',
+          visible: isAdmin && !incubatorLoading && incubatorData.length > 0,
+          urgent: urgentBatches.length > 0,
+          node: (
+            <CollapsibleSection
+              title="Incubator" hash="#/chickens" open={incubatorOpen} onToggle={setIncubatorOpen}
+              right={`${incubatorData.length} active batch${incubatorData.length > 1 ? 'es' : ''}`}
+            >
+              <div className="space-y-3">
+                {incubatorData.map(batch => {
+                  const { day }                     = getBatchPhase(batch)
+                  const { label: nextLabel, urgent } = getNextActionInfo(batch)
+                  const batchName = formatBatchName(safeStr(batch.fields?.['Batch Name'], 'Untitled'))
+                  const pct = Math.min(Math.max((day / 21) * 100, 0), 100)
+                  return (
+                    <div
+                      key={batch.id}
+                      className={`rounded-lg px-4 py-3 border ${
+                        urgent ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900 text-sm">{batchName}</span>
+                          <span className="text-xs text-gray-400">Day {day}</span>
+                        </div>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                          urgent ? 'bg-amber-200 text-amber-800' : 'bg-gray-200 text-gray-600'
+                        }`}>
+                          {nextLabel}
+                        </span>
+                      </div>
+                      <div className="mt-2.5">
+                        <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${urgent ? 'bg-amber-400' : 'bg-blue-400'}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
-                      urgent ? 'bg-amber-200 text-amber-800' : 'bg-gray-200 text-gray-600'
-                    }`}>
-                      {nextLabel}
-                    </span>
-                  </div>
-                  <div className="mt-2.5">
-                    <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${urgent ? 'bg-amber-400' : 'bg-blue-400'}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Section 3b — Fleet ─────────────────────────────────────────────── */}
-      {isAdmin && !fleetLoading && activeFleet.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <SectionHeader title="Fleet" hash="#/fleet" />
-            <span className="text-xs text-gray-400">
-              {[
+                  )
+                })}
+              </div>
+            </CollapsibleSection>
+          ),
+        },
+        {
+          key: 'fleet',
+          visible: isAdmin && !fleetLoading && activeFleet.length > 0,
+          urgent: fleetTotals.maintDue > 0,
+          node: (
+            <CollapsibleSection
+              title="Fleet" hash="#/fleet" open={fleetOpen} onToggle={setFleetOpen}
+              right={[
                 fleetTotals.running && `${fleetTotals.running} Running`,
                 fleetTotals.inRepair && `${fleetTotals.inRepair} In Repair`,
                 fleetTotals.down && `${fleetTotals.down} Down`,
               ].filter(Boolean).join(' · ')}
-            </span>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Invested</p>
-              <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtMoney(fleetTotals.invested)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Est. value</p>
-              <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtMoney(fleetTotals.value)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Equity</p>
-              <p className={`text-lg font-bold tabular-nums ${fleetTotals.equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {fmtMoney(fleetTotals.equity)}
-              </p>
-            </div>
-          </div>
-          {fleetTotals.maintDue > 0 && (
-            <p className="text-xs text-amber-600 mt-3 pt-3 border-t border-gray-100">
-              {fleetTotals.maintDue} maintenance item{fleetTotals.maintDue === 1 ? '' : 's'} due or overdue
-            </p>
-          )}
-        </div>
-      )}
+            >
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Invested</p>
+                  <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtMoney(fleetTotals.invested)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Est. value</p>
+                  <p className="text-lg font-bold text-gray-900 tabular-nums">{fmtMoney(fleetTotals.value)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Equity</p>
+                  <p className={`text-lg font-bold tabular-nums ${fleetTotals.equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {fmtMoney(fleetTotals.equity)}
+                  </p>
+                </div>
+              </div>
+              {fleetTotals.maintDue > 0 && (
+                <p className="text-xs text-amber-600 mt-3 pt-3 border-t border-gray-100">
+                  {fleetTotals.maintDue} maintenance item{fleetTotals.maintDue === 1 ? '' : 's'} due or overdue
+                </p>
+              )}
+            </CollapsibleSection>
+          ),
+        },
+        {
+          key: 'mows',
+          visible: isAdmin,
+          urgent: false,
+          node: (
+            <CollapsibleSection title="Upcoming Mows" hash="#/happy-cuts" open={mowsOpen} onToggle={setMowsOpen} right="Next 7 days">
+              {hcLoading ? (
+                <p className="text-sm text-gray-400">Loading…</p>
+              ) : upcomingMows.length === 0 ? (
+                <p className="text-sm text-gray-400">No mows scheduled this week.</p>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {upcomingMows.map(r => {
+                    const clientName = safeStr(r.fields?.[SF.clientName], 'Unknown client')
+                    const date       = safeStr(r.fields?.[SF.date])
+                    const invStatus  = safeStr(r.fields?.[SF.invStatus])
+                    const hasSent    = invStatus !== '' && invStatus !== 'Not Sent' && invStatus !== 'No Invoice'
+                    return (
+                      <div key={r.id} className="flex items-center justify-between py-2.5">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium text-gray-800">{clientName}</span>
+                          <span className="text-xs text-gray-400">{fmtDateShort(date)}</span>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
+                          hasSent ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {hasSent ? invStatus : 'No invoice'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CollapsibleSection>
+          ),
+        },
+      ]
+        .filter(m => m.visible)
+        .sort((a, b) => (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0))
+        .map(m => <div key={m.key}>{m.node}</div>)}
 
-      {/* ── Section 4 — Upcoming Mows ─────────────────────────────────────── */}
-      {isAdmin && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <SectionHeader title="Upcoming Mows" hash="#/happy-cuts" />
-            <span className="text-xs text-gray-400">Next 7 days</span>
-          </div>
-          {hcLoading ? (
-            <p className="text-sm text-gray-400">Loading…</p>
-          ) : upcomingMows.length === 0 ? (
-            <p className="text-sm text-gray-400">No mows scheduled this week.</p>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {upcomingMows.map(r => {
-                const clientName = safeStr(r.fields?.[SF.clientName], 'Unknown client')
-                const date       = safeStr(r.fields?.[SF.date])
-                const invStatus  = safeStr(r.fields?.[SF.invStatus])
-                const hasSent    = invStatus !== '' && invStatus !== 'Not Sent' && invStatus !== 'No Invoice'
-                return (
-                  <div key={r.id} className="flex items-center justify-between py-2.5">
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium text-gray-800">{clientName}</span>
-                      <span className="text-xs text-gray-400">{fmtDateShort(date)}</span>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${
-                      hasSent ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {hasSent ? invStatus : 'No invoice'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Section 5 — Recent Activity ───────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h2 className="font-semibold text-gray-800 mb-4">Recent Activity</h2>
+      {/* ── Recent Activity ────────────────────────────────────────────────── */}
+      <CollapsibleSection title="Recent Activity" open={activityOpen} onToggle={setActivityOpen}>
         {activityLoading ? (
           <p className="text-sm text-gray-400">Loading…</p>
         ) : activityLogs.length === 0 ? (
@@ -543,7 +637,7 @@ export default function Dashboard() {
             ))}
           </div>
         )}
-      </div>
+      </CollapsibleSection>
 
     </div>
   )
@@ -632,6 +726,7 @@ function StatCard({ label, value, sub, color = 'normal', onClick }) {
 }
 
 function SectionHeader({ title, hash }) {
+  if (!hash) return <h2 className="font-semibold text-gray-800">{title}</h2>
   return (
     <button
       onClick={() => { window.location.hash = hash }}
@@ -640,5 +735,94 @@ function SectionHeader({ title, hash }) {
       {title}
       <span className="text-gray-400 text-sm ml-0.5">→</span>
     </button>
+  )
+}
+
+// Card wrapper with a chevron toggle whose open state is persisted (via useCollapsed).
+function CollapsibleSection({ title, hash, right, open, onToggle, children }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => onToggle(o => !o)}
+            className="text-gray-400 hover:text-gray-600 transition-colors -ml-0.5 p-0.5"
+            title={open ? 'Collapse' : 'Expand'}
+          >
+            <ChevronDown size={15} className={`transition-transform ${open ? '' : '-rotate-90'}`} />
+          </button>
+          <SectionHeader title={title} hash={hash} />
+        </div>
+        {right && <span className="text-xs text-gray-400">{right}</span>}
+      </div>
+      {open && children}
+    </div>
+  )
+}
+
+// ── Quick Actions ────────────────────────────────────────────────────────────
+function QuickActions({ userId, permissions, isAdmin }) {
+  const [taskTitle, setTaskTitle] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const links = [
+    (isAdmin || permissions.can_view_triage) && { label: 'Triage', hash: '#/triage', icon: Activity },
+    permissions.properties && { label: 'Maintenance', hash: '#/properties', icon: Wrench },
+    permissions.documents && { label: 'Documents', hash: '#/documents', icon: FileSearch },
+  ].filter(Boolean)
+
+  async function handleAddTask(e) {
+    e.preventDefault()
+    const title = taskTitle.trim()
+    if (!title || !userId || submitting) return
+    setSubmitting(true)
+    try {
+      await createTask({ title, userId })
+      setTaskTitle('')
+      toast.success('Task added')
+    } catch {
+      toast.error('Could not add task')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-3 flex flex-wrap items-center gap-2">
+      <form onSubmit={handleAddTask} className="flex items-center gap-2 flex-1 min-w-[220px]">
+        <Plus size={16} className="text-gray-400 flex-shrink-0" />
+        <input
+          type="text"
+          value={taskTitle}
+          onChange={e => setTaskTitle(e.target.value)}
+          placeholder="Quick add a task…"
+          disabled={submitting}
+          className="flex-1 min-w-0 text-sm border-0 focus:ring-0 focus:outline-none placeholder:text-gray-400"
+        />
+        {taskTitle.trim() && (
+          <button
+            type="submit"
+            disabled={submitting}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-700 px-2 py-1 flex-shrink-0"
+          >
+            {submitting ? 'Adding…' : 'Add'}
+          </button>
+        )}
+      </form>
+      {links.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {links.map(({ label, hash, icon: Icon }) => (
+            <a
+              key={hash}
+              href={hash}
+              className="flex items-center gap-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <Icon size={13} />
+              {label}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

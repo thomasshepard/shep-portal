@@ -93,7 +93,27 @@ async function applyOwners(accounts: any[]) {
 
 // ── Actions ──────────────────────────────────────────────────────────────
 
-async function actionCreateLinkToken(_payload: any, userId: string) {
+async function actionCreateLinkToken(payload: any, userId: string) {
+  const itemId = payload?.itemId ? String(payload.itemId) : null
+
+  // Re-linking a specific broken item (ITEM_LOGIN_REQUIRED etc.) uses
+  // Plaid's "update mode" — pass the item's own access_token instead of
+  // `products`, and Link re-authenticates that exact Item in place rather
+  // than creating a new one. The access_token doesn't change, so unlike a
+  // fresh link there's no exchange_token call afterwards.
+  if (itemId) {
+    const { data: item, error } = await sb.from('bank_items').select('access_token').eq('item_id', itemId).single()
+    if (error || !item) throw new Error('Item not found')
+    const data = await plaid('/link/token/create', {
+      user: { client_user_id: userId },
+      client_name: 'Shep Portal — Bank Dashboard',
+      access_token: item.access_token,
+      country_codes: ['US'],
+      language: 'en',
+    })
+    return { ok: true, link_token: data.link_token, mode: 'update' }
+  }
+
   const data = await plaid('/link/token/create', {
     user: { client_user_id: userId },
     client_name: 'Shep Portal — Bank Dashboard',
@@ -101,7 +121,7 @@ async function actionCreateLinkToken(_payload: any, userId: string) {
     country_codes: ['US'],
     language: 'en',
   })
-  return { ok: true, link_token: data.link_token }
+  return { ok: true, link_token: data.link_token, mode: 'new' }
 }
 
 async function actionExchangeToken(payload: any) {
