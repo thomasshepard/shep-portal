@@ -11,6 +11,7 @@ const TASKS_TABLE   = 'tbl3Di18kSLwEj1vN'
 // Airtable table names
 const BATCHES_TABLE       = 'tblKomWeHkj9aGFDC'
 const SCHEDULE_TABLE      = 'tbli7OArESf2SHL10'
+const PROJECTS_TABLE      = 'tblP7yDgETBBbgLpb'
 const LLC_TABLE           = 'LLCs'
 const LEASES_TABLE        = 'Lease Agreements'
 const TENANTS_TABLE       = 'Tenants'
@@ -22,6 +23,12 @@ const HC_INV_STATUS  = 'fldhiIRXuRlvp3QXO'
 const HC_CLIENT_NAME = 'fldjSJ0x5rJ3S0FYm'
 const HC_AMOUNT      = 'fldJoKhtQX4MujAOi'
 const HC_MOW_DATE    = 'fldcu9rgNI8REbrE0'
+
+// Happy Cuts Projects field IDs
+const HC_PROJ_INV_STATUS   = 'fldrA8Jw7VziWmEIX'
+const HC_PROJ_TITLE        = 'fldaxKyhnfOqdV9Ae'  // "<client> — <category>", set at create/edit
+const HC_PROJ_QUOTED_PRICE = 'fld3yYhAe1SaTShhT'
+const HC_PROJ_SCHEDULED    = 'fldVOXBQuqUrZrLmh'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -171,7 +178,7 @@ Deno.serve(async (req) => {
 
     let totalInserted = 0
     let totalTasksCreated = 0
-    let batchCount = 0, mowCount = 0, leaseCount = 0, llcCount = 0, taskReminderCount = 0
+    let batchCount = 0, mowCount = 0, projectCount = 0, leaseCount = 0, llcCount = 0, taskReminderCount = 0
 
     const results = await Promise.allSettled([
 
@@ -239,22 +246,22 @@ Deno.serve(async (req) => {
         }
       })(),
 
-      // ── Happy Cuts — overdue invoices ────────────────────────────────────────
+      // ── Happy Cuts — overdue mow invoices ────────────────────────────────────
       (async () => {
         const mows = await fetchAirtable(HC_BASE, SCHEDULE_TABLE, {
           filterByFormula: `{${HC_INV_STATUS}} = 'Sent'`,
         }, airtablePat)
         mowCount = mows.length
 
-        const sevenDaysAgo = new Date(today)
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+        const staleCutoff = new Date(today)
+        staleCutoff.setDate(staleCutoff.getDate() - 3)
 
         for (const mow of mows) {
           const f = mow.fields
           const mowDateStr = f[HC_MOW_DATE]
           if (!mowDateStr) continue
           const mowDate = new Date(mowDateStr + 'T12:00:00')
-          if (mowDate > sevenDaysAgo) continue // not yet overdue
+          if (mowDate > staleCutoff) continue // not yet overdue
 
           const clientName = Array.isArray(f[HC_CLIENT_NAME]) ? f[HC_CLIENT_NAME][0] : (f[HC_CLIENT_NAME] || 'Client')
           const amount = f[HC_AMOUNT] || 0
@@ -283,6 +290,63 @@ Deno.serve(async (req) => {
                   'Body':       `$${amount} sent ${daysAgo} days ago`,
                   'Source Key': srcKey,
                   'Action URL': '/#/happy-cuts',
+                  'User ID':    uid,
+                  'Due Date':   isoDate(today),
+                }, airtablePat)
+                totalTasksCreated++
+              }
+            }
+          }
+        }
+      })(),
+
+      // ── Happy Cuts — overdue project invoices ────────────────────────────────
+      (async () => {
+        const projects = await fetchAirtable(HC_BASE, PROJECTS_TABLE, {
+          filterByFormula: `{${HC_PROJ_INV_STATUS}} = 'Sent'`,
+        }, airtablePat)
+        projectCount = projects.length
+
+        const staleCutoff = new Date(today)
+        staleCutoff.setDate(staleCutoff.getDate() - 3)
+
+        for (const project of projects) {
+          const f = project.fields
+          // Scheduled Date is the closest thing Projects has to a completion
+          // date — there's no separate "completed at" field, same approximation
+          // the mow check makes off of mow date.
+          const refDateStr = f[HC_PROJ_SCHEDULED]
+          if (!refDateStr) continue
+          const refDate = new Date(refDateStr + 'T12:00:00')
+          if (refDate > staleCutoff) continue // not yet overdue
+
+          const title = f[HC_PROJ_TITLE] || 'Project'
+          const amount = f[HC_PROJ_QUOTED_PRICE] || 0
+          const daysAgo = Math.floor((today.getTime() - refDate.getTime()) / 86400000)
+
+          for (const uid of adminIds) {
+            const srcKey = `hc:project_invoice_overdue:${project.id}:${uid}`
+            const inserted = await insertIfNew(sb, {
+              user_id:    uid,
+              title:      `$${amount} project invoice overdue — ${title}`,
+              body:       `Scheduled ${refDateStr} · ${daysAgo} days overdue`,
+              module:     'happy_cuts',
+              category:   'happy_cuts',
+              severity:   'action_needed',
+              action_url: '/#/happy-cuts?tab=projects',
+              source_key: srcKey,
+              expires_at: null,
+            })
+            if (inserted) {
+              totalInserted++
+              if (!await airtableTaskExists(srcKey, airtablePat)) {
+                await airtableCreateTask({
+                  'Title':      `Follow up on overdue project invoice — ${title}`,
+                  'Status':     'To Do',
+                  'Module':     'Happy Cuts',
+                  'Body':       `$${amount} sent ${daysAgo} days ago`,
+                  'Source Key': srcKey,
+                  'Action URL': '/#/happy-cuts?tab=projects',
                   'User ID':    uid,
                   'Due Date':   isoDate(today),
                 }, airtablePat)
@@ -511,6 +575,7 @@ Deno.serve(async (req) => {
       checked: {
         incubator:      batchCount,
         happy_cuts:     mowCount,
+        happy_cuts_projects: projectCount,
         properties:     leaseCount,
         llcs:           llcCount,
         task_reminders: taskReminderCount,

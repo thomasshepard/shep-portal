@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import { notify, getAdminUserIds } from '../lib/notifications'
@@ -4126,6 +4126,7 @@ function CrewTab({ crew, schedules, onRefresh }) {
 export default function HappyCuts() {
   const { profile } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   if (profile?.role !== 'admin') return null
 
@@ -4135,7 +4136,8 @@ export default function HappyCuts() {
   const [crew, setCrew] = useState([])
   const [contactsById, setContactsById] = useState({})
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('today')
+  // Supports deep links like /#/happy-cuts?tab=projects (e.g. from the overdue-invoice notification)
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'today')
   const [jobDetail, setJobDetail] = useState(null)
   const [weekStart, setWeekStart] = useState(getMonday(new Date()))
   const [weather, setWeather] = useState(null)
