@@ -8,6 +8,7 @@ import BacklogKanban from '../components/BacklogKanban'
 import BacklogModal from '../components/BacklogModal'
 import BacklogComposer from '../components/BacklogComposer'
 import BacklogGroomView from '../components/BacklogGroomView'
+import BacklogFilterBar from '../components/BacklogFilterBar'
 
 const BASE_ID = 'appp0qWrN24f8wqho'
 const TABLE_ID = 'tblHUG1CGxrirONPB'
@@ -122,6 +123,12 @@ export default function Backlog() {
   const [editingFeature, setEditingFeature] = useState(null)
   const [groomingRecord, setGroomingRecord] = useState(null)
   const [groomBusy, setGroomBusy] = useState(false)
+  const [search, setSearch] = useState('')
+  const [category, setCategory] = useState(() => localStorage.getItem('backlog:category') || 'All')
+  const [sort, setSort] = useState(() => localStorage.getItem('backlog:sort') || 'default')
+
+  useEffect(() => { localStorage.setItem('backlog:category', category) }, [category])
+  useEffect(() => { localStorage.setItem('backlog:sort', sort) }, [sort])
 
   useEffect(() => {
     log('backlog', 'view')
@@ -272,6 +279,31 @@ export default function Backlog() {
     inProgress: records.filter(r => r.fields['Status'] === 'In Progress').length,
   }
 
+  // Filtering/sorting applies to the whole record set before BacklogKanban
+  // groups it by Status/Kind -- so filters shrink every column consistently,
+  // and sort order carries through into each column's card list. Header
+  // stats above stay unfiltered (they describe the whole board, not the view).
+  const filteredRecords = records.filter(r => {
+    const f = r.fields
+    if (category !== 'All' && f['Category'] !== category) return false
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      const hay = (String(f['Feature'] || '') + ' ' + String(f['Description'] || '')).toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+
+  const EFFORT_RANK = { S: 0, M: 1, L: 2, XL: 3 }
+  const visibleRecords = [...filteredRecords]
+  if (sort === 'value') {
+    visibleRecords.sort((a, b) => (b.fields['Value'] || 0) - (a.fields['Value'] || 0))
+  } else if (sort === 'effort') {
+    visibleRecords.sort((a, b) => (EFFORT_RANK[a.fields['Effort']] ?? 9) - (EFFORT_RANK[b.fields['Effort']] ?? 9))
+  } else if (sort === 'az') {
+    visibleRecords.sort((a, b) => (a.fields['Feature'] || '').localeCompare(b.fields['Feature'] || ''))
+  }
+
   if (loading) return <div className="max-w-7xl mx-auto px-6 py-8 text-gray-500">Loading backlog...</div>
   if (error) return <div className="max-w-7xl mx-auto px-6 py-8 text-red-500">{error}</div>
 
@@ -307,8 +339,16 @@ export default function Backlog() {
         </button>
       </div>
 
+      {/* Filter + sort */}
+      <BacklogFilterBar
+        search={search} onSearch={setSearch}
+        category={category} onCategory={setCategory}
+        sort={sort} onSort={setSort}
+        resultCount={visibleRecords.length}
+      />
+
       {/* Kanban board */}
-      <BacklogKanban records={records} onCardClick={handleEditFeature} onGroomClick={handleGroomOpen} />
+      <BacklogKanban records={visibleRecords} onCardClick={handleEditFeature} onGroomClick={handleGroomOpen} />
 
       {/* Modal */}
       <BacklogModal

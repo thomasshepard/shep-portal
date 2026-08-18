@@ -44,7 +44,7 @@ function Column({ status, records, onCardClick, onGroomClick }) {
         <span className={`font-medium ${config.color}`}>{status}</span>
         <span className="ml-auto text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{records.length}</span>
       </div>
-      <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+      <div className="space-y-2">
         {records.map(record => (
           <div
             key={record.id}
