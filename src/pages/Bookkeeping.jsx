@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth'
 import { fmtCurrency, fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
 import { suggestReceiptForTransaction } from '../lib/documentLinks'
 import { downloadCsv, downloadJson } from '../lib/csv'
+import { parseRelayCsv } from '../lib/bankCsv'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 // Local field-name access for Documents records — this page doesn't own the
@@ -1327,6 +1328,7 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
   const [syncing, setSyncing] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [suggestions, setSuggestions] = useState({}) // rawTransactionId -> { code, name }
+  const [importingId, setImportingId] = useState(null)
 
   useEffect(() => { load() }, [])
 
@@ -1372,6 +1374,37 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
     setSyncing(false)
   }
 
+  // Backfill past SimpleFin's 90-day cap from the bank's own CSV export —
+  // one or more files (Relay exports one per month, so multi-select is the
+  // natural shape). Parsed entirely client-side; only the normalized rows
+  // go to the server.
+  async function handleImportCsv(bankAccountId, files) {
+    if (!files || files.length === 0) return
+    setImportingId(bankAccountId)
+    try {
+      const allRows = []
+      const parseErrors = []
+      for (const file of files) {
+        const text = await file.text()
+        const { rows, errors } = parseRelayCsv(text)
+        allRows.push(...rows)
+        errors.forEach(e => parseErrors.push(`${file.name}: ${e}`))
+      }
+      if (allRows.length === 0) {
+        toast.error(parseErrors[0] || 'No rows found in the selected file(s)')
+        return
+      }
+      const result = await callBookkeeping('import_csv_transactions', { bankAccountId, rows: allRows })
+      toast.success(`Imported ${result.inserted} transaction${result.inserted === 1 ? '' : 's'}${result.skippedDuplicate ? ` (${result.skippedDuplicate} already had a matching entry, skipped)` : ''}`)
+      if (parseErrors.length > 0) toast.error(`${parseErrors.length} row(s) couldn't be parsed — see console`, { duration: 6000 })
+      if (parseErrors.length > 0) console.warn('[bookkeeping] CSV import parse errors:', parseErrors)
+      load()
+    } catch (e) {
+      toast.error('Import failed: ' + e.message)
+    }
+    setImportingId(null)
+  }
+
   async function categorize(rawTransactionId, accountCode) {
     if (!accountCode) return
     setBusyId(rawTransactionId)
@@ -1412,16 +1445,27 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
       <div className="p-4 space-y-4">
         {/* Mapped accounts summary */}
         {mappedAccounts.length > 0 && (
-          <div className="space-y-1">
+          <div className="space-y-2">
             {mappedAccounts.map(a => (
-              <div key={a.id} className="flex items-center justify-between text-[13px] py-1">
-                <span className="text-gray-600 flex items-center gap-1.5">
-                  {a.display_name}
-                  {a.status === 'needs_reauth' && (
-                    <Badge tone="bad"><AlertTriangle size={10} /> Needs re-auth</Badge>
-                  )}
-                </span>
-                <span className="font-medium text-gray-800 tabular-nums">{a.last_balance != null ? fmtCurrency(a.last_balance) : '—'}</span>
+              <div key={a.id} className="text-[13px] py-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600 flex items-center gap-1.5">
+                    {a.display_name}
+                    {a.status === 'needs_reauth' && (
+                      <Badge tone="bad"><AlertTriangle size={10} /> Needs re-auth</Badge>
+                    )}
+                  </span>
+                  <span className="font-medium text-gray-800 tabular-nums">{a.last_balance != null ? fmtCurrency(a.last_balance) : '—'}</span>
+                </div>
+                <label className="mt-1 flex items-center gap-1.5 text-xs text-violet-600 hover:text-violet-800 cursor-pointer w-fit">
+                  {importingId === a.id ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} className="rotate-180" />}
+                  Import CSV — backfill past the bank feed's history
+                  <input
+                    type="file" accept=".csv,text/csv" multiple hidden
+                    disabled={importingId === a.id}
+                    onChange={e => { handleImportCsv(a.id, e.target.files); e.target.value = '' }}
+                  />
+                </label>
               </div>
             ))}
           </div>

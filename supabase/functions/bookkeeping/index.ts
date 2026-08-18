@@ -761,6 +761,83 @@ async function actionMapFeedAccount(payload: any, _userId?: string, ctx?: BkCont
   return { ok: true }
 }
 
+// Backfill past SimpleFin's hard 90-day lookback cap, from the bank's own
+// CSV export (rows already parsed client-side — see src/lib/bankCsv.js —
+// raw CSV text never needs to touch the server, same shape Finances' CSV
+// import already uses). The two sources describe the same real transaction
+// differently (SimpleFin masks account tails, the CSV export doesn't, plus
+// an extra suffix) — no shared ID or description to dedup on, so dedup
+// against already-synced rows keys on (bank account, date, amount) instead.
+function csvSyntheticId(date: string, amount: number, payee: string, n: number): string {
+  const slug = payee.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return `csv:${date}:${amount.toFixed(2)}:${slug}:${n}`
+}
+
+async function actionImportCsvTransactions(payload: any, _userId?: string, ctx?: BkContext) {
+  const bankAccountId = String(payload?.bankAccountId || '')
+  if (!bankAccountId) throw new Error('bankAccountId is required')
+  await assertBankAccountScope(bankAccountId, ctx)
+  const rows = Array.isArray(payload?.rows) ? payload.rows : []
+  if (rows.length === 0) throw new Error('rows is required')
+
+  // Existing rows for this account, once — checked in-memory per incoming
+  // row rather than a query per row.
+  const { data: existing, error: exErr } = await sb.from('bk_raw_transactions')
+    .select('simplefin_transaction_id, posted_at, amount, source')
+    .eq('bank_account_id', bankAccountId)
+  if (exErr) throw new Error(exErr.message)
+
+  const existingIds = new Set((existing || []).map(e => e.simplefin_transaction_id))
+  const existingLiveKeys = new Set(
+    (existing || []).filter(e => e.source === 'simplefin')
+      .map(e => `${String(e.posted_at).slice(0, 10)}:${Number(e.amount).toFixed(2)}`)
+  )
+
+  const seenInBatch: Record<string, number> = {}
+  const toInsert: Array<{ bank_account_id: string; simplefin_transaction_id: string; posted_at: string; amount: number; description: string; pending: boolean; source: string }> = []
+  let skippedDuplicate = 0
+
+  for (const row of rows) {
+    const date = String(row?.date || '').slice(0, 10)
+    const amount = num(row?.amount)
+    const payee = String(row?.payee || '').trim()
+    const referenceText = String(row?.referenceText || '').trim()
+    if (!date) continue
+
+    const dupeKey = `${date}:${amount.toFixed(2)}:${payee.toLowerCase()}`
+    const n = seenInBatch[dupeKey] ?? 0
+    seenInBatch[dupeKey] = n + 1
+    const syntheticId = csvSyntheticId(date, amount, payee, n)
+
+    // Already imported this exact row before (re-uploading the same file),
+    // or SimpleFin already synced a row for this account/date/amount live.
+    if (existingIds.has(syntheticId) || existingLiveKeys.has(`${date}:${amount.toFixed(2)}`)) {
+      skippedDuplicate++
+      continue
+    }
+
+    toInsert.push({
+      bank_account_id: bankAccountId,
+      simplefin_transaction_id: syntheticId,
+      posted_at: date,
+      amount,
+      // Relay's Reference text often already starts with the Payee (e.g.
+      // "ROBINHOOD  |  Funds |  ...") — don't double it up.
+      description: (referenceText && !referenceText.toLowerCase().startsWith(payee.toLowerCase()))
+        ? `${payee}  |  ${referenceText}` : (referenceText || payee),
+      pending: false,
+      source: 'csv_import',
+    })
+  }
+
+  if (toInsert.length > 0) {
+    const { error: insErr } = await sb.from('bk_raw_transactions').insert(toInsert)
+    if (insErr) throw new Error(insErr.message)
+  }
+
+  return { ok: true, inserted: toInsert.length, skippedDuplicate }
+}
+
 async function actionListRawTransactions(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
   assertEntityScope(entityName, ctx)
@@ -1392,6 +1469,7 @@ const ACTIONS: Record<string, (payload: any, userId: string, ctx?: BkContext) =>
   post_obligation_payment:          actionPostObligationPayment,
   post_bills_payment:               actionPostBillsPayment,
   export_backup:                    actionExportBackup,
+  import_csv_transactions:          actionImportCsvTransactions,
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
