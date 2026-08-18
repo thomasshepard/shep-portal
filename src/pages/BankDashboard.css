@@ -230,6 +230,21 @@
 }
 .bd-unlink-inline:hover { color: var(--bd-danger); }
 
+.bd-relink-inline {
+  background: transparent;
+  border: none;
+  color: var(--bd-accent);
+  font-family: var(--bd-mono);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  padding: 0;
+  transition: opacity 0.15s;
+}
+.bd-relink-inline:hover { opacity: 0.75; }
+.bd-relink-inline:disabled { opacity: 0.5; cursor: default; }
+
 .bd-row-right {
   display: flex;
   align-items: center;

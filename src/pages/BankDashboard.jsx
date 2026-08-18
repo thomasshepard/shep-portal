@@ -51,6 +51,7 @@ export default function BankDashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [linking, setLinking] = useState(false)
+  const [relinkingId, setRelinkingId] = useState(null)
   const [accounts, setAccounts] = useState([])
   const [ownerOptions, setOwnerOptions] = useState(['Personal'])
   const [updatedAt, setUpdatedAt] = useState(null)
@@ -129,6 +130,32 @@ export default function BankDashboard() {
     } catch (err) {
       toast.error(err.message || 'Failed to open Plaid Link')
       setLinking(false)
+    }
+  }
+
+  // Re-authenticates an already-linked, broken item (ITEM_LOGIN_REQUIRED)
+  // in place via Plaid's "update mode" — same Item, same access_token,
+  // just a fresh login. Unlike startLink(), success doesn't call
+  // exchange_token: update mode doesn't rotate the access_token, so
+  // there's nothing new to store.
+  async function startRelink(itemId, institutionName) {
+    setRelinkingId(itemId)
+    try {
+      await loadScriptOnce(PLAID_SDK_SRC)
+      const data = await callGateway('create_link_token', { itemId })
+      const handler = window.Plaid.create({
+        token: data.link_token,
+        onSuccess: () => {
+          toast.success(`${institutionName} re-linked`)
+          loadBalances(true)
+          setRelinkingId(null)
+        },
+        onExit: () => setRelinkingId(null),
+      })
+      handler.open()
+    } catch (err) {
+      toast.error(err.message || 'Failed to open Plaid Link')
+      setRelinkingId(null)
     }
   }
 
@@ -283,11 +310,23 @@ export default function BankDashboard() {
                   </div>
                   {group.accounts.map(acct => {
                     if (acct.error) {
+                      const needsRelink = acct.error.startsWith('Needs re-link')
                       return (
                         <div key={acct.itemId} className="bd-account-row bd-error">
                           <div className="bd-name-block">
                             <div className="bd-name">{acct.institutionName}</div>
-                            <div className="bd-meta">error</div>
+                            <div className="bd-meta">
+                              error
+                              {needsRelink && (
+                                <button
+                                  className="bd-relink-inline"
+                                  disabled={relinkingId === acct.itemId}
+                                  onClick={() => startRelink(acct.itemId, acct.institutionName)}
+                                >
+                                  {relinkingId === acct.itemId ? 're-linking…' : 're-link'}
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="bd-amount">{acct.error}</div>
                         </div>
