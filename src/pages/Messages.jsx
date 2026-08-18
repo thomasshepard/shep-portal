@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Plus, Send, Paperclip, X, Image as ImageIcon, File as FileIcon, MessageSquare, BellOff, Bell, CornerDownRight } from 'lucide-react'
+import { Plus, Send, Paperclip, X, Image as ImageIcon, File as FileIcon, MessageSquare, BellOff, Bell, CornerDownRight, ChevronLeft } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useChannelList, useChannelMessages } from '../hooks/useMessages'
 import {
@@ -226,9 +226,10 @@ function ThreadPanel({ root, channelId, members, myId, onClose }) {
   }
 
   return (
-    <div className="w-80 border-l border-slate-200 flex flex-col shrink-0 bg-white">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-        <h3 className="text-sm font-semibold text-slate-700">Thread</h3>
+    <div className="fixed inset-0 z-40 md:static md:z-auto md:w-80 md:border-l border-slate-200 flex flex-col shrink-0 bg-white">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200">
+        <button onClick={onClose} className="md:hidden text-slate-400 hover:text-slate-600 -ml-1"><ChevronLeft size={22} /></button>
+        <h3 className="text-sm font-semibold text-slate-700 flex-1">Thread</h3>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -291,12 +292,6 @@ export default function Messages() {
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages.length])
 
-  // Auto-select the first channel once the list loads, on desktop-width pages
-  // without a channel already selected via the URL.
-  useEffect(() => {
-    if (!channelId && channels.length) navigate(`/messages/${channels[0].id}`, { replace: true })
-  }, [channelId, channels, navigate])
-
   function memberName(id) {
     if (id === myId) return 'You'
     return members.find(m => m.profile_id === id)?.profiles?.full_name || 'Someone'
@@ -345,8 +340,8 @@ export default function Messages() {
 
   return (
     <div className="h-[calc(100vh-8rem)] flex rounded-xl border border-slate-200 overflow-hidden bg-white">
-      {/* Channel list */}
-      <div className="w-72 border-r border-slate-200 flex flex-col shrink-0">
+      {/* Channel list — full-screen on mobile when no conversation is open, a fixed side rail on desktop */}
+      <div className={`${channelId ? 'hidden md:flex' : 'flex'} w-full md:w-72 border-r border-slate-200 flex-col shrink-0`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
           <h1 className="text-base font-semibold text-slate-800">Messages</h1>
           <button onClick={() => setShowNew(true)} className="text-blue-600 hover:text-blue-700" title="New conversation">
@@ -365,13 +360,20 @@ export default function Messages() {
         </div>
       </div>
 
-      {/* Active channel */}
+      {/* Active channel — full-screen on mobile (hidden until a conversation is picked), side-by-side with the list on desktop */}
+      <div className={`${channelId ? 'flex' : 'hidden md:flex'} flex-1 min-w-0`}>
       {activeChannel ? (
         <div className="flex-1 flex min-w-0">
           <div className="flex-1 flex flex-col min-w-0">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-              <div>
-                <div className="text-sm font-semibold text-slate-800">{displayName}</div>
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200">
+              <button onClick={() => navigate('/messages')} className="md:hidden text-slate-400 hover:text-slate-600 -ml-1 shrink-0">
+                <ChevronLeft size={22} />
+              </button>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 bg-slate-200 text-slate-600`}>
+                {activeChannel.kind === 'group' ? <MessageSquare size={14} /> : initials(displayName)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-800 truncate">{displayName}</div>
                 {activeChannel.kind === 'group' && (
                   <div className="text-xs text-slate-400 truncate">
                     {members.map(m => m.profiles?.full_name || m.profiles?.email).join(', ')}
@@ -380,7 +382,7 @@ export default function Messages() {
               </div>
               <button
                 onClick={() => setChannelMuted(channelId, myId, !activeChannel.muted).then(refreshChannels)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 shrink-0"
                 title={activeChannel.muted ? 'Unmute' : 'Mute'}
               >
                 {activeChannel.muted ? <BellOff size={18} /> : <Bell size={18} />}
@@ -473,6 +475,7 @@ export default function Messages() {
           {channelsLoading ? <LoadingSpinner /> : 'Select a conversation, or start a new one.'}
         </div>
       )}
+      </div>
 
       {showNew && <NewConversationModal myId={myId} onClose={() => setShowNew(false)} onCreated={handleCreated} />}
     </div>
