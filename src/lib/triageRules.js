@@ -683,6 +683,67 @@ export const TRIAGE_RULES = [
   },
 
   /**
+   * Rule 13 — backlog-decide-stale
+   * Backlog Inbox "Decide / Research" cards that are still unresolved past
+   * their check-in date. Backlog.jsx archives (Status='Archived') a
+   * Decide/Research card immediately on Accept/route, not on resolution --
+   * so Status can't be the "still needs a decision" signal here, that's
+   * what the separate Resolved checkbox is for. Resolve action is a direct
+   * updateField (one click from the Triage card, no navigation needed).
+   */
+  {
+    id: 'backlog-decide-stale',
+    label: 'Backlog Decide/Research item overdue',
+    enabled: true,
+    fetch: async (cache) => {
+      return cache.get('backlog:decide-research-open', async () => {
+        const formula = encodeURIComponent("AND({Kind}='Decide / Research', NOT({Resolved}))")
+        const url = `https://api.airtable.com/v0/appp0qWrN24f8wqho/tblHUG1CGxrirONPB?filterByFormula=${formula}`
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${import.meta.env.VITE_AIRTABLE_PAT}` } })
+        if (!res.ok) return []
+        const json = await res.json()
+        return json.records || []
+      })
+    },
+    evaluate: (record, today) => {
+      const checkIn = parseDate(record.fields['Check-in Date'])
+      if (!checkIn || checkIn > today) return null
+      const daysLate = daysBetween(checkIn, today)
+      return {
+        id: `rule:backlog-decide-stale:${record.id}`,
+        source: 'Backlog',
+        sourceRecordId: record.id,
+        sourceBaseId: 'appp0qWrN24f8wqho',
+        sourceTable: 'tblHUG1CGxrirONPB',
+        identifier: record.fields['Feature'],
+        whatShouldBeTrue: 'Decide/Research on this backlog item by its check-in date',
+        expectedDate: checkIn,
+        lastObservedDate: null,
+        daysLate,
+        daysUntil: null,
+        daysSinceObserved: null,
+        bucket: daysLate > 14 ? 'stale' : 'late',
+        // 'Thomas', not 'Decide' -- HANDLER_OPTIONS already has an unrelated
+        // 'Decide' value meaning "no owner yet, you decide".
+        handler: 'Thomas',
+        consequence: 'This idea sits unresolved past its check-in date',
+        detailRoute: '/backlog',
+        resolveAction: {
+          label: 'Mark resolved',
+          handler: 'updateField',
+          targetBaseId: 'appp0qWrN24f8wqho',
+          targetTableId: 'tblHUG1CGxrirONPB',
+          targetRecordId: record.id,
+          targetField: 'Resolved',
+          targetValue: true,
+        },
+        ruleId: 'backlog-decide-stale',
+        isManual: false,
+      }
+    },
+  },
+
+  /**
    * Rule 10 — manual-flag
    * Preserved from v1: records with Triage Status = Initiative/Rhythm/Watch
    * across Property, Lease Agreements, Maintenance Requests, Flock, and LLCs.

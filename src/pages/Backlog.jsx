@@ -2,12 +2,20 @@ import { useState, useEffect } from 'react'
 import { Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAccessLog } from '../hooks/useAccessLog'
+import { useAuth } from '../hooks/useAuth'
+import { createTask, taskExistsForSourceKey } from '../lib/tasks'
 import BacklogKanban from '../components/BacklogKanban'
 import BacklogModal from '../components/BacklogModal'
+import BacklogComposer from '../components/BacklogComposer'
+import BacklogGroomView from '../components/BacklogGroomView'
 
 const BASE_ID = 'appp0qWrN24f8wqho'
 const TABLE_ID = 'tblHUG1CGxrirONPB'
 const AIRTABLE_PAT = import.meta.env.VITE_AIRTABLE_PAT
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10)
+}
 
 async function fetchRecords() {
   const all = []
@@ -30,6 +38,8 @@ async function fetchRecords() {
   return { records: all }
 }
 
+// Classic manual-entry flow (BacklogModal, "+ Add Feature"). Always tags
+// Kind='Build' so these never get mistaken for ungroomed Inbox captures.
 async function saveRecord(record) {
   const fields = {
     Feature: record.name,
@@ -39,11 +49,12 @@ async function saveRecord(record) {
     Category: record.category,
     Description: record.description,
     'Build Prompt': record.buildPrompt,
+    Kind: 'Build',
   }
   const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ records: [{ fields }] }),
+    body: JSON.stringify({ records: [{ fields }], typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to create record')
   return res.json()
@@ -58,11 +69,44 @@ async function updateRecord(recordId, record) {
     Category: record.category,
     Description: record.description,
     'Build Prompt': record.buildPrompt,
+    Kind: 'Build',
   }
   const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields }),
+    body: JSON.stringify({ fields, typecast: true }),
+  })
+  if (!res.ok) throw new Error('Failed to update record')
+  return res.json()
+}
+
+// Bare capture: only Feature + Status set. Lands in the Inbox lane (Kind
+// stays empty) via BacklogKanban's grouping.
+async function createInboxRecords(featureNames) {
+  const records = featureNames.map(name => ({ fields: { Feature: name, Status: 'Idea' } }))
+  const chunks = []
+  for (let i = 0; i < records.length; i += 10) chunks.push(records.slice(i, i + 10))
+
+  const created = []
+  for (const chunk of chunks) {
+    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records: chunk, typecast: true }),
+    })
+    if (!res.ok) throw new Error('Failed to create record')
+    const json = await res.json()
+    created.push(...json.records)
+  }
+  return created
+}
+
+// Generic field patch, used by the groom Accept/Discard flow.
+async function patchFields(recordId, fields) {
+  const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields, typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to update record')
   return res.json()
@@ -70,11 +114,14 @@ async function updateRecord(recordId, record) {
 
 export default function Backlog() {
   const { log } = useAccessLog()
+  const { session } = useAuth()
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const [editingFeature, setEditingFeature] = useState(null)
+  const [groomingRecord, setGroomingRecord] = useState(null)
+  const [groomBusy, setGroomBusy] = useState(false)
 
   useEffect(() => {
     log('backlog', 'view')
@@ -93,6 +140,10 @@ export default function Backlog() {
     }
   }
 
+  function upsertLocal(id, fields) {
+    setRecords(prev => prev.map(r => r.id === id ? { ...r, fields: { ...r.fields, ...fields } } : r))
+  }
+
   const handleAddFeature = () => {
     setEditingFeature(null)
     setShowModal(true)
@@ -107,11 +158,15 @@ export default function Backlog() {
     try {
       if (editingFeature) {
         await updateRecord(editingFeature.id, formData)
-        setRecords(records.map(r => r.id === editingFeature.id ? { ...r, fields: { ...r.fields, ...formData } } : r))
+        upsertLocal(editingFeature.id, {
+          Feature: formData.name, Status: formData.status, Effort: formData.effort,
+          Value: formData.value, Category: formData.category, Description: formData.description,
+          'Build Prompt': formData.buildPrompt, Kind: 'Build',
+        })
         toast.success('✓ Feature updated')
       } else {
         const result = await saveRecord(formData)
-        setRecords([...records, result.records[0]])
+        setRecords(prev => [...prev, result.records[0]])
         toast.success('✓ Feature added')
       }
       setShowModal(false)
@@ -121,16 +176,119 @@ export default function Backlog() {
     }
   }
 
+  // ── Capture ──────────────────────────────────────────────────────────────
+  const handleCapture = async (text) => {
+    try {
+      const [created] = await createInboxRecords([text])
+      setRecords(prev => [...prev, created])
+      toast.success('Added to Inbox')
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const handleCaptureMany = async (lines) => {
+    try {
+      const created = await createInboxRecords(lines)
+      setRecords(prev => [...prev, ...created])
+      toast.success(`Added ${created.length} to Inbox`)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  // ── Groom ────────────────────────────────────────────────────────────────
+  const handleGroomOpen = (record) => setGroomingRecord(record)
+  const handleGroomCancel = () => setGroomingRecord(null)
+
+  const handleGroomDiscard = async () => {
+    if (!groomingRecord) return
+    setGroomBusy(true)
+    try {
+      const fields = { Status: 'Archived', 'Groomed At': todayISO() }
+      await patchFields(groomingRecord.id, fields)
+      upsertLocal(groomingRecord.id, fields)
+      toast.success('Discarded')
+      setGroomingRecord(null)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setGroomBusy(false)
+    }
+  }
+
+  const handleGroomAccept = async (form) => {
+    if (!groomingRecord) return
+    setGroomBusy(true)
+    try {
+      const baseFields = {
+        Kind: form.kind,
+        Category: form.category || null,
+        Effort: form.effort || null,
+        Value: form.value || null,
+        Description: form.description || '',
+        'Groomed At': todayISO(),
+      }
+
+      if (form.kind === 'Build') {
+        const fields = { ...baseFields, 'Build Prompt': form.buildPrompt || '' }
+        await patchFields(groomingRecord.id, fields)
+        upsertLocal(groomingRecord.id, fields)
+        toast.success('Groomed — now on the Build board')
+      } else if (form.kind === 'Do') {
+        const sourceKey = `backlog:${groomingRecord.id}`
+        if (!(await taskExistsForSourceKey(sourceKey))) {
+          await createTask({
+            title: groomingRecord.fields['Feature'],
+            module: 'Backlog',
+            dueDate: form.dueDate || null,
+            body: form.description || '',
+            sourceKey,
+            actionUrl: '/#/backlog',
+            userId: session?.user?.id,
+          })
+        }
+        const fields = { ...baseFields, Status: 'Archived' }
+        await patchFields(groomingRecord.id, fields)
+        upsertLocal(groomingRecord.id, fields)
+        toast.success('Routed to Tasks')
+      } else if (form.kind === 'Decide / Research') {
+        const fields = { ...baseFields, Status: 'Archived', 'Check-in Date': form.checkInDate }
+        await patchFields(groomingRecord.id, fields)
+        upsertLocal(groomingRecord.id, fields)
+        toast.success(`Will check back on ${form.checkInDate}`)
+      }
+
+      setGroomingRecord(null)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setGroomBusy(false)
+    }
+  }
+
   const stats = {
-    active: records.filter(r => ['Idea', 'Planned', 'In Progress'].includes(r.fields['Status'])).length,
+    active: records.filter(r => !['Done', 'Archived'].includes(r.fields['Status'])).length,
     inProgress: records.filter(r => r.fields['Status'] === 'In Progress').length,
   }
 
   if (loading) return <div className="max-w-7xl mx-auto px-6 py-8 text-gray-500">Loading backlog...</div>
   if (error) return <div className="max-w-7xl mx-auto px-6 py-8 text-red-500">{error}</div>
 
+  if (groomingRecord) {
+    return (
+      <BacklogGroomView
+        record={groomingRecord}
+        onAccept={handleGroomAccept}
+        onDiscard={handleGroomDiscard}
+        onCancel={handleGroomCancel}
+        busy={groomBusy}
+      />
+    )
+  }
+
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8">
+    <div className="max-w-7xl mx-auto px-6 py-8 pb-24">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -150,7 +308,7 @@ export default function Backlog() {
       </div>
 
       {/* Kanban board */}
-      <BacklogKanban records={records} onCardClick={handleEditFeature} stats={stats} />
+      <BacklogKanban records={records} onCardClick={handleEditFeature} onGroomClick={handleGroomOpen} />
 
       {/* Modal */}
       <BacklogModal
@@ -162,6 +320,9 @@ export default function Backlog() {
         }}
         onSave={handleSaveFeature}
       />
+
+      {/* Persistent capture bar */}
+      <BacklogComposer onCapture={handleCapture} onCaptureMany={handleCaptureMany} />
     </div>
   )
 }
