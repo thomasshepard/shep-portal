@@ -201,6 +201,7 @@ Deno.serve(async (req) => {
       },
       metadata: {
         airtable_mow_id: mowRecordId,
+        table_id: targetTable,
         source: 'happy_cuts_portal',
       },
     })
