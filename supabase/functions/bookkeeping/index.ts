@@ -30,7 +30,7 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
 
 const corsHeaders = {
   'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cron-key',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
@@ -1399,6 +1399,30 @@ const ACTIONS: Record<string, (payload: any, userId: string, ctx?: BkContext) =>
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405)
+
+  // Scheduled sync (pg_cron → net.http_post, see the
+  // *_bookkeeping_sync_cron.sql migration) carries no user session, so it
+  // authenticates via a shared-secret header instead — same trust model as
+  // run-migration's x-migration-key. Deliberately narrow: this path can only
+  // ever reach sync_feed_transactions, never anything that reads or posts
+  // ledger data, so a leaked cron key can't do more than trigger a sync.
+  const cronKey = req.headers.get('x-cron-key') || ''
+  const CRON_KEY = Deno.env.get('BOOKKEEPING_CRON_KEY')
+  if (CRON_KEY && cronKey === CRON_KEY) {
+    let cronBody: any
+    try { cronBody = await req.json() } catch { cronBody = {} }
+    if (String(cronBody?.action || '') !== 'sync_feed_transactions') {
+      return json({ ok: false, error: 'Cron key may only call sync_feed_transactions' }, 403)
+    }
+    try {
+      const result = await actionSyncFeedTransactions(cronBody)
+      return json(result)
+    } catch (err: any) {
+      const message = err?.message || String(err)
+      console.error('[bookkeeping] cron sync failed:', message)
+      return json({ ok: false, error: message }, 400)
+    }
+  }
 
   const authHeader = req.headers.get('authorization') || ''
   const jwt = authHeader.replace(/^Bearer\s+/i, '')
