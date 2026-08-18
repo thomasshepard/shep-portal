@@ -19,10 +19,15 @@ const MODULE_LABELS = {
   llcs:       { label: 'LLCs',       color: 'bg-slate-100 text-slate-700'   },
   alerts:     { label: 'Alerts',     color: 'bg-red-100 text-red-700'       },
   system:     { label: 'System',     color: 'bg-gray-100 text-gray-700'     },
+  messages:   { label: 'Messages (push, not email)', color: 'bg-indigo-100 text-indigo-700' },
 }
 
 const DELIVERY_OPTIONS = ['instant', 'digest', 'discord', 'off']
 const DELIVERY_LABELS  = { instant: 'Instant', digest: 'Digest', discord: 'Discord', off: 'Off' }
+
+// Messages has no Discord routing (it's the Discord replacement) — that column
+// renders disabled for this one row instead of a 5th grid column.
+const MODULE_DELIVERY_OPTIONS = { messages: ['instant', 'digest', 'off'] }
 
 const TZ_OPTIONS = [
   'America/New_York',
@@ -87,10 +92,11 @@ export default function NotificationSettings() {
       discord_user_id: null, digest_hour_local: 7,
       mod_tasks: true, mod_happy_cuts: true, mod_properties: true,
       mod_incubator: true, mod_chickens: true, mod_documents: true,
-      mod_llcs: true, mod_alerts: true, mod_system: true,
+      mod_llcs: true, mod_alerts: true, mod_system: true, mod_messages: true,
       delivery_tasks: 'instant', delivery_happy_cuts: 'digest', delivery_properties: 'instant',
       delivery_incubator: 'digest', delivery_chickens: 'digest', delivery_documents: 'digest',
       delivery_llcs: 'digest', delivery_alerts: 'instant', delivery_system: 'instant',
+      delivery_messages: 'instant',
       paused_until: null,
       quiet_hours_start: null, quiet_hours_end: null,
       timezone: 'America/Chicago',
@@ -371,6 +377,7 @@ export default function NotificationSettings() {
           {Object.entries(MODULE_LABELS).map(([key, { label, color }]) => {
             const modKey = `mod_${key}`
             const delKey = `delivery_${key}`
+            const allowedOpts = MODULE_DELIVERY_OPTIONS[key] || DELIVERY_OPTIONS
             return (
               <div key={key} className="grid grid-cols-[1fr_repeat(4,48px)] gap-1 items-center py-1 border-b border-slate-50 last:border-0">
                 <div className="flex items-center gap-2">
@@ -384,15 +391,19 @@ export default function NotificationSettings() {
                 </div>
                 {DELIVERY_OPTIONS.map(opt => (
                   <div key={opt} className="flex justify-center">
-                    <input
-                      type="radio"
-                      name={`delivery_${key}`}
-                      value={opt}
-                      checked={prefs?.[delKey] === opt}
-                      onChange={() => set(delKey, opt)}
-                      className="w-3.5 h-3.5 border-slate-300 text-amber-500 focus:ring-amber-400"
-                      disabled={!prefs?.[modKey]}
-                    />
+                    {allowedOpts.includes(opt) ? (
+                      <input
+                        type="radio"
+                        name={`delivery_${key}`}
+                        value={opt}
+                        checked={prefs?.[delKey] === opt}
+                        onChange={() => set(delKey, opt)}
+                        className="w-3.5 h-3.5 border-slate-300 text-amber-500 focus:ring-amber-400"
+                        disabled={!prefs?.[modKey]}
+                      />
+                    ) : (
+                      <span className="text-slate-300 text-xs">—</span>
+                    )}
                   </div>
                 ))}
               </div>
