@@ -50,24 +50,29 @@ Deno.serve(async (req) => {
     // --- Make the cash payment unambiguous on the Stripe side ---
     // paid_out_of_band alone just flips the invoice to "Paid" with no record of
     // *how* — indistinguishable in the dashboard from any other manual override.
-    // Stamp a description (shows on the invoice detail page + PDF) and metadata
-    // (shows in the dashboard's Metadata panel) before marking it paid.
+    // Stamp metadata (shows in the dashboard's Metadata panel) before marking it
+    // paid. NOTE: `description` looked like a good spot for a visible note too,
+    // but Stripe rejects updating it (or footer/custom_fields) on an invoice
+    // that's already finalized — "Finalized invoices can't be updated in this
+    // way" — those fields are draft-only, and by the time we're marking paid
+    // the invoice has always already been finalized. Metadata is the one
+    // invoice-level field Stripe allows editing at any status. Best-effort and
+    // never blocks the actual paid-marking below — a metadata hiccup shouldn't
+    // stop cash from getting recorded as paid.
     const paidAt = new Date().toISOString()
-    const existingInvoice = await stripe.invoices.retrieve(stripeInvoiceId)
-    const cashStamp = `[PAID IN CASH — recorded via Shep Portal ${new Date(paidAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}]`
-    const newDescription = existingInvoice.description
-      ? `${existingInvoice.description}\n${cashStamp}`
-      : cashStamp
-
-    await stripe.invoices.update(stripeInvoiceId, {
-      description: newDescription,
-      metadata: {
-        ...existingInvoice.metadata,
-        payment_method: 'cash',
-        cash_marked_via: 'shep_portal',
-        cash_marked_at: paidAt,
-      },
-    })
+    try {
+      const existingInvoice = await stripe.invoices.retrieve(stripeInvoiceId)
+      await stripe.invoices.update(stripeInvoiceId, {
+        metadata: {
+          ...existingInvoice.metadata,
+          payment_method: 'cash',
+          cash_marked_via: 'shep_portal',
+          cash_marked_at: paidAt,
+        },
+      })
+    } catch (metaErr) {
+      console.error('[MarkPaid] Could not stamp cash metadata (continuing anyway):', metaErr)
+    }
 
     const paidInvoice = await stripe.invoices.pay(stripeInvoiceId, {
       paid_out_of_band: true,
