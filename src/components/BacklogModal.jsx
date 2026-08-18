@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 
 const EFFORT_OPTIONS = ['S', 'M', 'L', 'XL']
 const STATUS_OPTIONS = ['Idea', 'Planned', 'In Progress', 'Done', 'Archived']
-const CATEGORY_OPTIONS = ['Operations', 'Real Estate', 'Happy Cuts', 'Homestead', 'Personal', 'Technical', 'Finance']
+const CATEGORY_OPTIONS = ['Operations', 'Real Estate', 'Happy Cuts', 'Homestead', 'Personal', 'Technical', 'Finance', 'Infrastructure']
 
 const VALUE_DESCRIPTIONS = [
   { stars: 1, label: 'Nice to have — low impact' },

@@ -31,18 +31,21 @@ const MODULE_ACCENT = {
   'Happy Cuts': 'bg-emerald-500',
   'Properties': 'bg-blue-500',
   'LLC':        'bg-violet-500',
+  'Backlog':    'bg-cyan-500',
   'Manual':     'bg-slate-400',
 }
 const MODULE_TEXT = {
   'Happy Cuts': 'text-emerald-600',
   'Properties': 'text-blue-600',
   'LLC':        'text-violet-600',
+  'Backlog':    'text-cyan-600',
   'Manual':     'text-slate-500',
 }
 const MODULE_PILL_BG = {
   'Happy Cuts': 'bg-emerald-100 text-emerald-700',
   'Properties': 'bg-blue-100 text-blue-700',
   'LLC':        'bg-violet-100 text-violet-700',
+  'Backlog':    'bg-cyan-100 text-cyan-700',
   'Manual':     'bg-slate-100 text-slate-600',
 }
 
