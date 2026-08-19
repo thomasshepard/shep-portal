@@ -140,19 +140,18 @@ export async function setChannelMuted(channelId, profileId, muted) {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-// Root (non-thread) messages by default; pass threadRootId to fetch a thread
-// (root + its replies) instead. Keyset pagination via `before`.
-export async function fetchMessages(channelId, { before, limit = 50, threadRootId = null } = {}) {
+// Every message in the channel, replies included, in one flat chronological
+// feed (Discord/iMessage-style — not hidden behind a separate thread view).
+// `thread_root_id` is still stored per message so a reply can show a small
+// "replying to" quote inline; it no longer gates what's fetched here.
+// Keyset pagination via `before`.
+export async function fetchMessages(channelId, { before, limit = 50 } = {}) {
   let query = supabase
     .from('msg_messages')
     .select(MSG_SELECT)
     .eq('channel_id', channelId)
     .order('created_at', { ascending: false })
     .limit(limit)
-
-  query = threadRootId
-    ? query.or(`id.eq.${threadRootId},thread_root_id.eq.${threadRootId}`)
-    : query.is('thread_root_id', null)
 
   if (before) query = query.lt('created_at', before)
 

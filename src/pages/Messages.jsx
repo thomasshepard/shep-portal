@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Plus, Send, Paperclip, X, Image as ImageIcon, File as FileIcon, MessageSquare, BellOff, Bell, CornerDownRight, ChevronLeft } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useChannelList, useChannelMessages } from '../hooks/useMessages'
 import {
   channelDisplayName, findOrCreateDM, createGroup, fetchTeammates, fetchChannelMembers,
-  sendMessage, uploadAttachment, signAttachmentUrl, setChannelMuted, fetchMessages,
+  sendMessage, uploadAttachment, signAttachmentUrl, setChannelMuted,
 } from '../lib/messaging'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
@@ -197,70 +197,6 @@ function NewConversationModal({ myId, onClose, onCreated }) {
   )
 }
 
-// ── Thread reply panel ────────────────────────────────────────────────────────
-function ThreadPanel({ root, channelId, members, myId, onClose }) {
-  const [replies, setReplies] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [text, setText] = useState('')
-  const memberName = (id) => members.find(m => m.profile_id === id)?.profiles?.full_name || 'Someone'
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const data = await fetchMessages(channelId, { threadRootId: root.id })
-    setReplies(data.filter(m => m.id !== root.id))
-    setLoading(false)
-  }, [channelId, root.id])
-
-  useEffect(() => { load() }, [load])
-
-  async function send() {
-    if (!text.trim()) return
-    const body = text
-    setText('')
-    try {
-      await sendMessage({ channelId, senderId: myId, body, threadRootId: root.id, members })
-      load()
-    } catch (err) {
-      toast.error(err.message || 'Failed to reply')
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-40 md:static md:z-auto md:w-80 md:border-l border-slate-200 flex flex-col shrink-0 bg-white">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200">
-        <button onClick={onClose} className="md:hidden text-slate-400 hover:text-slate-600 -ml-1"><ChevronLeft size={22} /></button>
-        <h3 className="text-sm font-semibold text-slate-700 flex-1">Thread</h3>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        <div className="text-sm">
-          <div className="font-medium text-slate-700">{memberName(root.sender_id)}</div>
-          <div className="text-slate-600 whitespace-pre-wrap break-words">{renderBody(root.body)}</div>
-        </div>
-        <div className="border-t border-slate-100 pt-3 space-y-3">
-          {loading ? <LoadingSpinner /> : replies.map(r => (
-            <div key={r.id} className="text-sm">
-              <div className="font-medium text-slate-700">{memberName(r.sender_id)} <span className="text-xs text-slate-400 font-normal">{timeAgo(r.created_at)}</span></div>
-              <div className="text-slate-600 whitespace-pre-wrap break-words">{renderBody(r.body)}</div>
-            </div>
-          ))}
-          {!loading && !replies.length && <p className="text-xs text-slate-400">No replies yet.</p>}
-        </div>
-      </div>
-      <div className="p-3 border-t border-slate-200 flex gap-2">
-        <input
-          value={text}
-          onChange={e => setText(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') send() }}
-          placeholder="Reply in thread…"
-          className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-        />
-        <button onClick={send} className="px-3 py-2 rounded-lg bg-blue-600 text-white"><Send size={16} /></button>
-      </div>
-    </div>
-  )
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Messages() {
   const { profile } = useAuth()
@@ -273,7 +209,7 @@ export default function Messages() {
 
   const [members, setMembers] = useState([])
   const [showNew, setShowNew] = useState(false)
-  const [thread, setThread] = useState(null)
+  const [replyingTo, setReplyingTo] = useState(null)
   const [text, setText] = useState('')
   const [pendingFiles, setPendingFiles] = useState([])
   const [sending, setSending] = useState(false)
@@ -285,7 +221,7 @@ export default function Messages() {
   useEffect(() => {
     if (!channelId) return
     fetchChannelMembers(channelId).then(setMembers)
-    setThread(null)
+    setReplyingTo(null)
   }, [channelId])
 
   useEffect(() => {
@@ -323,17 +259,31 @@ export default function Messages() {
     setSending(true)
     const body = text
     const attachments = pendingFiles
+    const replyTarget = replyingTo
     setText('')
     setPendingFiles([])
+    setReplyingTo(null)
     try {
-      await sendMessage({ channelId, senderId: myId, body, attachments, members })
+      await sendMessage({
+        channelId, senderId: myId, body, attachments, members,
+        threadRootId: replyTarget ? (replyTarget.thread_root_id || replyTarget.id) : null,
+      })
     } catch (err) {
       toast.error(err.message || 'Failed to send')
       setText(body)
       setPendingFiles(attachments)
+      setReplyingTo(replyTarget)
     } finally {
       setSending(false)
     }
+  }
+
+  // For a reply, resolves which already-loaded message to show as the quoted
+  // reference above the bubble (always the thread's root, per the flat-thread
+  // convention — see messaging.js).
+  function quotedFor(m) {
+    if (!m.thread_root_id) return null
+    return messages.find(x => x.id === m.thread_root_id) || null
   }
 
   const displayName = useMemo(() => channelDisplayName(activeChannel, myId), [activeChannel, myId])
@@ -392,11 +342,20 @@ export default function Messages() {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messagesLoading ? <LoadingSpinner /> : messages.map(m => {
                 const mine = m.sender_id === myId
+                const quoted = quotedFor(m)
                 return (
                   <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[70%] ${mine ? 'items-end' : 'items-start'} flex flex-col`}>
                       {!mine && activeChannel.kind === 'group' && (
                         <span className="text-xs text-slate-400 mb-0.5 px-1">{m.profiles?.full_name || memberName(m.sender_id)}</span>
+                      )}
+                      {quoted && !m.deleted_at && (
+                        <div className={`flex items-center gap-1 text-[11px] text-slate-400 mb-0.5 px-1 max-w-full ${mine ? 'flex-row-reverse' : ''}`}>
+                          <CornerDownRight size={11} className="shrink-0" />
+                          <span className="truncate">
+                            {quoted.deleted_at ? 'a deleted message' : `${memberName(quoted.sender_id)}: ${quoted.body || 'an attachment'}`}
+                          </span>
+                        </div>
                       )}
                       <div className={`rounded-2xl px-3 py-2 text-sm ${mine ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                         {m.deleted_at ? (
@@ -413,10 +372,10 @@ export default function Messages() {
                         <span className="text-[11px] text-slate-400">{timeAgo(m.created_at)}</span>
                         {!m.deleted_at && (
                           <button
-                            onClick={() => setThread(m)}
+                            onClick={() => setReplyingTo(m)}
                             className="text-[11px] text-slate-400 hover:text-blue-600 flex items-center gap-0.5"
                           >
-                            <CornerDownRight size={11} /> {m.reply_count > 0 ? `${m.reply_count} repl${m.reply_count === 1 ? 'y' : 'ies'}` : 'Reply'}
+                            <CornerDownRight size={11} /> Reply
                           </button>
                         )}
                       </div>
@@ -428,6 +387,14 @@ export default function Messages() {
             </div>
 
             <div className="p-3 border-t border-slate-200">
+              {replyingTo && (
+                <div className="flex items-center justify-between gap-2 mb-2 pl-2 pr-1 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+                  <span className="truncate text-slate-500">
+                    Replying to <span className="font-medium text-slate-600">{memberName(replyingTo.sender_id)}</span>: {replyingTo.body || 'an attachment'}
+                  </span>
+                  <button onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-slate-600 shrink-0 p-1"><X size={13} /></button>
+                </div>
+              )}
               {pendingFiles.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2">
                   {pendingFiles.map((f, i) => (
@@ -465,10 +432,6 @@ export default function Messages() {
               </div>
             </div>
           </div>
-
-          {thread && (
-            <ThreadPanel root={thread} channelId={channelId} members={members} myId={myId} onClose={() => setThread(null)} />
-          )}
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
