@@ -55,7 +55,6 @@ export function useChannelMessages(channelId, profileId) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'msg_messages', filter: `channel_id=eq.${channelId}` },
         (payload) => {
-          if (payload.new.thread_root_id) return // thread replies render inside the thread panel, not the main feed
           setMessages(prev => prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new])
         }
       )
