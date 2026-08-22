@@ -2,6 +2,18 @@ import { supabase } from './supabase'
 
 const MSG_SELECT = '*, profiles!msg_messages_sender_id_fkey(id, full_name, email)'
 
+// profiles' own RLS only allows a user to read their own row (or admin, any
+// row) — so embedding `profiles(...)` straight off msg_members silently
+// resolves to null for every teammate who isn't you or an admin. Resolve
+// names through teammates_directory instead (a narrow view exposing just
+// id/full_name/email/role/is_active, readable by any authenticated user).
+async function resolveProfiles(profileIds) {
+  const ids = [...new Set(profileIds)].filter(Boolean)
+  if (!ids.length) return {}
+  const { data } = await supabase.from('teammates_directory').select('id, full_name, email, role').in('id', ids)
+  return Object.fromEntries((data || []).map(p => [p.id, p]))
+}
+
 // ── Channels ──────────────────────────────────────────────────────────────────
 
 // All channels the given profile belongs to, enriched with other members,
@@ -16,10 +28,13 @@ export async function fetchMyChannels(profileId) {
 
   const channelIds = memberRows.map(r => r.channel_id)
 
-  const { data: allMembers } = await supabase
+  const { data: allMembersRaw } = await supabase
     .from('msg_members')
-    .select('channel_id, profile_id, role, profiles(id, full_name, email)')
+    .select('channel_id, profile_id, role')
     .in('channel_id', channelIds)
+
+  const profileById = await resolveProfiles((allMembersRaw || []).map(m => m.profile_id))
+  const allMembers = (allMembersRaw || []).map(m => ({ ...m, profiles: profileById[m.profile_id] || null }))
 
   const channels = await Promise.all(memberRows.map(async (row) => {
     const [{ data: lastMsgs }, { count: unreadCount }] = await Promise.all([
@@ -117,9 +132,10 @@ export async function createGroup(myProfileId, name, memberIds) {
 export async function fetchChannelMembers(channelId) {
   const { data } = await supabase
     .from('msg_members')
-    .select('channel_id, profile_id, role, muted, profiles(id, full_name, email)')
+    .select('channel_id, profile_id, role, muted')
     .eq('channel_id', channelId)
-  return data || []
+  const profileById = await resolveProfiles((data || []).map(m => m.profile_id))
+  return (data || []).map(m => ({ ...m, profiles: profileById[m.profile_id] || null }))
 }
 
 export async function markChannelRead(channelId, profileId) {
@@ -230,9 +246,8 @@ export async function signAttachmentUrl(path, expiresIn = 3600) {
 
 export async function fetchTeammates(excludeProfileId) {
   const { data, error } = await supabase
-    .from('profiles')
+    .from('teammates_directory')
     .select('id, full_name, email, role')
-    .eq('is_active', true)
     .neq('id', excludeProfileId)
     .order('full_name')
   if (error) return []
