@@ -60,11 +60,15 @@ export function AuthProvider({ children }) {
     logPayments: isAdmin || isVA,
     documents: isAdmin || !!profile?.can_view_documents,
     deals: isAdmin || isVA || !!profile?.can_view_deals,
-    can_view_tasks:    !!profile?.can_view_tasks,
-    can_view_recipes:  !!profile?.can_view_recipes,
-    can_view_tools:    !!profile?.can_view_tools,
-    can_view_files:    !!profile?.can_view_files,
-    can_view_listings: !!profile?.can_view_listings,
+    // Admin shortcut added because these routes are now actually gated by
+    // PermRoute (previously ProtectedRoute-only) — without it, admin
+    // would need the flag set on their own profile like anyone else,
+    // which the Admin > Users toggle table already assumed was the case.
+    can_view_tasks:    isAdmin || !!profile?.can_view_tasks,
+    can_view_recipes:  isAdmin || !!profile?.can_view_recipes,
+    can_view_tools:    isAdmin || !!profile?.can_view_tools,
+    can_view_files:    isAdmin || !!profile?.can_view_files,
+    can_view_listings: isAdmin || !!profile?.can_view_listings,
     can_view_triage:     isAdmin || isVA || !!profile?.can_view_triage,
     can_view_backlog:    isAdmin || !!profile?.can_view_backlog,
     can_view_happy_cuts: isAdmin || !!profile?.can_view_happy_cuts,

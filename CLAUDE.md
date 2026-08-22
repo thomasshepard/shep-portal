@@ -40,7 +40,7 @@ Permission flags in `useAuth.jsx` (`permissions` object):
 - `documents` — admin or `can_view_documents`
 - `deals` — admin, VA, or `can_view_deals`
 - `editTenants` / `manageMaintenance` / `logPayments` — admin or VA
-- `can_view_tasks` / `can_view_recipes` / `can_view_tools` / `can_view_files` / `can_view_listings` — member-only flags; these gate **sidebar visibility**, not the route itself (Tools/Files/Tasks/Recipes/Listings routes only require `ProtectedRoute`, so any authenticated user can reach them directly by URL even without the flag)
+- `can_view_tasks` / `can_view_recipes` / `can_view_tools` / `can_view_files` / `can_view_listings` — gate both sidebar visibility and the routes themselves via `PermRoute` (Tools/Files/Tasks/Recipes/Listings). **Not role-defaulted for admin/VA** — even an admin needs the flag set (admin's implicit "everything" access is a `useAuth.jsx` convention per-flag, and these five don't have an `isAdmin ||` short-circuit), so don't lock these down for a project without first confirming every real user who needs them has the flag. Fixed from a real gap: before this, the routes only required `ProtectedRoute`, so any authenticated user (any role, any flags) could reach all five by direct URL regardless of what Admin > Users showed.
 - `can_view_triage` — admin, VA, or `can_view_triage`
 - `can_view_backlog` — admin or `can_view_backlog`
 - `can_view_happy_cuts` — admin or `can_view_happy_cuts`

@@ -215,6 +215,8 @@ export default function AdminUsers() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Finances</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Bank Dashboard</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Bookkeeping</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Fleet</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">Messages</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -350,6 +352,20 @@ export default function AdminUsers() {
                         enabled={isAdmin || u.can_view_bookkeeping}
                         locked={isAdmin}
                         onChange={() => togglePerm(u, 'can_view_bookkeeping')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.can_view_fleet}
+                        locked={isAdmin}
+                        onChange={() => togglePerm(u, 'can_view_fleet')}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <PermToggle
+                        enabled={isAdmin || u.role === 'va' || u.can_view_messages}
+                        locked={isAdmin || u.role === 'va'}
+                        onChange={() => togglePerm(u, 'can_view_messages')}
                       />
                     </td>
                     <td className="px-4 py-3 text-right">
