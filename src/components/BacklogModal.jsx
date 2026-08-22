@@ -14,7 +14,7 @@ const VALUE_DESCRIPTIONS = [
   { stars: 5, label: 'Critical — solves major pain point' },
 ]
 
-export default function BacklogModal({ isOpen, feature, onClose, onSave }) {
+export default function BacklogModal({ isOpen, feature, onClose, onSave, onRegroom }) {
   const [formData, setFormData] = useState({
     name: '',
     effort: 'M',
@@ -94,6 +94,21 @@ ${formData.buildPrompt || '(No build prompt yet)'}`
             <X size={20} />
           </button>
         </div>
+
+        {/* Turned out not to be a Build item after all, or its Kind changed?
+            Re-run it through the same Kind picker Inbox items go through --
+            existing values pre-fill instead of a fresh AI guess. Edit-only:
+            nothing to reclassify on a card that doesn't exist yet. */}
+        {feature && onRegroom && (
+          <div className="px-6 pt-4">
+            <button
+              onClick={() => onRegroom(feature)}
+              className="text-xs font-medium text-blue-600 hover:text-blue-700"
+            >
+              ↻ Re-groom — change its Kind (Build / Do / Decide / Research)
+            </button>
+          </div>
+        )}
 
         {/* Form */}
         <div className="px-6 py-5 space-y-5">
