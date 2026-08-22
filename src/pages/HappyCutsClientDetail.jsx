@@ -736,20 +736,21 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
     onBack()
   }
 
-  async function handleMarkPaidCash() {
+  async function handleMarkPaid(method = 'cash') {
+    const label = method === 'check' ? 'Check' : 'Cash'
     setCashLoading(true)
     try {
       const stripeInvoiceId = mow.stripeId || ''
       const existingNotes = mow.notes || ''
 
       if (!stripeInvoiceId) {
-        const cashNote = 'Paid cash in person'
-        const updatedNotes = existingNotes ? `${existingNotes}\n${cashNote}` : cashNote
+        const note = `Paid ${label.toLowerCase()}${method === 'cash' ? ' in person' : ''}`
+        const updatedNotes = existingNotes ? `${existingNotes}\n${note}` : note
         await atPatch(SCHEDULE_TABLE, mow.id, {
           [SF.invStatus]: 'Paid',
           [SF.notes]: updatedNotes,
         })
-        toast.success('Marked as paid (cash) ✓')
+        toast.success(`Marked as paid (${label.toLowerCase()}) ✓`)
       } else {
         const res = await fetch(
           `${SUPABASE_URL}/functions/v1/mark-invoice-paid`,
@@ -763,6 +764,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
               stripeInvoiceId,
               mowRecordId: mow.id,
               existingNotes,
+              method,
             }),
           }
         )
@@ -770,7 +772,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to mark invoice paid')
         }
-        toast.success('Invoice marked as paid (cash) ✓')
+        toast.success(`Invoice marked as paid (${label.toLowerCase()}) ✓`)
       }
 
       setLocalInvStatus('Paid')
@@ -1031,11 +1033,18 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
                       🔗 View Invoice
                     </button>
                     <button
-                      onClick={() => { handleMarkPaidCash(); setShowInvoiceMenu(false) }}
+                      onClick={() => { handleMarkPaid('cash'); setShowInvoiceMenu(false) }}
+                      disabled={cashLoading}
+                      className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100"
+                    >
+                      💵 Mark Paid (Cash)
+                    </button>
+                    <button
+                      onClick={() => { handleMarkPaid('check'); setShowInvoiceMenu(false) }}
                       disabled={cashLoading}
                       className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
                     >
-                      💵 Mark Paid (Cash)
+                      📝 Mark Paid (Check)
                     </button>
                   </div>
                 </>

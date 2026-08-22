@@ -34,11 +34,16 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json()
-    const { stripeInvoiceId, mowRecordId, existingNotes, tableId } = body
+    const { stripeInvoiceId, mowRecordId, existingNotes, tableId, method } = body
     const targetTable = tableId || SCHEDULE_TABLE
     const tFields = TABLE_FIELDS[targetTable] ?? TABLE_FIELDS[SCHEDULE_TABLE]
+    // Any out-of-band method funnels through here (cash today, check as of
+    // Aug 2026) — default to cash so older callers that don't send `method`
+    // keep working unchanged.
+    const paymentMethod: 'cash' | 'check' = method === 'check' ? 'check' : 'cash'
+    const paymentLabel = paymentMethod === 'check' ? 'Check' : 'Cash'
 
-    console.log('[MarkPaid] Request:', { stripeInvoiceId, mowRecordId, targetTable })
+    console.log('[MarkPaid] Request:', { stripeInvoiceId, mowRecordId, targetTable, paymentMethod })
 
     if (!stripeInvoiceId || !mowRecordId) {
       return new Response(
@@ -47,7 +52,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    // --- Make the cash payment unambiguous on the Stripe side ---
+    // --- Make the payment method unambiguous on the Stripe side ---
     // paid_out_of_band alone just flips the invoice to "Paid" with no record of
     // *how* — indistinguishable in the dashboard from any other manual override.
     // Stamp metadata (shows in the dashboard's Metadata panel) before marking it
@@ -58,20 +63,20 @@ Deno.serve(async (req) => {
     // the invoice has always already been finalized. Metadata is the one
     // invoice-level field Stripe allows editing at any status. Best-effort and
     // never blocks the actual paid-marking below — a metadata hiccup shouldn't
-    // stop cash from getting recorded as paid.
+    // stop the payment from getting recorded as paid.
     const paidAt = new Date().toISOString()
     try {
       const existingInvoice = await stripe.invoices.retrieve(stripeInvoiceId)
       await stripe.invoices.update(stripeInvoiceId, {
         metadata: {
           ...existingInvoice.metadata,
-          payment_method: 'cash',
-          cash_marked_via: 'shep_portal',
-          cash_marked_at: paidAt,
+          payment_method: paymentMethod,
+          marked_via: 'shep_portal',
+          marked_paid_at: paidAt,
         },
       })
     } catch (metaErr) {
-      console.error('[MarkPaid] Could not stamp cash metadata (continuing anyway):', metaErr)
+      console.error('[MarkPaid] Could not stamp payment-method metadata (continuing anyway):', metaErr)
     }
 
     const paidInvoice = await stripe.invoices.pay(stripeInvoiceId, {
@@ -80,10 +85,10 @@ Deno.serve(async (req) => {
 
     console.log('[MarkPaid] Invoice marked paid:', paidInvoice.id, paidInvoice.status)
 
-    const cashNote = 'Paid cash in person'
+    const paymentNote = `Paid ${paymentLabel.toLowerCase()}${paymentMethod === 'cash' ? ' in person' : ''}`
     const updatedNotes = existingNotes
-      ? `${existingNotes}\n${cashNote}`
-      : cashNote
+      ? `${existingNotes}\n${paymentNote}`
+      : paymentNote
 
     const atRes = await fetch(
       `https://api.airtable.com/v0/${AIRTABLE_BASE}/${targetTable}/${mowRecordId}`,
@@ -109,7 +114,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, invoiceStatus: paidInvoice.status }),
+      JSON.stringify({ success: true, invoiceStatus: paidInvoice.status, paymentMethod }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 

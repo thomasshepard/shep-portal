@@ -1013,21 +1013,22 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
     onBack()
   }
 
-  async function handleMarkPaidCash() {
+  async function handleMarkPaid(method = 'cash') {
+    const label = method === 'check' ? 'Check' : 'Cash'
     setCashLoading(true)
     try {
       const stripeInvoiceId = mow.stripeId || ''
       const existingNotes = mow.notes || ''
 
       if (!stripeInvoiceId) {
-        const cashNote = 'Paid cash in person'
-        const updatedNotes = existingNotes ? `${existingNotes}\n${cashNote}` : cashNote
+        const note = `Paid ${label.toLowerCase()}${method === 'cash' ? ' in person' : ''}`
+        const updatedNotes = existingNotes ? `${existingNotes}\n${note}` : note
         await atPatch(SCHEDULE_TABLE, mow.id, {
           [SF.invStatus]: 'Paid',
           [SF.notes]: updatedNotes,
         })
-        toast.success('Marked as paid (cash) ✓')
-        // Cash collected — clears the receivable booked at completion.
+        toast.success(`Marked as paid (${label.toLowerCase()}) ✓`)
+        // Payment collected — clears the receivable booked at completion.
         // (Stripe-paid mows go through mark-invoice-paid server-side and
         // aren't wired to Bookkeeping yet — noted as a fast-follow.)
         postBookkeeping('post_mow_payment', { scheduleRecordId: mow.id, amount: safeNum(mow.amount, 0) })
@@ -1044,6 +1045,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
               stripeInvoiceId,
               mowRecordId: mow.id,
               existingNotes,
+              method,
             }),
           }
         )
@@ -1051,22 +1053,22 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to mark invoice paid')
         }
-        toast.success('Invoice marked as paid (cash) ✓')
+        toast.success(`Invoice marked as paid (${label.toLowerCase()}) ✓`)
       }
 
       setLocalInvStatus('Paid')
       setShowInvoiceMenu(false)
 
-      // Notify admins of cash payment — fire and forget
+      // Notify admins of the payment — fire and forget
       getAdminUserIds().then(adminIds => {
         notify({
           userIds: adminIds,
-          title: `Cash payment received — ${mow.clientName}`,
+          title: `${label} payment received — ${mow.clientName}`,
           body: `$${mow.amount}`,
           module: 'happy_cuts',
           severity: 'info',
           actionUrl: '/#/happy-cuts',
-          sourceKey: `hc:payment_cash:${mow.id}`,
+          sourceKey: `hc:payment_${method}:${mow.id}`,
         })
       })
     } catch (err) {
@@ -1492,11 +1494,18 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
                       🔗 View Invoice
                     </button>
                     <button
-                      onClick={() => { handleMarkPaidCash(); setShowInvoiceMenu(false) }}
+                      onClick={() => { handleMarkPaid('cash'); setShowInvoiceMenu(false) }}
+                      disabled={cashLoading}
+                      className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100"
+                    >
+                      💵 Mark Paid (Cash)
+                    </button>
+                    <button
+                      onClick={() => { handleMarkPaid('check'); setShowInvoiceMenu(false) }}
                       disabled={cashLoading}
                       className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
                     >
-                      💵 Mark Paid (Cash)
+                      📝 Mark Paid (Check)
                     </button>
                   </div>
                 </>
@@ -3166,6 +3175,7 @@ function RevenueTab({ onOpenJob }) {
 
 function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInvoice, onEdit }) {
   const [statusLoading, setStatusLoading] = useState(false)
+  const [showPaidMenu, setShowPaidMenu] = useState(false)
   const isLost = p.status === 'Lost'
   const borderColor = CATEGORY_BORDER[p.category] || '#9ca3af'
   const canInvoice = ['Scheduled', 'In Progress', 'Completed'].includes(p.status) && !p.stripeInvoiceId
@@ -3188,9 +3198,10 @@ function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInv
   // Marks the project paid when the client paid outside Stripe (cash, check,
   // Venmo, etc.) instead of using the hosted invoice link. If a Stripe invoice
   // exists, routes through mark-invoice-paid so the Stripe side is stamped
-  // unambiguously (description + metadata) as a cash payment, not just left as
-  // an unexplained "paid out of band". Mirrors the mow schedule's cash flow.
-  async function handleMarkPaidCash() {
+  // unambiguously (metadata) with the payment method, not just left as an
+  // unexplained "paid out of band". Mirrors the mow schedule's cash flow.
+  async function handleMarkPaid(method = 'cash') {
+    const label = method === 'check' ? 'Check' : 'Cash'
     setStatusLoading(true)
     try {
       if (p.stripeInvoiceId) {
@@ -3202,15 +3213,16 @@ function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInv
             mowRecordId: p.id,
             tableId: PROJECTS_TABLE,
             existingNotes: p.notes || '',
+            method,
           }),
         })
         const data = await res.json()
         if (!res.ok || !data.success) throw new Error(data.error || 'Failed to mark invoice paid')
-        toast.success('Invoice marked paid (cash) ✓ — logged in Stripe')
+        toast.success(`Invoice marked paid (${label.toLowerCase()}) ✓ — logged in Stripe`)
       } else {
         // No Stripe invoice on this project (status moved to Invoiced by hand) — Airtable-only.
         await atPatch(PROJECTS_TABLE, p.id, { [PF.invoiceStatus]: 'Paid' })
-        toast.success('Marked paid (cash) ✓')
+        toast.success(`Marked paid (${label.toLowerCase()}) ✓`)
       }
       await atPatch(PROJECTS_TABLE, p.id, { [PF.status]: 'Paid' })
       onRefresh()
@@ -3334,13 +3346,34 @@ function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInv
               </button>
             )}
             {p.status === 'Invoiced' && (
-              <button
-                onClick={handleMarkPaidCash}
-                disabled={statusLoading}
-                className="text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-semibold"
-              >
-                💵 Mark Paid (Cash)
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowPaidMenu(prev => !prev)}
+                  disabled={statusLoading}
+                  className="text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-semibold"
+                >
+                  💰 Mark Paid ▾
+                </button>
+                {showPaidMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowPaidMenu(false)} />
+                    <div className="absolute top-full mt-1 left-0 bg-white rounded-lg shadow-lg border border-gray-100 overflow-hidden z-50 w-36">
+                      <button
+                        onClick={() => { handleMarkPaid('cash'); setShowPaidMenu(false) }}
+                        className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 border-b border-gray-100"
+                      >
+                        💵 Cash
+                      </button>
+                      <button
+                        onClick={() => { handleMarkPaid('check'); setShowPaidMenu(false) }}
+                        className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-1.5"
+                      >
+                        📝 Check
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
             <button
               onClick={onEdit}
@@ -3838,6 +3871,225 @@ function ProjectsTab({ contacts, contactsById }) {
   )
 }
 
+// ─── PaymentsTab ────────────────────────────────────────────────────────────
+// Review surface for "did this client actually pay" — completed mows +
+// completed/invoiced projects, unpaid-first by default, with a days-since
+// badge so a stale one is obvious at a glance and quick actions (message,
+// view invoice, mark paid cash/check) without drilling into each record.
+function paymentRowsFromData(schedules, projects, contactsById, today) {
+  const mowRows = (schedules || [])
+    .filter(m => m.status === 'Completed')
+    .map(m => {
+      const contact = contactsById[m.contactIds?.[0]]
+      const refDate = m.date ? new Date(m.date + 'T12:00:00') : null
+      const daysAgo = refDate ? Math.floor((today.getTime() - refDate.getTime()) / 86400000) : null
+      const isPaid = m.invStatus === 'Paid' || m.invStatus === 'Waived'
+      return {
+        kind: 'mow',
+        id: m.id,
+        record: m,
+        contact,
+        clientName: contact?.name || m.clientName || 'Client',
+        amount: m.amount,
+        invStatus: m.invStatus || 'Not Sent',
+        hasInvoice: !!m.stripeId,
+        invoiceUrl: m.stripeInvoiceUrl,
+        date: m.date,
+        daysAgo,
+        isPaid,
+      }
+    })
+
+  const projectRows = (projects || [])
+    .filter(p => ['Completed', 'Invoiced', 'Paid'].includes(p.status))
+    .map(p => {
+      const contact = contactsById[p.clientIds?.[0]]
+      const refDate = p.scheduledDate ? new Date(p.scheduledDate + 'T12:00:00') : null
+      const daysAgo = refDate ? Math.floor((today.getTime() - refDate.getTime()) / 86400000) : null
+      const isPaid = p.status === 'Paid'
+      return {
+        kind: 'project',
+        id: p.id,
+        record: p,
+        contact,
+        clientName: contact?.name || (p.title || '').split(' — ')[0] || 'Client',
+        amount: p.quotedPrice,
+        invStatus: isPaid ? 'Paid' : (p.status === 'Invoiced' ? 'Sent' : 'Not Sent'),
+        hasInvoice: !!p.stripeInvoiceId,
+        invoiceUrl: p.stripeInvoiceUrl,
+        date: p.scheduledDate,
+        daysAgo,
+        isPaid,
+      }
+    })
+
+  return [...mowRows, ...projectRows]
+}
+
+function PaymentRow({ row, onOpenJob, onGoToProjects, onRefresh }) {
+  const [loading, setLoading] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
+  const overdue = !row.isPaid && row.daysAgo != null && row.daysAgo >= 3
+
+  async function markPaid(method) {
+    setLoading(true)
+    try {
+      const tableId = row.kind === 'project' ? PROJECTS_TABLE : SCHEDULE_TABLE
+      const invStatusField = row.kind === 'project' ? PF.invoiceStatus : SF.invStatus
+      const notes = row.record.notes || ''
+      if (row.hasInvoice) {
+        const stripeInvoiceId = row.kind === 'project' ? row.record.stripeInvoiceId : row.record.stripeId
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/mark-invoice-paid`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({ stripeInvoiceId, mowRecordId: row.id, tableId, existingNotes: notes, method }),
+        })
+        const data = await res.json()
+        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to mark invoice paid')
+      } else {
+        const label = method === 'check' ? 'Check' : 'Cash'
+        const note = `Paid ${label.toLowerCase()}${method === 'cash' ? ' in person' : ''}`
+        await atPatch(tableId, row.id, { [invStatusField]: 'Paid', [row.kind === 'project' ? PF.notes : SF.notes]: notes ? `${notes}\n${note}` : note })
+      }
+      if (row.kind === 'project') await atPatch(PROJECTS_TABLE, row.id, { [PF.status]: 'Paid' })
+      toast.success(`Marked paid (${method}) ✓`)
+      onRefresh()
+    } catch (err) {
+      toast.error(`Could not mark as paid: ${err.message}`)
+    } finally {
+      setLoading(false)
+      setShowMenu(false)
+    }
+  }
+
+  const smsLink = row.contact?.phone ? `sms:${row.contact.phone.replace(/\D/g, '')}` : null
+
+  return (
+    <div className={`bg-white rounded-xl border px-4 py-3 ${overdue ? 'border-red-200' : 'border-gray-100'}`}>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          className="flex-1 min-w-0 text-left"
+          onClick={() => row.kind === 'mow' ? onOpenJob(row.record) : onGoToProjects()}
+        >
+          <p className="text-sm font-semibold text-gray-800 truncate">{row.clientName}</p>
+          <p className="text-xs text-gray-400 truncate">
+            {row.kind === 'mow' ? '🌿 Mow' : '🌳 Project'} · {row.date ? fmtDateShort(row.date) : 'No date'}
+            {row.daysAgo != null && row.daysAgo >= 0 && ` · ${row.daysAgo}d ago`}
+          </p>
+        </button>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className="text-sm font-semibold text-gray-800">{fmtCurrency(row.amount)}</span>
+          <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${INV_STATUS[row.invStatus] || 'bg-gray-100 text-gray-500'}`}>
+            {overdue ? `⚠️ ${row.invStatus}` : row.invStatus}
+          </span>
+        </div>
+      </div>
+
+      {!row.isPaid && (
+        <div className="flex gap-2 flex-wrap pt-2 mt-2 border-t border-gray-100">
+          {smsLink && (
+            <a href={smsLink} className="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg flex items-center gap-1">
+              💬 Message
+            </a>
+          )}
+          {row.invoiceUrl && (
+            <a href={row.invoiceUrl} target="_blank" rel="noreferrer" className="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg">
+              🔗 View Invoice
+            </a>
+          )}
+          {row.invStatus === 'Sent' && (
+            <div className="relative">
+              <button
+                onClick={() => setShowMenu(prev => !prev)}
+                disabled={loading}
+                className="text-xs bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1.5 font-semibold"
+              >
+                💰 Mark Paid ▾
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+                  <div className="absolute top-full mt-1 left-0 bg-white rounded-lg shadow-lg border border-gray-100 overflow-hidden z-50 w-32">
+                    <button onClick={() => markPaid('cash')} className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 border-b border-gray-100">💵 Cash</button>
+                    <button onClick={() => markPaid('check')} className="w-full text-left px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">📝 Check</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {row.invStatus === 'Not Sent' && (
+            <span className="text-xs text-gray-400 italic py-1.5">Not invoiced yet — {row.kind === 'mow' ? 'open the job to send one' : 'go to Projects to send one'}</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PaymentsTab({ schedules, projects, contactsById, onOpenJob, onGoToProjects, onRefresh }) {
+  const [filter, setFilter] = useState('unpaid')
+
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+
+  const allRows = paymentRowsFromData(schedules, projects, contactsById, today)
+  const unpaidRows = allRows.filter(r => !r.isPaid)
+  const unpaidTotal = unpaidRows.reduce((s, r) => s + (r.amount || 0), 0)
+  const overdueCount = unpaidRows.filter(r => r.daysAgo != null && r.daysAgo >= 3).length
+
+  const rows = (filter === 'unpaid' ? unpaidRows : filter === 'paid' ? allRows.filter(r => r.isPaid) : allRows)
+    .sort((a, b) => (b.daysAgo ?? -1) - (a.daysAgo ?? -1))
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-3 gap-2">
+        <div className="bg-white rounded-xl p-3 border border-gray-100">
+          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide">Unpaid Jobs</p>
+          <p className="text-sm font-semibold text-gray-800 tabular-nums">{unpaidRows.length}</p>
+        </div>
+        <div className="bg-white rounded-xl p-3 border border-gray-100">
+          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide">Outstanding</p>
+          <p className="text-sm font-semibold text-gray-800 tabular-nums">{fmtCurrency(unpaidTotal)}</p>
+        </div>
+        <div className={`bg-white rounded-xl p-3 border ${overdueCount > 0 ? 'border-red-200' : 'border-gray-100'}`}>
+          <p className="text-[10px] text-gray-400 mb-0.5 uppercase tracking-wide">3+ Days</p>
+          <p className={`text-sm font-semibold tabular-nums ${overdueCount > 0 ? 'text-red-600' : 'text-gray-800'}`}>{overdueCount}</p>
+        </div>
+      </div>
+
+      <div className="flex gap-1.5">
+        {['unpaid', 'paid', 'all'].map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${filter === f ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-500 border-gray-200'}`}
+          >
+            {f.charAt(0).toUpperCase() + f.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="text-center text-gray-400 py-8 text-sm">
+          {filter === 'unpaid' ? 'Nothing unpaid 🎉' : 'No jobs here'}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map(row => (
+            <PaymentRow
+              key={`${row.kind}:${row.id}`}
+              row={row}
+              onOpenJob={onOpenJob}
+              onGoToProjects={onGoToProjects}
+              onRefresh={onRefresh}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── CrewTab ────────────────────────────────────────────────────────────────
 const emptyCrewForm = {
   name: '', businessName: '', phone: '', email: '',
@@ -4196,6 +4448,7 @@ export default function HappyCuts() {
     { id: 'clients',  label: 'Clients',  icon: Users },
     { id: 'schedule', label: 'Schedule', icon: Calendar },
     { id: 'projects', label: 'Projects', icon: TreePine },
+    { id: 'payments', label: 'Payments', icon: DollarSign },
     { id: 'crew',     label: 'Crew',     icon: HardHat },
     { id: 'revenue',  label: 'Revenue',  icon: BarChart2 },
   ]
@@ -4277,6 +4530,16 @@ export default function HappyCuts() {
       )}
       {activeTab === 'projects' && (
         <ProjectsTab contacts={contacts} contactsById={contactsById} />
+      )}
+      {activeTab === 'payments' && (
+        <PaymentsTab
+          schedules={schedules}
+          projects={projects}
+          contactsById={contactsById}
+          onOpenJob={setJobDetail}
+          onGoToProjects={() => setActiveTab('projects')}
+          onRefresh={load}
+        />
       )}
       {activeTab === 'crew' && (
         <CrewTab crew={crew} schedules={schedules} onRefresh={load} />
