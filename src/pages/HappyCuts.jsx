@@ -2865,14 +2865,30 @@ function RevenueTab({ onOpenJob }) {
 
   const [selectedYM, setSelectedYM] = useState(currentYM)
   const [cache, setCache] = useState({})          // YYYY-MM → mow[]
+  const [projectCache, setProjectCache] = useState({}) // YYYY-MM → project[], by Scheduled Date
   const [revLoading, setRevLoading] = useState(false)
   const [filterChip, setFilterChip] = useState('Completed')
   const [allFuture, setAllFuture] = useState(null) // total $ of all future Scheduled mows
   const [allFutureLoading, setAllFutureLoading] = useState(false)
 
+  // Previous month, warmed alongside the selected one so the "vs last month"
+  // delta on Revenue Collected has something to compare against — this also
+  // means stepping back a month with the nav arrows is already cached.
+  const prevYM = (() => {
+    const [y, m] = selectedYM.split('-').map(Number)
+    const d = new Date(y, m - 2, 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })()
+
   useEffect(() => {
     if (!cache[selectedYM]) fetchMonthData(selectedYM)
+    if (!projectCache[selectedYM]) fetchMonthProjects(selectedYM)
   }, [selectedYM])
+
+  useEffect(() => {
+    if (!cache[prevYM]) fetchMonthData(prevYM)
+    if (!projectCache[prevYM]) fetchMonthProjects(prevYM)
+  }, [prevYM])
 
   useEffect(() => {
     fetchAllFuture()
@@ -2929,6 +2945,32 @@ function RevenueTab({ onOpenJob }) {
     }
   }
 
+  // Projects don't have a Completed-mow-style date field — Scheduled Date is
+  // the closest thing to "when this job happened," same approximation used
+  // elsewhere (Payments tab, the overdue-invoice notification check).
+  async function fetchMonthProjects(ym) {
+    try {
+      const [year, month] = ym.split('-').map(Number)
+      const start = `${ym}-01`
+      const nextM = new Date(year, month, 1)
+      const end = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}-01`
+      const filter = encodeURIComponent(`AND({${PF.scheduledDate}}>='${start}', {${PF.scheduledDate}}<'${end}')`)
+      const records = []
+      let offset = null
+      do {
+        let qs = `?returnFieldsByFieldId=true&filterByFormula=${filter}`
+        if (offset) qs += `&offset=${offset}`
+        const json = await atGet(PROJECTS_TABLE, qs)
+        if (!json.records) throw new Error(json.error?.message || 'Fetch failed')
+        records.push(...json.records)
+        offset = json.offset || null
+      } while (offset)
+      setProjectCache(prev => ({ ...prev, [ym]: records.map(parseProject) }))
+    } catch {
+      setProjectCache(prev => ({ ...prev, [ym]: [] }))
+    }
+  }
+
   function prevMonth() {
     const [y, m] = selectedYM.split('-').map(Number)
     const d = new Date(y, m - 2, 1)
@@ -2951,6 +2993,37 @@ function RevenueTab({ onOpenJob }) {
   const scheduledMows = mows.filter(m => m.status === 'Scheduled')
   const revenueCollected = completedMows.reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
   const forecasted      = scheduledMows.reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
+
+  // Projects folded in alongside mows — same "done" / "booked, not yet done"
+  // split, using workflow Status since Projects has no separate Completed
+  // flag the way the Schedule table does.
+  const projects = arr(projectCache[selectedYM])
+  const completedProjects  = projects.filter(p => ['Completed', 'Invoiced', 'Paid'].includes(p.status))
+  const forecastedProjects = projects.filter(p => ['Scheduled', 'In Progress'].includes(p.status))
+  const projectRevenue = completedProjects.reduce((s, p) => s + (safeNum(p.quotedPrice) || 0), 0)
+  const projectForecast = forecastedProjects.reduce((s, p) => s + (safeNum(p.quotedPrice) || 0), 0)
+
+  const combinedCollected = revenueCollected + projectRevenue
+  const combinedForecast  = forecasted + projectForecast
+
+  // Paid vs still-outstanding, across whatever's actually done this month
+  const paidMowRevenue = completedMows.filter(m => m.invStatus === 'Paid' || m.invStatus === 'Waived')
+    .reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
+  const paidProjectRevenue = completedProjects.filter(p => p.status === 'Paid')
+    .reduce((s, p) => s + (safeNum(p.quotedPrice) || 0), 0)
+  const paidTotal = paidMowRevenue + paidProjectRevenue
+  const outstandingTotal = Math.max(0, combinedCollected - paidTotal)
+  const paidPct = combinedCollected > 0 ? (paidTotal / combinedCollected) * 100 : 0
+
+  // vs last month — only once both months have actually loaded, so a zero
+  // never flashes as a real (and misleading) −100%
+  const prevDataReady = cache[prevYM] !== undefined && projectCache[prevYM] !== undefined
+  const prevMows = arr(cache[prevYM])
+  const prevProjects = arr(projectCache[prevYM])
+  const prevTotal = prevMows.filter(m => m.status === 'Completed').reduce((s, m) => s + (safeNum(m.amount) || 0), 0)
+    + prevProjects.filter(p => ['Completed', 'Invoiced', 'Paid'].includes(p.status)).reduce((s, p) => s + (safeNum(p.quotedPrice) || 0), 0)
+  const deltaPct = prevDataReady && prevTotal > 0 ? ((combinedCollected - prevTotal) / prevTotal) * 100 : null
+  const prevMonthLabel = new Date(prevYM + '-01T12:00:00').toLocaleDateString('en-US', { month: 'short' })
 
   const listMows = (filterChip === 'Completed' ? completedMows : scheduledMows)
     .slice()
@@ -3014,21 +3087,52 @@ function RevenueTab({ onOpenJob }) {
       <div className="grid grid-cols-2 gap-3 mb-5">
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
           <p className="text-xs text-gray-400 mb-1">Revenue Collected</p>
-          <p className="text-lg font-bold text-green-600">{fmtCurrency(revenueCollected)}</p>
+          <p className="text-lg font-bold text-green-600">{fmtCurrency(combinedCollected)}</p>
+          {projectRevenue > 0 && (
+            <p className="text-[10px] text-gray-400 mt-0.5">{fmtCurrency(revenueCollected)} mows + {fmtCurrency(projectRevenue)} projects</p>
+          )}
+          {deltaPct != null && (
+            <p className={`text-[10px] font-semibold mt-0.5 ${deltaPct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+              {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct).toFixed(0)}% vs {prevMonthLabel}
+            </p>
+          )}
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
           <p className="text-xs text-gray-400 mb-1">Forecasted</p>
-          <p className="text-lg font-bold text-blue-500">{fmtCurrency(forecasted)}</p>
+          <p className="text-lg font-bold text-blue-500">{fmtCurrency(combinedForecast)}</p>
+          {projectForecast > 0 && (
+            <p className="text-[10px] text-gray-400 mt-0.5">{fmtCurrency(forecasted)} mows + {fmtCurrency(projectForecast)} projects</p>
+          )}
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
           <p className="text-xs text-gray-400 mb-1">Mows Done</p>
           <p className="text-lg font-bold text-gray-800">{completedMows.length}</p>
+          {completedProjects.length > 0 && (
+            <p className="text-[10px] text-gray-400 mt-0.5">+ {completedProjects.length} project{completedProjects.length === 1 ? '' : 's'}</p>
+          )}
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-3 text-center">
           <p className="text-xs text-gray-400 mb-1">Mows Booked</p>
           <p className="text-lg font-bold text-gray-800">{scheduledMows.length}</p>
         </div>
       </div>
+
+      {/* Paid vs. outstanding — of the work actually done this month, what's collected */}
+      {combinedCollected > 0 && (
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Collected vs. Outstanding</p>
+            <p className="text-xs text-gray-400">{paidPct.toFixed(0)}% paid</p>
+          </div>
+          <div className="h-2.5 bg-amber-100 rounded-full overflow-hidden">
+            <div className="h-full bg-green-600 rounded-full" style={{ width: `${Math.min(100, Math.max(paidTotal > 0 ? 3 : 0, paidPct))}%` }} />
+          </div>
+          <div className="flex justify-between mt-2 text-xs">
+            <span className="text-green-700 font-semibold">{fmtCurrency(paidTotal)} paid</span>
+            <span className="text-amber-700 font-semibold">{fmtCurrency(outstandingTotal)} outstanding</span>
+          </div>
+        </div>
+      )}
 
       {/* Revenue report panel — hidden when no data for the chip */}
       {statsSource.length > 0 && (
