@@ -925,6 +925,70 @@ async function actionQuickCategorizeTransaction(payload: any, userId: string, ct
   return { ok: true, ...result }
 }
 
+// Splits one bank-feed transaction across two accounts — e.g. a Stripe
+// move-in payment that bundles a security deposit with first month's rent
+// into one lump deposit. Deliberately narrow (exactly two accounts, no
+// arbitrary N-way split, no learned-pattern rule recorded) — this is a rare,
+// one-off situation (filling a unit), not a recurring vendor pattern worth
+// building auto-post support for.
+async function actionSplitCategorizeTransaction(payload: any, userId: string, ctx?: BkContext) {
+  const rawTransactionId = String(payload?.rawTransactionId || '')
+  if (!rawTransactionId) throw new Error('rawTransactionId is required')
+  const primaryAccountCode = String(payload?.primaryAccountCode || '')
+  const secondaryAccountCode = String(payload?.secondaryAccountCode || '')
+  if (!primaryAccountCode || !secondaryAccountCode) throw new Error('primaryAccountCode and secondaryAccountCode are required')
+  const secondaryAmount = num(payload?.secondaryAmount)
+  if (!(secondaryAmount > 0)) throw new Error('secondaryAmount must be a positive number')
+
+  const { data: raw, error: rawErr } = await sb.from('bk_raw_transactions')
+    .select('id, amount, description, posted_at, matched_journal_entry_id, bk_bank_accounts!inner(entity_id, ledger_account_id, bk_entities(name))')
+    .eq('id', rawTransactionId).single()
+  if (rawErr || !raw) throw new Error('Transaction not found')
+  if (raw.matched_journal_entry_id) throw new Error('This transaction has already been categorized')
+
+  const bankAccount = (raw as any).bk_bank_accounts
+  if (!bankAccount?.entity_id || !bankAccount?.ledger_account_id) {
+    throw new Error("This bank account isn't mapped to an entity/ledger account yet")
+  }
+  if (ctx && ctx.scope !== null && !ctx.scope.includes(bankAccount.bk_entities?.name)) {
+    throw new Error('You do not have access to this transaction')
+  }
+
+  const total = Math.abs(num(raw.amount))
+  if (secondaryAmount >= total) throw new Error('secondaryAmount must be less than the transaction total')
+  const primaryAmount = total - secondaryAmount
+
+  const acct = await getAccountIds(bankAccount.entity_id, [primaryAccountCode, secondaryAccountCode])
+  const isDeposit = num(raw.amount) > 0
+  const lines = isDeposit
+    ? [
+        { accountId: bankAccount.ledger_account_id, debit: total },
+        { accountId: acct[primaryAccountCode], credit: primaryAmount },
+        { accountId: acct[secondaryAccountCode], credit: secondaryAmount },
+      ]
+    : [
+        { accountId: acct[primaryAccountCode], debit: primaryAmount },
+        { accountId: acct[secondaryAccountCode], debit: secondaryAmount },
+        { accountId: bankAccount.ledger_account_id, credit: total },
+      ]
+
+  const result = await postEntry({
+    entityId: bankAccount.entity_id,
+    entryDate: String(raw.posted_at).slice(0, 10),
+    memo: String(payload?.memo || raw.description || 'Bank feed transaction (split)'),
+    source: 'bank_feed',
+    sourceModule: 'bookkeeping_bank_feed',
+    sourceRecordId: rawTransactionId,
+    createdBy: userId,
+    lines,
+  })
+
+  if (result.posted && result.entryId) {
+    await sb.from('bk_raw_transactions').update({ matched_journal_entry_id: result.entryId }).eq('id', rawTransactionId)
+  }
+  return { ok: true, ...result }
+}
+
 async function actionSuggestCategory(payload: any, _userId?: string, ctx?: BkContext) {
   const rawTransactionId = String(payload?.rawTransactionId || '')
   if (!rawTransactionId) throw new Error('rawTransactionId is required')
@@ -1453,6 +1517,7 @@ const ACTIONS: Record<string, (payload: any, userId: string, ctx?: BkContext) =>
   map_feed_account:       actionMapFeedAccount,
   list_raw_transactions:  actionListRawTransactions,
   quick_categorize_transaction: actionQuickCategorizeTransaction,
+  split_categorize_transaction: actionSplitCategorizeTransaction,
   remove_feed_claim:      actionRemoveFeedClaim,
   suggest_category:       actionSuggestCategory,
   void_entry:             actionVoidEntry,
