@@ -54,6 +54,7 @@ import Insurance from './pages/Insurance'
 import Fleet from './pages/Fleet'
 import FleetDetail from './pages/FleetDetail'
 import FleetMaintenance from './pages/FleetMaintenance'
+import LocalAI from './pages/LocalAI'
 
 export default function App() {
   return (
@@ -115,6 +116,7 @@ export default function App() {
             <Route path="bookkeeping" element={<PermRoute permission="can_view_bookkeeping"><ErrorBoundary><Bookkeeping /></ErrorBoundary></PermRoute>} />
             <Route path="bookkeeping/guide" element={<PermRoute permission="can_view_bookkeeping"><BookkeepingGuide /></PermRoute>} />
             <Route path="insurance" element={<PermRoute permission="can_view_insurance"><ErrorBoundary><Insurance /></ErrorBoundary></PermRoute>} />
+            <Route path="local-ai" element={<AdminRoute><LocalAI /></AdminRoute>} />
             <Route
               path="admin"
               element={
