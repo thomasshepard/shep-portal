@@ -23,6 +23,18 @@
 --     supabase secrets set BOOKKEEPING_CRON_KEY=...>', 'bookkeeping_cron_key');
 --
 -- To unschedule: SELECT cron.unschedule('bookkeeping-sync-feed');
+--
+-- 2026-08-22 fix: the original version of this job (and score-fbm-distances'
+-- own job, which predates it) was missing the `apikey` header. Supabase's
+-- Functions gateway needs that header to route the request to a function at
+-- all — without it every single scheduled call 404'd with "Requested
+-- function was not found" before ever reaching this function's code, for
+-- every single run since this job was first scheduled. `Authorization`
+-- alone isn't enough. Also added an explicit timeout_milliseconds — syncing
+-- several bank claims routinely takes longer than pg_net's 5s default,
+-- which was silently timing the caller out even on a successful sync (the
+-- sync itself completes server-side regardless — verified via
+-- bk_feed_claims.last_synced_at — but the cron log looked like a failure).
 
 select cron.schedule(
   'bookkeeping-sync-feed',
@@ -32,10 +44,12 @@ select cron.schedule(
       url     := 'https://zhboqhhjijktsanxhwjv.supabase.co/functions/v1/bookkeeping',
       headers := jsonb_build_object(
         'Content-Type',  'application/json',
+        'apikey',        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm9xaGhqaWprdHNhbnhod2p2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNTgxNTAsImV4cCI6MjA4ODczNDE1MH0.LC_sE9nWjgguGB5_8cbYz88btqBfjJU4AyoK7FafrvU',
         'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm9xaGhqaWprdHNhbnhod2p2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNTgxNTAsImV4cCI6MjA4ODczNDE1MH0.LC_sE9nWjgguGB5_8cbYz88btqBfjJU4AyoK7FafrvU',
         'x-cron-key',    (select decrypted_secret from vault.decrypted_secrets where name = 'bookkeeping_cron_key')
       ),
-      body    := '{"action": "sync_feed_transactions"}'::jsonb
+      body    := '{"action": "sync_feed_transactions"}'::jsonb,
+      timeout_milliseconds := 60000
     )
   $$
 );
