@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
   Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield, UserCog, Wrench, Calculator,
-  ChevronDown, Star, MessageSquare,
+  ChevronDown, Star, MessageSquare, Cpu,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
@@ -13,6 +13,7 @@ import { useChannelList } from '../hooks/useMessages'
 import toast from 'react-hot-toast'
 
 const adminItems = [
+  { to: '/local-ai', icon: Cpu, label: 'Local AI' },
   { to: '/admin/users', icon: Users, label: 'Users' },
   { to: '/admin/logs', icon: ScrollText, label: 'Access Logs' },
   { to: '/admin/agents', icon: Bot, label: 'Agent Fleet' },
