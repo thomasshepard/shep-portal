@@ -77,9 +77,9 @@ export default function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="properties" element={<PermRoute permission="properties"><ErrorBoundary><Properties /></ErrorBoundary></PermRoute>} />
             <Route path="properties/:id" element={<PermRoute permission="properties"><ErrorBoundary><PropertyDetail /></ErrorBoundary></PermRoute>} />
-            <Route path="tools" element={<Tools />} />
-            <Route path="tools/:slug" element={<ToolView />} />
-            <Route path="files" element={<Files />} />
+            <Route path="tools" element={<PermRoute permission="can_view_tools"><Tools /></PermRoute>} />
+            <Route path="tools/:slug" element={<PermRoute permission="can_view_tools"><ToolView /></PermRoute>} />
+            <Route path="files" element={<PermRoute permission="can_view_files"><Files /></PermRoute>} />
             <Route path="llcs" element={<PermRoute permission="llcs"><LLCs /></PermRoute>} />
             <Route path="llcs/:id" element={<PermRoute permission="llcs"><LLCDetail /></PermRoute>} />
             <Route path="chickens" element={<PermRoute permission="chickens"><Chickens /></PermRoute>} />
@@ -88,8 +88,8 @@ export default function App() {
             <Route path="documents" element={<PermRoute permission="documents"><Documents /></PermRoute>} />
             <Route path="deals" element={<PermRoute permission="deals"><Deals /></PermRoute>} />
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
-            <Route path="listings" element={<ProtectedRoute><PropertyListings /></ProtectedRoute>} />
-            <Route path="listings/benwick" element={<ProtectedRoute><CrossvilleDashboard /></ProtectedRoute>} />
+            <Route path="listings" element={<PermRoute permission="can_view_listings"><PropertyListings /></PermRoute>} />
+            <Route path="listings/benwick" element={<PermRoute permission="can_view_listings"><CrossvilleDashboard /></PermRoute>} />
             <Route path="happy-cuts" element={<PermRoute permission="can_view_happy_cuts"><HappyCuts /></PermRoute>} />
             <Route path="happy-cuts/client/:id" element={<PermRoute permission="can_view_happy_cuts"><HappyCutsClientDetail /></PermRoute>} />
             <Route path="happy-cuts/guide" element={<PermRoute permission="can_view_happy_cuts"><HappyCutsGuide /></PermRoute>} />
@@ -99,12 +99,12 @@ export default function App() {
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="notifications/settings" element={<ProtectedRoute><NotificationSettings /></ProtectedRoute>} />
             <Route path="notifications/digest-guide" element={<ProtectedRoute><DigestGuide /></ProtectedRoute>} />
-            <Route path="tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
-            <Route path="tasks/:taskId" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
-            <Route path="tasks/:taskId/full" element={<ProtectedRoute><TaskDetail /></ProtectedRoute>} />
+            <Route path="tasks" element={<PermRoute permission="can_view_tasks"><Tasks /></PermRoute>} />
+            <Route path="tasks/:taskId" element={<PermRoute permission="can_view_tasks"><Tasks /></PermRoute>} />
+            <Route path="tasks/:taskId/full" element={<PermRoute permission="can_view_tasks"><TaskDetail /></PermRoute>} />
             <Route path="messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
             <Route path="messages/:channelId" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
-            <Route path="recipes" element={<ProtectedRoute><Recipes /></ProtectedRoute>} />
+            <Route path="recipes" element={<PermRoute permission="can_view_recipes"><Recipes /></PermRoute>} />
             <Route path="triage" element={<PermRoute permission="can_view_triage"><Triage /></PermRoute>} />
             <Route path="triage/setup" element={<AdminRoute><TriageSetup /></AdminRoute>} />
             <Route path="triage/guide" element={<PermRoute permission="can_view_triage"><TriageGuide /></PermRoute>} />
