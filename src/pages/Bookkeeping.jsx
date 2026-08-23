@@ -1329,6 +1329,7 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
   const [busyId, setBusyId] = useState(null)
   const [suggestions, setSuggestions] = useState({}) // rawTransactionId -> { code, name }
   const [importingId, setImportingId] = useState(null)
+  const [split, setSplit] = useState(null) // { id, primaryAccount, secondaryAccount, secondaryAmount } | null — at most one transaction split at a time, this is rare
 
   useEffect(() => { load() }, [])
 
@@ -1418,6 +1419,32 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
     setBusyId(null)
   }
 
+  // Rare (a move-in Stripe payment bundling a deposit with rent, etc.) —
+  // deliberately just a two-way split, not a general N-line builder.
+  function startSplit(rawTransactionId) {
+    setSplit({ id: rawTransactionId, secondaryAccount: '', secondaryAmount: '', primaryAccount: '' })
+  }
+
+  async function saveSplit() {
+    const { id, secondaryAccount, secondaryAmount, primaryAccount } = split
+    if (!primaryAccount || !secondaryAccount || !secondaryAmount) return
+    setBusyId(id)
+    try {
+      await callBookkeeping('split_categorize_transaction', {
+        rawTransactionId: id,
+        primaryAccountCode: primaryAccount,
+        secondaryAccountCode: secondaryAccount,
+        secondaryAmount: Number(secondaryAmount),
+      })
+      setTransactions(prev => prev.filter(t => t.id !== id))
+      setSplit(null)
+      onPosted?.()
+    } catch (e) {
+      toast.error('Failed to post split: ' + e.message)
+    }
+    setBusyId(null)
+  }
+
   if (loading) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-2 text-sm text-gray-400">
@@ -1487,18 +1514,67 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
                   </div>
                   <span className="text-sm font-semibold text-gray-900 tabular-nums flex-shrink-0">{fmtCurrency(t.amount)}</span>
                 </div>
-                <select
-                  defaultValue=""
-                  disabled={busyId === t.id}
-                  onChange={e => categorize(t.id, e.target.value)}
-                  className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
-                >
-                  <option value="" disabled>Categorize…</option>
-                  {suggestions[t.id] && (
-                    <option value={suggestions[t.id].code}>★ {suggestions[t.id].name} (suggested)</option>
-                  )}
-                  {expenseIncomeAccounts.filter(c => c.code !== suggestions[t.id]?.code).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                </select>
+                {split?.id === t.id ? (
+                  <div className="space-y-2 bg-gray-50 rounded-lg p-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 flex-shrink-0">$</span>
+                      <input
+                        type="number" step="0.01" placeholder="Amount" autoFocus
+                        value={split.secondaryAmount}
+                        onChange={e => setSplit(s => ({ ...s, secondaryAmount: e.target.value }))}
+                        className="w-24 h-9 text-sm border border-gray-300 rounded-lg px-2"
+                      />
+                      <span className="text-xs text-gray-500 flex-shrink-0">to</span>
+                      <select
+                        value={split.secondaryAccount}
+                        onChange={e => setSplit(s => ({ ...s, secondaryAccount: e.target.value }))}
+                        className="flex-1 min-w-0 h-9 text-sm border border-gray-300 rounded-lg px-2"
+                      >
+                        <option value="" disabled>Choose account…</option>
+                        {expenseIncomeAccounts.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 flex-shrink-0">Rest to</span>
+                      <select
+                        value={split.primaryAccount}
+                        onChange={e => setSplit(s => ({ ...s, primaryAccount: e.target.value }))}
+                        className="flex-1 min-w-0 h-9 text-sm border border-gray-300 rounded-lg px-2"
+                      >
+                        <option value="" disabled>Choose account…</option>
+                        {expenseIncomeAccounts.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-3 pt-0.5">
+                      <button
+                        onClick={saveSplit}
+                        disabled={busyId === t.id || !split.primaryAccount || !split.secondaryAccount || !split.secondaryAmount}
+                        className="text-xs font-medium text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-40 rounded-lg px-3 py-1.5"
+                      >
+                        Save split
+                      </button>
+                      <button onClick={() => setSplit(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      defaultValue=""
+                      disabled={busyId === t.id}
+                      onChange={e => categorize(t.id, e.target.value)}
+                      className="w-full h-11 text-sm border border-gray-300 rounded-lg px-3"
+                    >
+                      <option value="" disabled>Categorize…</option>
+                      {suggestions[t.id] && (
+                        <option value={suggestions[t.id].code}>★ {suggestions[t.id].name} (suggested)</option>
+                      )}
+                      {expenseIncomeAccounts.filter(c => c.code !== suggestions[t.id]?.code).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                    </select>
+                    <button onClick={() => startSplit(t.id)} className="text-xs text-violet-600 hover:text-violet-800">
+                      Split into two accounts
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
