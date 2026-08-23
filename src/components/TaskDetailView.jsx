@@ -15,6 +15,7 @@ const MODULE_PILL = {
   'Happy Cuts': 'bg-emerald-100 text-emerald-700',
   'Properties': 'bg-blue-100 text-blue-700',
   'LLC':        'bg-violet-100 text-violet-700',
+  'Backlog':    'bg-cyan-100 text-cyan-700',
   'Manual':     'bg-slate-100 text-slate-600',
 }
 

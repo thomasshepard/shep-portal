@@ -16,9 +16,17 @@ const CATEGORY_COLORS = {
   Personal: 'bg-pink-100 text-pink-700',
   Technical: 'bg-indigo-100 text-indigo-700',
   Finance: 'bg-amber-100 text-amber-700',
+  Infrastructure: 'bg-slate-100 text-slate-700',
+}
+
+const KIND_COLORS = {
+  Build: 'bg-slate-100 text-slate-700',
+  Do: 'bg-cyan-100 text-cyan-700',
+  'Decide / Research': 'bg-fuchsia-100 text-fuchsia-700',
 }
 
 const STATUS_CONFIG = {
+  Inbox: { icon: '📥', color: 'text-slate-600', borderColor: 'border-slate-300' },
   Idea: { icon: '💡', color: 'text-gray-600', borderColor: 'border-gray-300' },
   Planned: { icon: '📋', color: 'text-blue-600', borderColor: 'border-blue-300' },
   'In Progress': { icon: '🔨', color: 'text-orange-600', borderColor: 'border-orange-300' },
@@ -26,8 +34,9 @@ const STATUS_CONFIG = {
   Archived: { icon: '🗄️', color: 'text-gray-500', borderColor: 'border-gray-300' },
 }
 
-function Column({ status, records, onCardClick }) {
+function Column({ status, records, onCardClick, onGroomClick }) {
   const config = STATUS_CONFIG[status]
+  const isInbox = status === 'Inbox'
   return (
     <div className="flex flex-col gap-3">
       <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${config.borderColor}`}>
@@ -39,25 +48,34 @@ function Column({ status, records, onCardClick }) {
         {records.map(record => (
           <div
             key={record.id}
-            onClick={() => onCardClick(record)}
+            onClick={() => (isInbox ? onGroomClick(record) : onCardClick(record))}
             className="bg-white border border-gray-200 rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-gray-400 transition-all"
           >
             <p className="font-medium text-sm text-gray-900 mb-2">{record.fields['Feature']}</p>
-            <div className="flex gap-2 flex-wrap">
-              {record.fields['Effort'] && (
-                <span className={`text-xs font-medium px-2 py-1 rounded ${EFFORT_COLORS[record.fields['Effort']] || 'bg-gray-100'}`}>
-                  {record.fields['Effort']}
-                </span>
-              )}
-              {record.fields['Value'] && (
-                <span className="text-xs px-2 py-1">{'⭐'.repeat(record.fields['Value'])}</span>
-              )}
-              {record.fields['Category'] && (
-                <span className={`text-xs font-medium px-2 py-1 rounded ${CATEGORY_COLORS[record.fields['Category']] || 'bg-gray-100'}`}>
-                  {record.fields['Category']}
-                </span>
-              )}
-            </div>
+            {isInbox ? (
+              <span className="text-xs font-medium text-blue-600">Groom →</span>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                {record.fields['Kind'] && (
+                  <span className={`text-xs font-medium px-2 py-1 rounded ${KIND_COLORS[record.fields['Kind']] || 'bg-gray-100'}`}>
+                    {record.fields['Kind']}
+                  </span>
+                )}
+                {record.fields['Effort'] && (
+                  <span className={`text-xs font-medium px-2 py-1 rounded ${EFFORT_COLORS[record.fields['Effort']] || 'bg-gray-100'}`}>
+                    {record.fields['Effort']}
+                  </span>
+                )}
+                {record.fields['Value'] && (
+                  <span className="text-xs px-2 py-1">{'⭐'.repeat(record.fields['Value'])}</span>
+                )}
+                {record.fields['Category'] && (
+                  <span className={`text-xs font-medium px-2 py-1 rounded ${CATEGORY_COLORS[record.fields['Category']] || 'bg-gray-100'}`}>
+                    {record.fields['Category']}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -65,25 +83,40 @@ function Column({ status, records, onCardClick }) {
   )
 }
 
-export default function BacklogKanban({ records, onCardClick, stats }) {
+export default function BacklogKanban({ records, onCardClick, onGroomClick }) {
   const [expandedInProgress, setExpandedInProgress] = useState(true)
   const [expandedDone, setExpandedDone] = useState(false)
   const [expandedArchived, setExpandedArchived] = useState(false)
 
-  const grouped = {
-    Idea: records.filter(r => r.fields['Status'] === 'Idea'),
-    Planned: records.filter(r => r.fields['Status'] === 'Planned'),
-    'In Progress': records.filter(r => r.fields['Status'] === 'In Progress'),
-    Done: records.filter(r => r.fields['Status'] === 'Done'),
-    Archived: records.filter(r => r.fields['Status'] === 'Archived'),
+  const KNOWN_STATUSES = ['Idea', 'Planned', 'In Progress', 'Done', 'Archived']
+  const grouped = { Inbox: [], Idea: [], Planned: [], 'In Progress': [], Done: [], Archived: [] }
+  for (const r of records) {
+    const status = r.fields['Status']
+    if (status === 'Idea') {
+      // Ungroomed captures (no Kind yet) live in Inbox; everything else --
+      // groomed Build cards or the classic manual-entry flow -- is Idea.
+      ;(r.fields['Kind'] ? grouped.Idea : grouped.Inbox).push(r)
+    } else if (KNOWN_STATUSES.includes(status)) {
+      grouped[status].push(r)
+    } else {
+      // Unknown/missing status -- surface it in Inbox instead of silently
+      // vanishing from the board (this bucketing previously dropped cards
+      // with no matching column at all).
+      grouped.Inbox.push(r)
+    }
   }
 
   return (
     <div className="space-y-6">
+      {/* Inbox -- ungroomed captures, full width, most prominent */}
+      {grouped.Inbox.length > 0 && (
+        <Column status="Inbox" records={grouped.Inbox} onCardClick={onCardClick} onGroomClick={onGroomClick} />
+      )}
+
       {/* Idea + Planned in 2-column grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Column status="Idea" records={grouped.Idea} onCardClick={onCardClick} />
-        <Column status="Planned" records={grouped.Planned} onCardClick={onCardClick} />
+        <Column status="Idea" records={grouped.Idea} onCardClick={onCardClick} onGroomClick={onGroomClick} />
+        <Column status="Planned" records={grouped.Planned} onCardClick={onCardClick} onGroomClick={onGroomClick} />
       </div>
 
       {/* In Progress section (collapsible, default expanded) */}
@@ -98,7 +131,7 @@ export default function BacklogKanban({ records, onCardClick, stats }) {
         </button>
         {expandedInProgress && (
           <div className="lg:w-full">
-            <Column status="In Progress" records={grouped['In Progress']} onCardClick={onCardClick} />
+            <Column status="In Progress" records={grouped['In Progress']} onCardClick={onCardClick} onGroomClick={onGroomClick} />
           </div>
         )}
       </div>
@@ -115,7 +148,7 @@ export default function BacklogKanban({ records, onCardClick, stats }) {
         </button>
         {expandedDone && (
           <div className="lg:w-full">
-            <Column status="Done" records={grouped.Done} onCardClick={onCardClick} />
+            <Column status="Done" records={grouped.Done} onCardClick={onCardClick} onGroomClick={onGroomClick} />
           </div>
         )}
       </div>
@@ -132,7 +165,7 @@ export default function BacklogKanban({ records, onCardClick, stats }) {
         </button>
         {expandedArchived && (
           <div className="lg:w-full">
-            <Column status="Archived" records={grouped.Archived} onCardClick={onCardClick} />
+            <Column status="Archived" records={grouped.Archived} onCardClick={onCardClick} onGroomClick={onGroomClick} />
           </div>
         )}
       </div>
