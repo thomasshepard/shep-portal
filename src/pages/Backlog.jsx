@@ -208,6 +208,14 @@ export default function Backlog() {
   const handleGroomOpen = (record) => setGroomingRecord(record)
   const handleGroomCancel = () => setGroomingRecord(null)
 
+  // Reclassifying an already-groomed card (from BacklogModal's "Re-groom"
+  // link) -- close the edit modal first so the two views don't stack.
+  const handleRegroom = (record) => {
+    setShowModal(false)
+    setEditingFeature(null)
+    setGroomingRecord(record)
+  }
+
   const handleGroomDiscard = async () => {
     if (!groomingRecord) return
     setGroomBusy(true)
@@ -277,6 +285,10 @@ export default function Backlog() {
   const stats = {
     active: records.filter(r => !['Done', 'Archived'].includes(r.fields['Status'])).length,
     inProgress: records.filter(r => r.fields['Status'] === 'In Progress').length,
+    // Same "ungroomed capture" test BacklogKanban uses to bucket into Inbox --
+    // a glanceable count here means Inbox's own column can stay small
+    // without losing visibility into what's waiting.
+    needsGrooming: records.filter(r => r.fields['Status'] === 'Idea' && !r.fields['Kind']).length,
   }
 
   // Filtering/sorting applies to the whole record set before BacklogKanban
@@ -328,6 +340,9 @@ export default function Backlog() {
           <div className="flex gap-6 mt-2 text-sm text-gray-600">
             <div>Active Features: <span className="font-semibold text-gray-900">{stats.active}</span></div>
             <div>In Progress: <span className="font-semibold text-gray-900">{stats.inProgress}</span></div>
+            {stats.needsGrooming > 0 && (
+              <div className="text-amber-700">Needs grooming: <span className="font-semibold">{stats.needsGrooming}</span></div>
+            )}
           </div>
         </div>
         <button
@@ -359,6 +374,7 @@ export default function Backlog() {
           setEditingFeature(null)
         }}
         onSave={handleSaveFeature}
+        onRegroom={handleRegroom}
       />
 
       {/* Persistent capture bar */}

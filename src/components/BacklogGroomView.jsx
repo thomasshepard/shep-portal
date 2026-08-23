@@ -34,8 +34,30 @@ export default function BacklogGroomView({ record, onAccept, onDiscard, onCancel
     checkInDate: '',
   })
 
+  const isRegroom = !!record.fields['Kind']
+
   useEffect(() => {
     let cancelled = false
+
+    // Already been through grooming once (re-grooming to change its Kind) --
+    // pre-fill from what's already there instead of re-asking the AI, which
+    // would ignore any manual edits since and waste a call for no reason.
+    if (isRegroom) {
+      const f = record.fields
+      setForm({
+        kind: f['Kind'] || '',
+        category: f['Category'] || '',
+        effort: f['Effort'] || 'M',
+        value: f['Value'] || 3,
+        description: f['Description'] || '',
+        buildPrompt: f['Build Prompt'] || '',
+        dueDate: defaultDate(3),
+        checkInDate: f['Check-in Date'] || defaultDate(7),
+      })
+      setLoadingGroom(false)
+      return
+    }
+
     setLoadingGroom(true)
     setGroomFailed(false)
     groomBacklogIdea(record.fields['Feature']).then(result => {
@@ -58,6 +80,7 @@ export default function BacklogGroomView({ record, onAccept, onDiscard, onCancel
       }))
     })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.id])
 
   function set(key, val) { setForm(f => ({ ...f, [key]: val })) }
@@ -74,13 +97,13 @@ export default function BacklogGroomView({ record, onAccept, onDiscard, onCancel
         <button type="button" onClick={onCancel} className="flex items-center gap-1.5 text-gray-500 text-sm font-medium hover:text-gray-800">
           <X size={16} /> Cancel
         </button>
-        <span className="text-sm font-semibold text-gray-900">Groom idea</span>
+        <span className="text-sm font-semibold text-gray-900">{isRegroom ? 'Re-groom' : 'Groom idea'}</span>
         <div className="w-14" />
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-5 space-y-5 pb-28">
         <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Captured</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{isRegroom ? 'Reclassifying' : 'Captured'}</p>
           <p className="text-base font-medium text-gray-900">{record.fields['Feature']}</p>
         </div>
 

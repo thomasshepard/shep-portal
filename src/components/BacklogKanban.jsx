@@ -26,12 +26,18 @@ const KIND_COLORS = {
 }
 
 const STATUS_CONFIG = {
-  Inbox: { icon: '📥', color: 'text-slate-600', borderColor: 'border-slate-300' },
-  Idea: { icon: '💡', color: 'text-gray-600', borderColor: 'border-gray-300' },
-  Planned: { icon: '📋', color: 'text-blue-600', borderColor: 'border-blue-300' },
-  'In Progress': { icon: '🔨', color: 'text-orange-600', borderColor: 'border-orange-300' },
-  Done: { icon: '✅', color: 'text-green-600', borderColor: 'border-green-300' },
-  Archived: { icon: '🗄️', color: 'text-gray-500', borderColor: 'border-gray-300' },
+  // Label is display-only -- the underlying Airtable Status value stays
+  // 'Idea' for both this and Inbox (disambiguated by whether Kind is set,
+  // see the grouping logic below). By the time a card lands here it's
+  // already been through grooming (Kind/Category/Effort/Value all set) --
+  // calling it "Idea" next to a literal Inbox full of ungroomed ideas was
+  // exactly the "what's the difference" confusion.
+  Inbox: { icon: '📥', label: 'Inbox', color: 'text-slate-600', borderColor: 'border-slate-300' },
+  Idea: { icon: '💡', label: 'Backlog', color: 'text-gray-600', borderColor: 'border-gray-300' },
+  Planned: { icon: '📋', label: 'Planned', color: 'text-blue-600', borderColor: 'border-blue-300' },
+  'In Progress': { icon: '🔨', label: 'In Progress', color: 'text-orange-600', borderColor: 'border-orange-300' },
+  Done: { icon: '✅', label: 'Done', color: 'text-green-600', borderColor: 'border-green-300' },
+  Archived: { icon: '🗄️', label: 'Archived', color: 'text-gray-500', borderColor: 'border-gray-300' },
 }
 
 function Column({ status, records, onCardClick, onGroomClick }) {
@@ -41,10 +47,13 @@ function Column({ status, records, onCardClick, onGroomClick }) {
     <div className="flex flex-col gap-3">
       <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${config.borderColor}`}>
         <span className="text-lg">{config.icon}</span>
-        <span className={`font-medium ${config.color}`}>{status}</span>
+        <span className={`font-medium ${config.color}`}>{config.label}</span>
         <span className="ml-auto text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">{records.length}</span>
       </div>
-      <div className="space-y-2">
+      {/* Capped + internally scrollable so a long Inbox (or any column)
+          doesn't push the rest of the board down the page -- you were
+          having to scroll past a tall Inbox just to reach Backlog/Planned. */}
+      <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
         {records.map(record => (
           <div
             key={record.id}
