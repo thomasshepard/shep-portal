@@ -44,7 +44,10 @@ const SYSTEM_PROMPT =
   'web_search results include a "content" field with real page text for the ' +
   'top results (not just a description) — use that as your source. If a ' +
   'result has no content (content is null) or you need a page beyond the ' +
-  'top results, call fetch_page on its url. Cite the source URLs in your reply.'
+  'top results, call fetch_page on its url. For "what is X\'s latest video" ' +
+  'questions, use youtube_latest_videos instead of web_search — it returns ' +
+  'real current video titles, which web_search cannot see. ' +
+  'Cite the source URLs in your reply.'
 
 const TOOLS = [
   {
@@ -71,14 +74,45 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'youtube_latest_videos',
+      description:
+        'Get a YouTube channel\'s actual recent video titles and links (real, current data — ' +
+        'web_search/fetch_page cannot see this since channel pages are JavaScript-rendered). ' +
+        'Use this for any "what is X\'s latest video" question instead of web_search.',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', description: 'Channel handle (e.g. "@meetkevin"), name, or URL' },
+          count: { type: 'number', description: 'How many recent videos to return (default 10, max 15)' },
+        },
+        required: ['channel'],
+      },
+    },
+  },
 ]
 
 const MAX_TOOL_ITERATIONS = 6 // search + a few fetch_page rounds + final answer
 
+const TOOL_ENDPOINTS = {
+  web_search: '/tools/search',
+  fetch_page: '/tools/fetch',
+  youtube_latest_videos: '/tools/youtube-latest',
+}
+
+function toolRequestBody(name, args) {
+  if (name === 'web_search') return { query: args.query }
+  if (name === 'fetch_page') return { url: args.url }
+  if (name === 'youtube_latest_videos') return { channel: args.channel, count: args.count }
+  return {}
+}
+
 async function callTool(name, args) {
-  const path = name === 'web_search' ? '/tools/search' : name === 'fetch_page' ? '/tools/fetch' : null
+  const path = TOOL_ENDPOINTS[name]
   if (!path) throw new Error(`Unknown tool: ${name}`)
-  const body = name === 'web_search' ? { query: args.query } : { url: args.url }
+  const body = toolRequestBody(name, args)
   const res = await fetch(`${OLLAMA_BASE_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -122,7 +156,11 @@ async function sendChat(model, priorMessages, onStatus) {
     for (const call of toolCalls) {
       const fn = call.function || {}
       const args = parseToolArgs(fn.arguments)
-      onStatus?.(fn.name === 'web_search' ? `Searching "${args.query}"…` : `Reading ${args.url}…`)
+      onStatus?.(
+        fn.name === 'web_search' ? `Searching "${args.query}"…` :
+        fn.name === 'youtube_latest_videos' ? `Checking ${args.channel}'s latest videos…` :
+        `Reading ${args.url}…`
+      )
       let resultText
       try {
         const result = await callTool(fn.name, args)
@@ -130,6 +168,8 @@ async function sendChat(model, priorMessages, onStatus) {
           for (const r of result.results || []) sources.push(r.url)
         } else if (fn.name === 'fetch_page') {
           sources.push(result.url)
+        } else if (fn.name === 'youtube_latest_videos') {
+          for (const v of result.videos || []) sources.push(v.url)
         }
         resultText = JSON.stringify(result)
       } catch (err) {
