@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Cpu, Send, RefreshCw, AlertTriangle, Trash2, Plus, Menu, X, Copy, Check, ExternalLink } from 'lucide-react'
+import { Cpu, Send, RefreshCw, AlertTriangle, Trash2, Plus, Menu, X, Copy, Check, ExternalLink, Search } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
@@ -398,9 +398,13 @@ function MessageBubble({ role, content }) {
   )
 }
 
-function ThreadList({ threads, activeId, onSelect, onDelete, onClose }) {
+function ThreadList({ threads, activeId, onSelect, onDelete, onClose, query, hasAnyThreads }) {
   if (threads.length === 0) {
-    return <p className="text-sm text-gray-400 px-4 py-6 text-center">No conversations yet</p>
+    return (
+      <p className="text-sm text-gray-400 px-4 py-6 text-center">
+        {query && hasAnyThreads ? <>No conversations match &ldquo;{query}&rdquo;</> : 'No conversations yet'}
+      </p>
+    )
   }
   return (
     <div className="space-y-1 p-2">
@@ -443,6 +447,10 @@ export default function LocalAI() {
   const [messages, setMessages] = useState([])
   const [loadingThreads, setLoadingThreads] = useState(true)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [threadQuery, setThreadQuery] = useState('')
+  const filteredThreads = threadQuery.trim()
+    ? threads.filter(t => (t.title || 'New conversation').toLowerCase().includes(threadQuery.trim().toLowerCase()))
+    : threads
 
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -619,30 +627,62 @@ export default function LocalAI() {
 
       <div className="flex gap-4 h-[70vh]">
         {/* Desktop sidebar */}
-        <div className="hidden lg:block w-64 flex-shrink-0 bg-white rounded-xl border border-gray-200 overflow-y-auto">
-          {loadingThreads ? (
-            <p className="text-sm text-gray-400 px-4 py-6 text-center">Loading...</p>
-          ) : (
-            <ThreadList threads={threads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} />
+        <div className="hidden lg:flex lg:flex-col w-64 flex-shrink-0 bg-white rounded-xl border border-gray-200 overflow-hidden">
+          {threads.length > 0 && (
+            <div className="p-2 border-b border-gray-100 sticky top-0 bg-white z-10">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={threadQuery}
+                  onChange={e => setThreadQuery(e.target.value)}
+                  placeholder="Search conversations..."
+                  className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
           )}
+          <div className="overflow-y-auto flex-1">
+            {loadingThreads ? (
+              <p className="text-sm text-gray-400 px-4 py-6 text-center">Loading...</p>
+            ) : (
+              <ThreadList threads={filteredThreads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} query={threadQuery.trim()} hasAnyThreads={threads.length > 0} />
+            )}
+          </div>
         </div>
 
         {/* Mobile drawer */}
         {drawerOpen && (
           <div className="fixed inset-0 z-40 lg:hidden">
             <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
-            <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl overflow-y-auto">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                <span className="font-semibold text-gray-800 text-sm">Conversations</span>
-                <button onClick={() => setDrawerOpen(false)} className="text-gray-400 hover:text-gray-700">
-                  <X size={18} />
-                </button>
+            <div className="absolute left-0 top-0 h-full w-72 bg-white shadow-xl flex flex-col">
+              <div className="sticky top-0 bg-white z-10 border-b border-gray-100">
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="font-semibold text-gray-800 text-sm">Conversations</span>
+                  <button onClick={() => setDrawerOpen(false)} className="text-gray-400 hover:text-gray-700">
+                    <X size={18} />
+                  </button>
+                </div>
+                {threads.length > 0 && (
+                  <div className="px-2 pb-2">
+                    <div className="relative">
+                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        value={threadQuery}
+                        onChange={e => setThreadQuery(e.target.value)}
+                        placeholder="Search conversations..."
+                        className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              {loadingThreads ? (
-                <p className="text-sm text-gray-400 px-4 py-6 text-center">Loading...</p>
-              ) : (
-                <ThreadList threads={threads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} onClose={() => setDrawerOpen(false)} />
-              )}
+              <div className="overflow-y-auto flex-1">
+                {loadingThreads ? (
+                  <p className="text-sm text-gray-400 px-4 py-6 text-center">Loading...</p>
+                ) : (
+                  <ThreadList threads={filteredThreads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} onClose={() => setDrawerOpen(false)} query={threadQuery.trim()} hasAnyThreads={threads.length > 0} />
+                )}
+              </div>
             </div>
           </div>
         )}
