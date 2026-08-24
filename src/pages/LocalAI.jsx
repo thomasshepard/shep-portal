@@ -1,8 +1,44 @@
 import { useState, useEffect, useRef } from 'react'
-import { Cpu, Send, RefreshCw, AlertTriangle, Trash2, Plus, Menu, X } from 'lucide-react'
+import { Cpu, Send, RefreshCw, AlertTriangle, Trash2, Plus, Menu, X, Copy, Check, ExternalLink } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+
+// Compact markdown rendering for chat bubbles (white/light background —
+// same context as PropertyPlaybook.jsx's MD components, tightened up for
+// a narrower bubble rather than a full page).
+const MD = {
+  h1: p => <h1 className="text-base font-bold mt-3 mb-1.5 first:mt-0" {...p} />,
+  h2: p => <h2 className="text-sm font-bold mt-3 mb-1.5 first:mt-0" {...p} />,
+  h3: p => <h3 className="text-sm font-semibold mt-2 mb-1 first:mt-0" {...p} />,
+  p: p => <p className="mb-2 leading-relaxed last:mb-0" {...p} />,
+  ul: p => <ul className="list-disc pl-5 mb-2 space-y-0.5 last:mb-0" {...p} />,
+  ol: p => <ol className="list-decimal pl-5 mb-2 space-y-0.5 last:mb-0" {...p} />,
+  li: p => <li className="leading-relaxed" {...p} />,
+  a: p => <a className="underline decoration-1 underline-offset-2 hover:opacity-80" target="_blank" rel="noreferrer" {...p} />,
+  strong: p => <strong className="font-semibold" {...p} />,
+  blockquote: p => <blockquote className="border-l-2 border-current/20 pl-3 italic opacity-80 my-2" {...p} />,
+  code: p => <code className="bg-black/5 px-1 py-0.5 rounded text-[0.85em]" {...p} />,
+  hr: () => <hr className="my-2 border-current/10" />,
+}
+
+// The client appends "\n\nSources:\n- url\n- url..." to messages that used
+// a tool (see handleSend). Split that back out so it can render as
+// clickable pills instead of raw bullet text mixed into the markdown body.
+function splitSourcesFooter(content) {
+  const marker = '\n\nSources:\n'
+  const idx = content.lastIndexOf(marker)
+  if (idx === -1) return { main: content, sourceUrls: [] }
+  const urls = content.slice(idx + marker.length).split('\n')
+    .map(l => l.replace(/^-\s*/, '').trim()).filter(Boolean)
+  if (urls.length === 0 || !urls.every(u => /^https?:\/\//.test(u))) return { main: content, sourceUrls: [] }
+  return { main: content.slice(0, idx), sourceUrls: urls }
+}
+
+function sourceLabel(url) {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
+}
 
 // Ollama runs on Thomas's desktop and is reachable only over Tailscale (his
 // private device mesh — not the LAN, not the public internet), fronted by
@@ -308,14 +344,55 @@ tailscale serve --bg http://127.0.0.1:11434`}
 
 function MessageBubble({ role, content }) {
   const isUser = role === 'user'
+  const [copied, setCopied] = useState(false)
+  const { main, sourceUrls } = isUser ? { main: content, sourceUrls: [] } : splitSourcesFooter(content)
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error('Could not copy — clipboard access blocked')
+    }
+  }
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] sm:max-w-[80%] rounded-xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
-          isUser ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-800'
+        className={`max-w-[85%] sm:max-w-[80%] rounded-xl px-4 py-2.5 text-sm ${
+          isUser ? 'bg-blue-600 text-white whitespace-pre-wrap' : 'bg-white border border-gray-200 text-gray-800'
         }`}
       >
-        {content}
+        {isUser ? main : <ReactMarkdown components={MD}>{main}</ReactMarkdown>}
+
+        {sourceUrls.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-gray-100">
+            {sourceUrls.map((u, i) => (
+              <a
+                key={i}
+                href={u}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 text-xs bg-gray-50 hover:bg-gray-100 text-gray-600 px-2 py-1 rounded-full border border-gray-200 transition-colors"
+              >
+                <ExternalLink size={10} />
+                {sourceLabel(u)}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {!isUser && content && (
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 text-xs text-gray-300 hover:text-gray-600 mt-1.5 transition-colors"
+            title="Copy message"
+          >
+            {copied ? <Check size={11} className="text-green-600" /> : <Copy size={11} />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        )}
       </div>
     </div>
   )
