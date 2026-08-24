@@ -5,10 +5,13 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 
 // Ollama runs on Thomas's desktop and is reachable only over Tailscale (his
-// private device mesh — not the LAN, not the public internet). This hostname
-// is Tailscale MagicDNS, stable even if the underlying 100.x IP changes.
+// private device mesh — not the LAN, not the public internet), fronted by
+// `tailscale serve` for a real HTTPS cert on the MagicDNS hostname (Ollama
+// itself only binds to 127.0.0.1; Tailscale Serve is the sole gateway).
+// HTTPS here is required, not cosmetic — this page loads over HTTPS on the
+// deployed site, and browsers block HTTPS pages from fetching plain HTTP.
 // Not a secret: only devices signed into that tailnet can resolve or reach it.
-const OLLAMA_BASE_URL = 'http://desktop-9r5vkuj.tailf094b9.ts.net:11434'
+const OLLAMA_BASE_URL = 'https://desktop-9r5vkuj.tailf094b9.ts.net'
 
 async function pingOllama() {
   try {
@@ -29,15 +32,110 @@ async function listModels() {
   return (data.models || []).map(m => m.name)
 }
 
-async function sendChat(model, messages) {
+// ── Web access tools ─────────────────────────────────────────────────────
+// Backed by /tools/search and /tools/fetch on the local proxy (same host as
+// Ollama). The Brave Search API key lives only on the proxy — this page
+// never sees it. Offered to the model on every request so it can pull in
+// current information; the model decides whether a given question needs it.
+const SYSTEM_PROMPT =
+  'You can call web_search and fetch_page to look things up online when you ' +
+  'need current information, facts you are unsure of, or anything after your ' +
+  'training cutoff. Prefer answering directly when you already know the answer. ' +
+  'When you do use search results, cite the source URLs in your reply.'
+
+const TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Search the public web and return the top results (title, url, description).',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string', description: 'Search query' } },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fetch_page',
+      description: 'Fetch a web page by URL and return its readable text content.',
+      parameters: {
+        type: 'object',
+        properties: { url: { type: 'string', description: 'Full http(s) URL to fetch' } },
+        required: ['url'],
+      },
+    },
+  },
+]
+
+const MAX_TOOL_ITERATIONS = 4
+
+async function callTool(name, args) {
+  const path = name === 'web_search' ? '/tools/search' : name === 'fetch_page' ? '/tools/fetch' : null
+  if (!path) throw new Error(`Unknown tool: ${name}`)
+  const body = name === 'web_search' ? { query: args.query } : { url: args.url }
+  const res = await fetch(`${OLLAMA_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `Tool ${name} failed: HTTP ${res.status}`)
+  return data
+}
+
+function parseToolArgs(raw) {
+  if (typeof raw === 'string') { try { return JSON.parse(raw) } catch { return {} } }
+  return raw || {}
+}
+
+async function sendChatRaw(model, messages) {
   const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, stream: false }),
+    body: JSON.stringify({ model, messages, tools: TOOLS, stream: false }),
   })
   if (!res.ok) throw new Error(`Ollama error: ${res.status}`)
   const data = await res.json()
-  return data.message?.content || ''
+  return data.message || { role: 'assistant', content: '' }
+}
+
+// Runs the tool-calling loop: sends the conversation, and whenever the model
+// asks for a tool, executes it locally and feeds the result back, until it
+// produces a final answer (or MAX_TOOL_ITERATIONS is hit). Returns the final
+// reply text plus the list of URLs touched along the way (for a sources footer).
+async function sendChat(model, priorMessages, onStatus) {
+  const working = [{ role: 'system', content: SYSTEM_PROMPT }, ...priorMessages]
+  const sources = []
+
+  for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    const message = await sendChatRaw(model, working)
+    const toolCalls = message.tool_calls || []
+    if (toolCalls.length === 0) return { content: message.content || '', sources }
+
+    working.push(message)
+    for (const call of toolCalls) {
+      const fn = call.function || {}
+      const args = parseToolArgs(fn.arguments)
+      onStatus?.(fn.name === 'web_search' ? `Searching "${args.query}"…` : `Reading ${args.url}…`)
+      let resultText
+      try {
+        const result = await callTool(fn.name, args)
+        if (fn.name === 'web_search') {
+          for (const r of result.results || []) sources.push(r.url)
+        } else if (fn.name === 'fetch_page') {
+          sources.push(result.url)
+        }
+        resultText = JSON.stringify(result)
+      } catch (err) {
+        resultText = JSON.stringify({ error: err.message })
+      }
+      working.push({ role: 'tool', tool_call_id: call.id, content: resultText })
+    }
+  }
+  return { content: 'Gave up after too many tool calls — try rephrasing.', sources }
 }
 
 // ── Supabase thread/message helpers ─────────────────────────────────────────
@@ -122,8 +220,9 @@ function UnavailableNotice({ onRetry, checking }) {
         </p>
         <pre className="bg-amber-100 rounded-lg p-2.5 text-xs overflow-x-auto">
 {`$env:OLLAMA_MODELS = "E:\\OllamaModels"
-$env:OLLAMA_HOST = "100.88.55.44:11434"
-Start-Process -FilePath "E:\\Ollama\\ollama.exe" -ArgumentList "serve" -WindowStyle Hidden`}
+$env:OLLAMA_HOST = "127.0.0.1:11434"
+Start-Process -FilePath "E:\\Ollama\\ollama.exe" -ArgumentList "serve" -WindowStyle Hidden
+tailscale serve --bg http://127.0.0.1:11434`}
         </pre>
         <button
           onClick={onRetry}
@@ -201,6 +300,7 @@ export default function LocalAI() {
 
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [toolStatus, setToolStatus] = useState('')
   const bottomRef = useRef(null)
 
   async function checkAvailability() {
@@ -286,9 +386,14 @@ export default function LocalAI() {
 
       await insertMessage(threadId, 'user', text)
 
-      const reply = await sendChat(model, nextMessages)
-      setMessages(m => [...m, { role: 'assistant', content: reply }])
-      await insertMessage(threadId, 'assistant', reply)
+      const { content: reply, sources } = await sendChat(model, nextMessages, setToolStatus)
+      setToolStatus('')
+      const uniqueSources = [...new Set(sources)]
+      const withSources = uniqueSources.length
+        ? `${reply}\n\nSources:\n${uniqueSources.map(u => `- ${u}`).join('\n')}`
+        : reply
+      setMessages(m => [...m, { role: 'assistant', content: withSources }])
+      await insertMessage(threadId, 'assistant', withSources)
 
       const newTitle = isFirstMessage ? titleFrom(text) : undefined
       await touchThread(threadId, newTitle)
@@ -303,6 +408,7 @@ export default function LocalAI() {
       setMessages(m => [...m, { role: 'assistant', content: `⚠️ ${err.message || 'Request failed'}` }])
     } finally {
       setSending(false)
+      setToolStatus('')
     }
   }
 
@@ -330,7 +436,7 @@ export default function LocalAI() {
               Local AI
             </h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              Runs entirely on the desktop via Ollama — nothing sent to the cloud.
+              Runs on the desktop via Ollama, with web search when it needs current info.
             </p>
           </div>
         </div>
@@ -403,7 +509,7 @@ export default function LocalAI() {
             {sending && (
               <div className="flex justify-start">
                 <div className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-400">
-                  Thinking...
+                  {toolStatus || 'Thinking...'}
                 </div>
               </div>
             )}
