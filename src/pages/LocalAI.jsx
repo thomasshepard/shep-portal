@@ -265,6 +265,20 @@ async function fetchMessages(threadId) {
   return data || []
 }
 
+// Distinct thread IDs containing a message whose content matches — RLS
+// (via local_ai_messages' policy, scoped through the parent thread's
+// user_id) is what actually restricts this to the caller's own messages,
+// same as fetchMessages above; no explicit user filter needed here either.
+async function searchMessageContent(query) {
+  const { data, error } = await supabase
+    .from('local_ai_messages')
+    .select('thread_id')
+    .ilike('content', `%${query}%`)
+    .limit(200)
+  if (error) throw error
+  return new Set((data || []).map(m => m.thread_id))
+}
+
 async function createThread(userId, model) {
   const { data, error } = await supabase
     .from('local_ai_threads')
@@ -398,11 +412,13 @@ function MessageBubble({ role, content }) {
   )
 }
 
-function ThreadList({ threads, activeId, onSelect, onDelete, onClose, query, hasAnyThreads }) {
+function ThreadList({ threads, activeId, onSelect, onDelete, onClose, query, hasAnyThreads, searching }) {
   if (threads.length === 0) {
     return (
       <p className="text-sm text-gray-400 px-4 py-6 text-center">
-        {query && hasAnyThreads ? <>No conversations match &ldquo;{query}&rdquo;</> : 'No conversations yet'}
+        {query && searching ? 'Searching...' :
+         query && hasAnyThreads ? <>No conversations match &ldquo;{query}&rdquo;</> :
+         'No conversations yet'}
       </p>
     )
   }
@@ -448,8 +464,33 @@ export default function LocalAI() {
   const [loadingThreads, setLoadingThreads] = useState(true)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [threadQuery, setThreadQuery] = useState('')
+  const [contentMatchIds, setContentMatchIds] = useState(null) // null = not searched yet, Set = results
+  const [searchingContent, setSearchingContent] = useState(false)
+
+  // Title matching is instant (client-side); message-content matching hits
+  // Supabase, so it's debounced and merged in once it resolves — searching
+  // "what a video was actually about" needs the body text, not just titles.
+  useEffect(() => {
+    const q = threadQuery.trim()
+    if (!q) { setContentMatchIds(null); setSearchingContent(false); return }
+    setSearchingContent(true)
+    const timer = setTimeout(async () => {
+      try {
+        setContentMatchIds(await searchMessageContent(q))
+      } catch {
+        setContentMatchIds(new Set())
+      } finally {
+        setSearchingContent(false)
+      }
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [threadQuery])
+
   const filteredThreads = threadQuery.trim()
-    ? threads.filter(t => (t.title || 'New conversation').toLowerCase().includes(threadQuery.trim().toLowerCase()))
+    ? threads.filter(t =>
+        (t.title || 'New conversation').toLowerCase().includes(threadQuery.trim().toLowerCase()) ||
+        contentMatchIds?.has(t.id)
+      )
     : threads
 
   const [input, setInput] = useState('')
@@ -636,8 +677,11 @@ export default function LocalAI() {
                   value={threadQuery}
                   onChange={e => setThreadQuery(e.target.value)}
                   placeholder="Search conversations..."
-                  className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-7 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {searchingContent && (
+                  <RefreshCw size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 animate-spin" />
+                )}
               </div>
             </div>
           )}
@@ -645,7 +689,7 @@ export default function LocalAI() {
             {loadingThreads ? (
               <p className="text-sm text-gray-400 px-4 py-6 text-center">Loading...</p>
             ) : (
-              <ThreadList threads={filteredThreads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} query={threadQuery.trim()} hasAnyThreads={threads.length > 0} />
+              <ThreadList threads={filteredThreads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} query={threadQuery.trim()} hasAnyThreads={threads.length > 0} searching={searchingContent} />
             )}
           </div>
         </div>
@@ -680,7 +724,7 @@ export default function LocalAI() {
                 {loadingThreads ? (
                   <p className="text-sm text-gray-400 px-4 py-6 text-center">Loading...</p>
                 ) : (
-                  <ThreadList threads={filteredThreads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} onClose={() => setDrawerOpen(false)} query={threadQuery.trim()} hasAnyThreads={threads.length > 0} />
+                  <ThreadList threads={filteredThreads} activeId={activeThreadId} onSelect={selectThread} onDelete={handleDeleteThread} onClose={() => setDrawerOpen(false)} query={threadQuery.trim()} hasAnyThreads={threads.length > 0} searching={searchingContent} />
                 )}
               </div>
             </div>
