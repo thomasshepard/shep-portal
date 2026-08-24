@@ -65,7 +65,11 @@ const OLLAMA_BASE_URL = 'https://desktop-9r5vkuj.tailf094b9.ts.net'
 async function pingOllama() {
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 3000)
+    // Ollama can take a while to answer /api/version while it's mid-pull on
+    // a multi-GB model (decompression + disk I/O) — a short timeout here
+    // reads as "unreachable" when it's really just busy. 8s gives it room
+    // without leaving a genuinely-down desktop spinning too long.
+    const timeout = setTimeout(() => controller.abort(), 8000)
     const res = await fetch(`${OLLAMA_BASE_URL}/api/version`, { signal: controller.signal })
     clearTimeout(timeout)
     return res.ok
@@ -100,7 +104,9 @@ const SYSTEM_PROMPT =
   'youtube_transcript. When the user wants to actually see a picture of ' +
   'something (not just read about it), use image_search and embed the ' +
   'results as markdown images — never invent an image URL yourself, only ' +
-  'use ones a tool actually returned. Cite the source URLs in your reply.'
+  'use ones a tool actually returned. Cite the source URLs in your reply. ' +
+  'For arithmetic, date math, or any calculation you might get wrong doing ' +
+  'in your head, call code_exec instead of computing it yourself.'
 
 const TOOLS = [
   {
@@ -174,6 +180,21 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'code_exec',
+      description:
+        'Execute JavaScript for calculations, date math, or string/array/logic processing you might ' +
+        'get wrong doing by hand. Sandboxed, 2-second timeout, no network or file access. Use ' +
+        'console.log() for intermediate output; the value of the last expression is also returned.',
+      parameters: {
+        type: 'object',
+        properties: { code: { type: 'string', description: 'JavaScript code to run' } },
+        required: ['code'],
+      },
+    },
+  },
 ]
 
 const MAX_TOOL_ITERATIONS = 6 // search + a few fetch_page rounds + final answer
@@ -184,6 +205,7 @@ const TOOL_ENDPOINTS = {
   image_search: '/tools/image-search',
   youtube_latest_videos: '/tools/youtube-latest',
   youtube_transcript: '/tools/youtube-transcript',
+  code_exec: '/tools/exec',
 }
 
 function toolRequestBody(name, args) {
@@ -192,6 +214,7 @@ function toolRequestBody(name, args) {
   if (name === 'image_search') return { query: args.query }
   if (name === 'youtube_latest_videos') return { channel: args.channel, count: args.count }
   if (name === 'youtube_transcript') return { video: args.video }
+  if (name === 'code_exec') return { code: args.code }
   return {}
 }
 
@@ -253,6 +276,7 @@ async function sendChat(model, priorMessages, onStatus) {
         fn.name === 'image_search' ? `Finding images of "${args.query}"…` :
         fn.name === 'youtube_latest_videos' ? `Checking ${args.channel}'s latest videos…` :
         fn.name === 'youtube_transcript' ? `Reading video transcript…` :
+        fn.name === 'code_exec' ? `Running calculation…` :
         `Reading ${args.url}…`
       )
       let resultText
