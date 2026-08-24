@@ -41,7 +41,10 @@ const SYSTEM_PROMPT =
   'You can call web_search and fetch_page to look things up online when you ' +
   'need current information, facts you are unsure of, or anything after your ' +
   'training cutoff. Prefer answering directly when you already know the answer. ' +
-  'When you do use search results, cite the source URLs in your reply.'
+  'web_search results include a "content" field with real page text for the ' +
+  'top results (not just a description) — use that as your source. If a ' +
+  'result has no content (content is null) or you need a page beyond the ' +
+  'top results, call fetch_page on its url. Cite the source URLs in your reply.'
 
 const TOOLS = [
   {
@@ -70,7 +73,7 @@ const TOOLS = [
   },
 ]
 
-const MAX_TOOL_ITERATIONS = 4
+const MAX_TOOL_ITERATIONS = 6 // search + a few fetch_page rounds + final answer
 
 async function callTool(name, args) {
   const path = name === 'web_search' ? '/tools/search' : name === 'fetch_page' ? '/tools/fetch' : null
