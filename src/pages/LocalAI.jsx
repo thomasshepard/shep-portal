@@ -169,7 +169,13 @@ async function sendChat(model, priorMessages, onStatus) {
     const toolCalls = message.tool_calls || []
     if (toolCalls.length === 0) return { content: message.content || '', sources }
 
-    working.push(message)
+    // Some models emit narration alongside a tool call (e.g. "I will now
+    // fetch the transcript..."). Feeding that back confuses later rounds —
+    // tested directly against Ollama: with the narration included, the
+    // model would insist "no actual transcript was fetched" even with the
+    // real transcript sitting right there in the next tool message; with
+    // only tool_calls (no content) it used the data correctly every time.
+    working.push({ role: message.role, tool_calls: message.tool_calls })
     for (const call of toolCalls) {
       const fn = call.function || {}
       const args = parseToolArgs(fn.arguments)
@@ -455,7 +461,8 @@ export default function LocalAI() {
       const { content: reply, sources } = await sendChat(model, nextMessages, setToolStatus)
       setToolStatus('')
       const uniqueSources = [...new Set(sources)]
-      const withSources = uniqueSources.length
+      // Models sometimes write their own citations already — don't double up.
+      const withSources = uniqueSources.length && !/sources:/i.test(reply)
         ? `${reply}\n\nSources:\n${uniqueSources.map(u => `- ${u}`).join('\n')}`
         : reply
       setMessages(m => [...m, { role: 'assistant', content: withSources }])
