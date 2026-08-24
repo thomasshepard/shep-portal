@@ -46,8 +46,9 @@ const SYSTEM_PROMPT =
   'result has no content (content is null) or you need a page beyond the ' +
   'top results, call fetch_page on its url. For "what is X\'s latest video" ' +
   'questions, use youtube_latest_videos instead of web_search — it returns ' +
-  'real current video titles, which web_search cannot see. ' +
-  'Cite the source URLs in your reply.'
+  'real current video titles, which web_search cannot see. To summarize or ' +
+  'answer questions about what was said in a specific YouTube video, use ' +
+  'youtube_transcript. Cite the source URLs in your reply.'
 
 const TOOLS = [
   {
@@ -92,6 +93,20 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'youtube_transcript',
+      description:
+        'Get the actual spoken transcript of a YouTube video (English auto-captions), for summarizing ' +
+        'or answering questions about what was said in it. Long videos are truncated.',
+      parameters: {
+        type: 'object',
+        properties: { video: { type: 'string', description: 'Video URL or 11-character video ID' } },
+        required: ['video'],
+      },
+    },
+  },
 ]
 
 const MAX_TOOL_ITERATIONS = 6 // search + a few fetch_page rounds + final answer
@@ -100,12 +115,14 @@ const TOOL_ENDPOINTS = {
   web_search: '/tools/search',
   fetch_page: '/tools/fetch',
   youtube_latest_videos: '/tools/youtube-latest',
+  youtube_transcript: '/tools/youtube-transcript',
 }
 
 function toolRequestBody(name, args) {
   if (name === 'web_search') return { query: args.query }
   if (name === 'fetch_page') return { url: args.url }
   if (name === 'youtube_latest_videos') return { channel: args.channel, count: args.count }
+  if (name === 'youtube_transcript') return { video: args.video }
   return {}
 }
 
@@ -159,6 +176,7 @@ async function sendChat(model, priorMessages, onStatus) {
       onStatus?.(
         fn.name === 'web_search' ? `Searching "${args.query}"…` :
         fn.name === 'youtube_latest_videos' ? `Checking ${args.channel}'s latest videos…` :
+        fn.name === 'youtube_transcript' ? `Reading video transcript…` :
         `Reading ${args.url}…`
       )
       let resultText
@@ -170,6 +188,8 @@ async function sendChat(model, priorMessages, onStatus) {
           sources.push(result.url)
         } else if (fn.name === 'youtube_latest_videos') {
           for (const v of result.videos || []) sources.push(v.url)
+        } else if (fn.name === 'youtube_transcript' && result.videoId) {
+          sources.push(`https://www.youtube.com/watch?v=${result.videoId}`)
         }
         resultText = JSON.stringify(result)
       } catch (err) {
@@ -354,7 +374,10 @@ export default function LocalAI() {
       try {
         const list = await listModels()
         setModels(list)
-        setModel(prev => prev || list.find(m => m.startsWith('qwen2.5:3b')) || list[0] || '')
+        setModel(prev => prev
+          || list.find(m => m.startsWith('qwen2.5:7b'))
+          || list.find(m => m.startsWith('qwen2.5:3b'))
+          || list[0] || '')
       } catch {
         toast.error('Connected, but could not list models')
       }
