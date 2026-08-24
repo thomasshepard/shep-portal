@@ -428,6 +428,17 @@ tailscale serve --bg http://127.0.0.1:11434`}
   )
 }
 
+// Ollama library names (qwen2.5:7b, hermes3:8b) are already short. Models
+// pulled from Hugging Face come through as the full hf.co/author/repo:quant
+// string, which is unreadable in a dropdown — shorten to just the repo name
+// (minus a redundant trailing "-GGUF") plus the quant level.
+function modelLabel(name) {
+  if (!name.startsWith('hf.co/')) return name
+  const [repoPart, quant] = name.slice('hf.co/'.length).split(':')
+  const repoName = repoPart.split('/').pop().replace(/-GGUF$/i, '')
+  return quant ? `${repoName} (${quant})` : repoName
+}
+
 function MessageBubble({ role, content }) {
   const isUser = role === 'user'
   const [copied, setCopied] = useState(false)
@@ -720,7 +731,7 @@ export default function LocalAI() {
               onChange={e => setModel(e.target.value)}
               className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white"
             >
-              {models.map(m => <option key={m} value={m}>{m}</option>)}
+              {models.map(m => <option key={m} value={m} title={m}>{modelLabel(m)}</option>)}
             </select>
             <button
               onClick={startNewChat}
