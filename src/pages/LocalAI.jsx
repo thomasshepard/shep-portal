@@ -21,6 +21,19 @@ const MD = {
   blockquote: p => <blockquote className="border-l-2 border-current/20 pl-3 italic opacity-80 my-2" {...p} />,
   code: p => <code className="bg-black/5 px-1 py-0.5 rounded text-[0.85em]" {...p} />,
   hr: () => <hr className="my-2 border-current/10" />,
+  // Hotlinked from whatever site image_search found — occasionally 404s or
+  // gets hotlink-blocked after the fact, so fail quietly (hide the broken
+  // image + its alt caption) instead of showing the browser's broken-image icon.
+  img: p => (
+    <a href={p.src} target="_blank" rel="noreferrer" className="block my-2">
+      <img
+        {...p}
+        loading="lazy"
+        className="max-w-full rounded-lg border border-current/10"
+        onError={e => { e.currentTarget.closest('a').style.display = 'none' }}
+      />
+    </a>
+  ),
 }
 
 // The client appends "\n\nSources:\n- url\n- url..." to messages that used
@@ -84,7 +97,10 @@ const SYSTEM_PROMPT =
   'questions, use youtube_latest_videos instead of web_search — it returns ' +
   'real current video titles, which web_search cannot see. To summarize or ' +
   'answer questions about what was said in a specific YouTube video, use ' +
-  'youtube_transcript. Cite the source URLs in your reply.'
+  'youtube_transcript. When the user wants to actually see a picture of ' +
+  'something (not just read about it), use image_search and embed the ' +
+  'results as markdown images — never invent an image URL yourself, only ' +
+  'use ones a tool actually returned. Cite the source URLs in your reply.'
 
 const TOOLS = [
   {
@@ -132,6 +148,21 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'image_search',
+      description:
+        'Search for real images and return their URLs, for when the user wants to actually see ' +
+        'pictures of something rather than read about it. Embed results in your reply as markdown ' +
+        'images using the "thumbnail" URL: ![description](thumbnail url).',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string', description: 'What to find images of' } },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'youtube_transcript',
       description:
         'Get the actual spoken transcript of a YouTube video (English auto-captions), for summarizing ' +
@@ -150,6 +181,7 @@ const MAX_TOOL_ITERATIONS = 6 // search + a few fetch_page rounds + final answer
 const TOOL_ENDPOINTS = {
   web_search: '/tools/search',
   fetch_page: '/tools/fetch',
+  image_search: '/tools/image-search',
   youtube_latest_videos: '/tools/youtube-latest',
   youtube_transcript: '/tools/youtube-transcript',
 }
@@ -157,6 +189,7 @@ const TOOL_ENDPOINTS = {
 function toolRequestBody(name, args) {
   if (name === 'web_search') return { query: args.query }
   if (name === 'fetch_page') return { url: args.url }
+  if (name === 'image_search') return { query: args.query }
   if (name === 'youtube_latest_videos') return { channel: args.channel, count: args.count }
   if (name === 'youtube_transcript') return { video: args.video }
   return {}
@@ -217,6 +250,7 @@ async function sendChat(model, priorMessages, onStatus) {
       const args = parseToolArgs(fn.arguments)
       onStatus?.(
         fn.name === 'web_search' ? `Searching "${args.query}"…` :
+        fn.name === 'image_search' ? `Finding images of "${args.query}"…` :
         fn.name === 'youtube_latest_videos' ? `Checking ${args.channel}'s latest videos…` :
         fn.name === 'youtube_transcript' ? `Reading video transcript…` :
         `Reading ${args.url}…`
