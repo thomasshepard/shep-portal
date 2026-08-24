@@ -313,6 +313,20 @@ function titleFrom(text) {
   return trimmed.length > 40 ? trimmed.slice(0, 40) + '…' : trimmed
 }
 
+// The browser's own fetch errors ("Load failed" on Safari, "Failed to
+// fetch" on Chrome, "NetworkError...") are accurate but meaningless to a
+// reader — they just mean the request never completed, usually a dropped
+// mobile connection. Give those a plain-English explanation; anything else
+// (a real error from Ollama, Supabase, or a tool) is already clear enough
+// to show as-is.
+function friendlyError(err) {
+  const msg = err?.message || ''
+  if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
+    return "Connection dropped before getting a response — check your signal and try again."
+  }
+  return msg || 'Something went wrong — try again.'
+}
+
 function relativeTime(iso) {
   const diffMs = Date.now() - new Date(iso).getTime()
   const mins = Math.round(diffMs / 60000)
@@ -603,8 +617,10 @@ export default function LocalAI() {
         return updated.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
       })
     } catch (err) {
-      toast.error(err.message || 'Request failed')
-      setMessages(m => [...m, { role: 'assistant', content: `⚠️ ${err.message || 'Request failed'}` }])
+      const friendly = friendlyError(err)
+      toast.error(friendly)
+      setMessages(m => [...m, { role: 'assistant', content: `⚠️ ${friendly}` }])
+      setInput(text) // refill so retrying is one tap, not retyping the whole thing
     } finally {
       setSending(false)
       setToolStatus('')
