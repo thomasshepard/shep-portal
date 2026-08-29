@@ -76,6 +76,35 @@ async function callBookkeeping(action, payload = {}) {
   return data
 }
 
+// 'YYYY-MM' list, most recent first, from the entity's earliest posted
+// entry through the current month — drives the period picker. Falls back
+// to just the current month before the first summary load resolves.
+function monthOptions(earliestEntryDate) {
+  const now = new Date()
+  const months = []
+  let cursor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  const stop = earliestEntryDate
+    ? new Date(Date.UTC(Number(earliestEntryDate.slice(0, 4)), Number(earliestEntryDate.slice(5, 7)) - 1, 1))
+    : cursor
+  while (cursor >= stop) {
+    months.push(cursor.toISOString().slice(0, 7))
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() - 1, 1))
+  }
+  return months
+}
+
+function monthLabel(month) {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+}
+
+// Compact form for stat-tile labels ("Revenue · Jul 2026") where the full
+// "July 2026" used in the period dropdown would wrap awkwardly.
+function monthLabelShort(month) {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
+
 function accountsFromSummary(summary) {
   if (!summary) return []
   const bs = (summary.balanceSheet || []).map(a => ({ code: a.code, name: a.name }))
@@ -107,6 +136,8 @@ export default function Bookkeeping() {
   const [contributionModalOpen, setContributionModalOpen] = useState(false)
   const [statementInput, setStatementInput] = useState('')
   const [partnerRefresh, setPartnerRefresh] = useState(0)
+  const [selectedMonth, setSelectedMonth] = useState(null) // null = current month; else 'YYYY-MM'
+  const [summaryLoading, setSummaryLoading] = useState(false)
   const isPartnership = PARTNERSHIP_ENTITIES.has(selectedEntity)
 
   // Once we know which entities this user can actually see, make sure the
@@ -119,14 +150,32 @@ export default function Bookkeeping() {
 
   useEffect(() => {
     if (myEntities.length === 0) { setLoading(false); return }
+    setSelectedMonth(null) // a different entity's history doesn't share the same relevant months
     setEntriesLimit(25); load(25)
   }, [selectedEntity, myEntities.length])
+
+  // Switching the reviewed month only needs a fresh P&L/Balance Sheet, not
+  // the Unreviewed transaction list or bank-match check — those aren't
+  // period-scoped, re-fetching them on every month click would just be
+  // wasted calls.
+  async function changeMonth(month) {
+    setSelectedMonth(month)
+    setSummaryLoading(true)
+    try {
+      const s = await callBookkeeping('get_summary', { entityName: selectedEntity, ...(month ? { periodMonth: month } : {}) })
+      setSummary(s)
+    } catch (e) {
+      toast.error('Failed to load that month: ' + e.message)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
 
   async function load(limit = entriesLimit) {
     setLoading(true)
     try {
       const [s, e, b] = await Promise.all([
-        callBookkeeping('get_summary', { entityName: selectedEntity }),
+        callBookkeeping('get_summary', { entityName: selectedEntity, ...(selectedMonth ? { periodMonth: selectedMonth } : {}) }),
         callBookkeeping('list_entries', { entityName: selectedEntity, limit }),
         callBookkeeping('get_bank_check', { entityName: selectedEntity }),
       ])
@@ -191,12 +240,12 @@ export default function Bookkeeping() {
       ...(summary?.pnl?.expenses || []).map(l => ['Expense', l.name, l.amount.toFixed(2)]),
       ['', 'Net Income', (summary?.pnl?.netIncome || 0).toFixed(2)],
     ]
-    downloadCsv(`${selectedEntity} - P&L.csv`, ['Type', 'Account', 'Amount'], rows)
+    downloadCsv(`${selectedEntity} - P&L - ${summary?.pnl?.periodMonth || 'current'}.csv`, ['Type', 'Account', 'Amount'], rows)
   }
 
   function exportBalanceSheetCsv() {
     const rows = (summary?.balanceSheet || []).map(a => [a.accountType, a.name, a.balance.toFixed(2)])
-    downloadCsv(`${selectedEntity} - Balance Sheet.csv`, ['Type', 'Account', 'Balance'], rows)
+    downloadCsv(`${selectedEntity} - Balance Sheet - ${summary?.asOfDate || 'today'}.csv`, ['Type', 'Account', 'Balance'], rows)
   }
 
   async function downloadBackup() {
@@ -220,6 +269,7 @@ export default function Bookkeeping() {
   // in BankConnectionsPanel, which fetches per-entity accounts itself.)
   const equityAccounts = (summary?.balanceSheet || []).filter(a => a.accountType === 'equity')
   const expenseIncomeAccounts = [...(summary?.pnl?.income || []), ...(summary?.pnl?.expenses || []), ...equityAccounts]
+  const periodStatLabel = selectedMonth ? monthLabelShort(selectedMonth) : 'MTD'
 
   if (loading) return <LoadingSpinner />
 
@@ -313,12 +363,34 @@ export default function Bookkeeping() {
         ))}
       </div>
 
+      {/* Period picker — drives both the Stats row and the P&L/Balance
+          Sheet below. Reviewing a prior month means the P&L covers only
+          that month AND the Balance Sheet becomes "as of" its last day,
+          not today (get_summary handles both from the same periodMonth). */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500">Reviewing</span>
+        <select
+          value={selectedMonth || ''}
+          disabled={summaryLoading}
+          onChange={e => changeMonth(e.target.value || null)}
+          className="h-8 text-xs border border-gray-300 rounded-lg pl-2 pr-6 disabled:opacity-50"
+        >
+          <option value="">This month (to date)</option>
+          {/* monthOptions is most-recent-first, so the first entry is
+              always the current month -- already covered by the option
+              above, so skip it here rather than list it twice. */}
+          {monthOptions(summary?.earliestEntryDate).slice(1).map(m => (
+            <option key={m} value={m}>{monthLabel(m)}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatTile label="Revenue · MTD" value={fmtCurrency(summary?.pnl?.income?.reduce((s, l) => s + l.amount, 0) || 0)} />
-        <StatTile label="Expenses · MTD" value={fmtCurrency(summary?.pnl?.expenses?.reduce((s, l) => s + l.amount, 0) || 0)} />
+        <StatTile label={`Revenue · ${periodStatLabel}`} value={fmtCurrency(summary?.pnl?.income?.reduce((s, l) => s + l.amount, 0) || 0)} />
+        <StatTile label={`Expenses · ${periodStatLabel}`} value={fmtCurrency(summary?.pnl?.expenses?.reduce((s, l) => s + l.amount, 0) || 0)} />
         <StatTile
-          label="Net Income · MTD"
+          label={`Net Income · ${periodStatLabel}`}
           value={fmtCurrency(summary?.pnl?.netIncome || 0)}
           tone={summary?.pnl?.netIncome >= 0 ? 'good' : 'bad'}
         />
@@ -336,7 +408,7 @@ export default function Bookkeeping() {
           <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
             <h2 className="font-semibold text-gray-800 text-sm">Profit &amp; Loss</h2>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-400">Month to date</span>
+              <span className="text-xs text-gray-400">{selectedMonth ? monthLabel(selectedMonth) : 'Month to date'}</span>
               <button onClick={exportPnlCsv} className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800">
                 <Download size={11} /> CSV
               </button>
@@ -359,7 +431,7 @@ export default function Bookkeeping() {
           <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
             <h2 className="font-semibold text-gray-800 text-sm">Balance Sheet</h2>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-400">As of today</span>
+              <span className="text-xs text-gray-400">{summary?.asOfDate ? `As of ${summary.asOfDate}` : 'As of today'}</span>
               <button onClick={exportBalanceSheetCsv} className="flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800">
                 <Download size={11} /> CSV
               </button>

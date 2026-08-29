@@ -500,7 +500,19 @@ async function actionGetSummary(payload: any, _userId?: string, ctx?: BkContext)
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
   assertEntityScope(entityName, ctx)
   const entityId = await getEntityId(entityName)
-  const monthStart = new Date().toISOString().slice(0, 8) + '01'
+
+  // Optional 'YYYY-MM' to review a prior month's statements instead of the
+  // current one. Reviewing March's books should mean the P&L covers only
+  // March AND the Balance Sheet is as of March 31 -- not today -- so a
+  // historical month's Cash/liabilities/equity reflect what they actually
+  // were then, not what they are now.
+  const periodMonth = /^\d{4}-\d{2}$/.test(payload?.periodMonth) ? String(payload.periodMonth) : null
+  const monthStart = periodMonth ? `${periodMonth}-01` : new Date().toISOString().slice(0, 8) + '01'
+  const monthEndExclusive = (() => {
+    const d = new Date(monthStart + 'T00:00:00Z')
+    d.setUTCMonth(d.getUTCMonth() + 1)
+    return d.toISOString().slice(0, 10)
+  })()
 
   const { data: accounts, error: acctErr } = await sb.from('bk_accounts').select('id, code, name, account_type').eq('entity_id', entityId)
   if (acctErr) throw new Error(acctErr.message)
@@ -516,19 +528,24 @@ async function actionGetSummary(payload: any, _userId?: string, ctx?: BkContext)
   const pnlLines: Record<string, number> = {}
   const bsBalances: Record<string, number> = {}
   let cashBalance = 0
+  let earliestEntryDate: string | null = null
 
   for (const line of allLines || []) {
     const acct = acctById.get(line.account_id)
     if (!acct) continue
     const entry = (line as any).bk_journal_entries
     const net = Number(line.debit) - Number(line.credit)
+    if (!earliestEntryDate || entry.entry_date < earliestEntryDate) earliestEntryDate = entry.entry_date
 
-    // Balance sheet: cumulative, all-time.
-    bsBalances[acct.code] = (bsBalances[acct.code] || 0) + (acct.account_type === 'asset' || acct.account_type === 'expense' ? net : -net)
-    if (acct.code === '1000') cashBalance += net
+    // Balance sheet: cumulative through the end of the selected period --
+    // today for the current month, or the historical month's last day.
+    if (!periodMonth || entry.entry_date < monthEndExclusive) {
+      bsBalances[acct.code] = (bsBalances[acct.code] || 0) + (acct.account_type === 'asset' || acct.account_type === 'expense' ? net : -net)
+      if (acct.code === '1000') cashBalance += net
+    }
 
-    // P&L: month-to-date only, income/expense accounts.
-    if (entry.entry_date >= monthStart && (acct.account_type === 'income' || acct.account_type === 'expense')) {
+    // P&L: scoped to the selected month only, income/expense accounts.
+    if (entry.entry_date >= monthStart && entry.entry_date < monthEndExclusive && (acct.account_type === 'income' || acct.account_type === 'expense')) {
       const key = acct.name
       pnlLines[key] = (pnlLines[key] || 0) + (acct.account_type === 'income' ? -net : net)
     }
@@ -543,11 +560,17 @@ async function actionGetSummary(payload: any, _userId?: string, ctx?: BkContext)
     .filter(a => a.account_type !== 'income' && a.account_type !== 'expense')
     .map(a => ({ code: a.code, name: a.name, accountType: a.account_type, balance: bsBalances[a.code] || 0 }))
 
+  const asOfDate = periodMonth
+    ? new Date(new Date(monthEndExclusive + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10)
+    : null
+
   return {
     ok: true,
-    pnl: { income, expenses, netIncome: totalIncome - totalExpenses, monthStart },
+    pnl: { income, expenses, netIncome: totalIncome - totalExpenses, monthStart, periodMonth: periodMonth || monthStart.slice(0, 7) },
     balanceSheet,
     cashBalance,
+    asOfDate,
+    earliestEntryDate,
   }
 }
 
