@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Cpu, Send, RefreshCw, AlertTriangle, Trash2, Plus, Menu, X, Copy, Check, ExternalLink, Search } from 'lucide-react'
+import { Cpu, Send, RefreshCw, AlertTriangle, Trash2, Plus, Menu, X, Copy, Check, ExternalLink, Search, ChevronDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
@@ -439,6 +439,59 @@ function modelLabel(name) {
   return quant ? `${repoName} (${quant})` : repoName
 }
 
+// Custom dropdown instead of a native <select> — iOS Safari renders a short
+// <select>'s options as a native popover menu anchored to wherever the OS
+// decides, which comes out cramped/misaligned when the trigger sits in a
+// tight flex row (seen live: the popover clipped at the screen edge,
+// overlapping the message list). Fully own the styling here instead so it
+// renders the same, and predictably, everywhere.
+function ModelDropdown({ model, models, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        title={model}
+        className="flex items-center gap-1.5 text-sm border border-gray-300 rounded-lg pl-3 pr-2 py-2 bg-white hover:bg-gray-50 max-w-[55vw] sm:max-w-xs"
+      >
+        <span className="truncate">{modelLabel(model)}</span>
+        <ChevronDown size={14} className={`text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-64 max-w-[80vw] max-h-72 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-30 py-1">
+          {models.map(m => (
+            <button
+              key={m}
+              type="button"
+              title={m}
+              onClick={() => { onChange(m); setOpen(false) }}
+              className="w-full flex items-center gap-2 text-left text-sm px-3 py-2 hover:bg-gray-50"
+            >
+              <Check size={14} className={m === model ? 'text-blue-600' : 'text-transparent'} />
+              <span className="truncate">{modelLabel(m)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MessageBubble({ role, content }) {
   const isUser = role === 'user'
   const [copied, setCopied] = useState(false)
@@ -726,13 +779,7 @@ export default function LocalAI() {
         </div>
         {available && models.length > 0 && (
           <div className="flex items-center gap-2">
-            <select
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white"
-            >
-              {models.map(m => <option key={m} value={m} title={m}>{modelLabel(m)}</option>)}
-            </select>
+            <ModelDropdown model={model} models={models} onChange={setModel} />
             <button
               onClick={startNewChat}
               className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
