@@ -473,7 +473,7 @@ function ModelDropdown({ model, models, onChange }) {
         <ChevronDown size={14} className={`text-gray-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-64 max-w-[80vw] max-h-72 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-30 py-1">
+        <div className="absolute left-0 mt-1 w-64 max-w-[80vw] max-h-72 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-30 py-1">
           {models.map(m => (
             <button
               key={m}
