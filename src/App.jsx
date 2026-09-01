@@ -55,6 +55,7 @@ import Fleet from './pages/Fleet'
 import FleetDetail from './pages/FleetDetail'
 import FleetMaintenance from './pages/FleetMaintenance'
 import LocalAI from './pages/LocalAI'
+import RankExpand from './pages/RankExpand'
 
 export default function App() {
   return (
@@ -111,6 +112,7 @@ export default function App() {
             <Route path="triage/guide" element={<PermRoute permission="can_view_triage"><TriageGuide /></PermRoute>} />
             <Route path="backlog" element={<PermRoute permission="can_view_backlog"><Backlog /></PermRoute>} />
             <Route path="bitcoin" element={<AdminRoute><Bitcoin /></AdminRoute>} />
+            <Route path="rank-expand" element={<AdminRoute><ErrorBoundary><RankExpand /></ErrorBoundary></AdminRoute>} />
             <Route path="finances" element={<PermRoute permission="can_view_finances"><ErrorBoundary><Finances /></ErrorBoundary></PermRoute>} />
             <Route path="bank-dashboard" element={<PermRoute permission="can_view_bank_dashboard"><ErrorBoundary><BankDashboard /></ErrorBoundary></PermRoute>} />
             <Route path="bookkeeping" element={<PermRoute permission="can_view_bookkeeping"><ErrorBoundary><Bookkeeping /></ErrorBoundary></PermRoute>} />
