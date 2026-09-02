@@ -624,6 +624,34 @@ async function actionDetachReceipt(payload: any, _userId?: string, ctx?: BkConte
   return { ok: true }
 }
 
+// Entity-wide, not paginated like list_entries — the whole point is an
+// accurate "what still needs a receipt" count/queue, not just whatever
+// page of 25 happens to be on screen. Only flags entries with an actual
+// expense line (debit > 0 against an expense-type account) — income,
+// transfer, and equity entries (owner draws, bank-feed cashback, etc.)
+// never have a receipt to attach in the first place, so they'd just be
+// permanent false positives in the queue.
+async function actionListMissingReceipts(payload: any, _userId?: string, ctx?: BkContext) {
+  const entityName = String(payload?.entityName || DEFAULT_ENTITY)
+  assertEntityScope(entityName, ctx)
+  const entityId = await getEntityId(entityName)
+
+  const { data, error } = await sb
+    .from('bk_journal_entries')
+    .select('id, entry_date, memo, source, source_module, source_record_id, status, receipt_document_id, bk_journal_lines(id, debit, credit, memo, bk_accounts(code, name, account_type))')
+    .eq('entity_id', entityId)
+    .eq('status', 'posted')
+    .is('receipt_document_id', null)
+    .order('entry_date', { ascending: false })
+    .limit(500)
+  if (error) throw new Error(error.message)
+
+  const entries = (data || []).filter((e: any) =>
+    (e.bk_journal_lines || []).some((l: any) => l.bk_accounts?.account_type === 'expense' && Number(l.debit) > 0)
+  )
+  return { ok: true, entries, count: entries.length }
+}
+
 async function actionGetBankCheck(payload: any, _userId?: string, ctx?: BkContext) {
   const entityName = String(payload?.entityName || DEFAULT_ENTITY)
   assertEntityScope(entityName, ctx)
@@ -1550,6 +1578,7 @@ const ACTIONS: Record<string, (payload: any, userId: string, ctx?: BkContext) =>
   list_triage_candidates:   actionListTriageCandidates,
   attach_receipt:           actionAttachReceipt,
   detach_receipt:           actionDetachReceipt,
+  list_missing_receipts:    actionListMissingReceipts,
   list_partners:                    actionListPartners,
   record_partner_distribution:      actionRecordPartnerDistribution,
   record_partner_contribution:      actionRecordPartnerContribution,
