@@ -1,8 +1,61 @@
-import { useEffect, useState } from 'react'
-import { Plus, Trash2, X, Edit2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, Trash2, X, Edit2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import toast from 'react-hot-toast'
+
+// Single source of truth for every page-access toggle shown in the Users
+// table/cards — grouped so a 17-column permission matrix reads as three
+// scannable clusters instead of one undifferentiated wall, on both the
+// desktop table (grouped header row) and the mobile card (grouped
+// sub-lists). Doesn't include can_view_insurance/health_policies/backlog —
+// those exist today only in the Add User form, a pre-existing gap this
+// pass didn't extend scope to close.
+const PERM_GROUPS = [
+  {
+    label: 'Core', tint: 'bg-blue-50/70',
+    perms: [
+      { key: 'can_view_properties', label: 'Properties' },
+      { key: 'can_view_llcs', label: 'LLCs' },
+      { key: 'can_view_chickens', label: 'Chickens' },
+      { key: 'can_view_documents', label: 'Documents' },
+      { key: 'can_view_deals', label: 'Deals' },
+      { key: 'can_view_triage', label: 'Triage' },
+    ],
+  },
+  {
+    label: 'Financial', tint: 'bg-amber-50/70',
+    perms: [
+      { key: 'can_view_happy_cuts', label: 'Happy Cuts' },
+      { key: 'can_view_finances', label: 'Finances' },
+      { key: 'can_view_bank_dashboard', label: 'Bank Dashboard' },
+      { key: 'can_view_bookkeeping', label: 'Bookkeeping' },
+      { key: 'can_view_fleet', label: 'Fleet' },
+    ],
+  },
+  {
+    label: 'Reference', tint: 'bg-gray-50',
+    perms: [
+      { key: 'can_view_tasks', label: 'Tasks' },
+      { key: 'can_view_recipes', label: 'Recipes' },
+      { key: 'can_view_tools', label: 'Tools' },
+      { key: 'can_view_files', label: 'Files' },
+      { key: 'can_view_listings', label: 'Listings' },
+      // Admin/VA get this automatically — vaAuto mirrors that in the toggle.
+      { key: 'can_view_messages', label: 'Messages', vaAuto: true },
+    ],
+  },
+]
+const ALL_PERMS = PERM_GROUPS.flatMap(g => g.perms)
+
+function permEnabled(u, isAdmin, perm) {
+  if (isAdmin) return true
+  if (perm.vaAuto && u.role === 'va') return true
+  return !!u[perm.key]
+}
+function permLocked(u, isAdmin, perm) {
+  return isAdmin || (perm.vaAuto && u.role === 'va')
+}
 
 
 const emptyForm = {
@@ -40,6 +93,28 @@ export default function AdminUsers() {
   const [saving, setSaving] = useState(false)
   const [editingUser, setEditingUser] = useState(null)  // user being edited for allowed_tags
 
+  // Desktop table scroll affordance — the complaint this whole pass is
+  // fixing was literally "it's missing the left/right scroll": overflow-x
+  // -auto alone gives no visual sign there's more to see, especially on a
+  // trackpad/touch device with an invisible native scrollbar. Track scroll
+  // position so edge-fade shadows and the arrow buttons only show when
+  // there's actually somewhere left to scroll.
+  const scrollRef = useRef(null)
+  const [scrollState, setScrollState] = useState({ atStart: true, atEnd: true })
+
+  function updateScrollState() {
+    const el = scrollRef.current
+    if (!el) return
+    setScrollState({
+      atStart: el.scrollLeft <= 2,
+      atEnd: el.scrollLeft >= el.scrollWidth - el.clientWidth - 2,
+    })
+  }
+
+  function scrollTableBy(px) {
+    scrollRef.current?.scrollBy({ left: px, behavior: 'smooth' })
+  }
+
   function load() {
     supabase
       .from('profiles')
@@ -53,6 +128,14 @@ export default function AdminUsers() {
   }
 
   useEffect(() => { load() }, [])
+
+  // Re-check scroll bounds once the table actually has rows to measure
+  // (scrollWidth is 0 until then) and whenever the viewport resizes.
+  useEffect(() => {
+    const id = setTimeout(updateScrollState, 0)
+    window.addEventListener('resize', updateScrollState)
+    return () => { clearTimeout(id); window.removeEventListener('resize', updateScrollState) }
+  }, [users])
 
   function setField(key, val) { setForm(f => ({ ...f, [key]: val })) }
 
@@ -191,207 +274,145 @@ export default function AdminUsers() {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="text-left px-5 py-3 font-medium text-gray-600">User</th>
-                <th className="text-left px-5 py-3 font-medium text-gray-600">Role</th>
-                <th className="text-left px-5 py-3 font-medium text-gray-600">Last Login</th>
-                <th className="text-center px-5 py-3 font-medium text-gray-600">Status</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Properties</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">LLCs</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Chickens</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Documents</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Deals</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Tasks</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Recipes</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Tools</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Files</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Listings</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Triage</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Happy Cuts</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Finances</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Bank Dashboard</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Bookkeeping</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Fleet</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-600">Messages</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {users.map(u => {
-                const isAdmin = u.role === 'admin'
-                return (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="px-5 py-3">
-                      <p className="font-medium text-gray-800">{u.full_name || '—'}</p>
-                      <p className="text-xs text-gray-400">{u.email}</p>
-                    </td>
-                    <td className="px-5 py-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
-                        isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {u.role}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3 text-gray-500 text-xs">
-                      {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}
-                    </td>
-                    <td className="px-5 py-3 text-center">
-                      <button
-                        onClick={() => toggleActive(u)}
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                          u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {u.is_active ? 'Active' : 'Inactive'}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_properties}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_properties')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_llcs}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_llcs')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_chickens}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_chickens')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_documents}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_documents')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_deals}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_deals')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_tasks}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_tasks')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_recipes}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_recipes')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_tools}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_tools')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_files}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_files')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_listings}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_listings')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_triage}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_triage')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_happy_cuts}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_happy_cuts')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_finances}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_finances')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_bank_dashboard}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_bank_dashboard')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_bookkeeping}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_bookkeeping')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.can_view_fleet}
-                        locked={isAdmin}
-                        onChange={() => togglePerm(u, 'can_view_fleet')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <PermToggle
-                        enabled={isAdmin || u.role === 'va' || u.can_view_messages}
-                        locked={isAdmin || u.role === 'va'}
-                        onChange={() => togglePerm(u, 'can_view_messages')}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => setEditingUser(u)}
-                          title="Edit access settings (document tags, property visibility)"
-                          className="text-gray-300 hover:text-blue-500 transition-colors"
-                        >
-                          <Edit2 size={15} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(u)}
-                          title="Delete user"
-                          className="text-gray-300 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+      {/* Desktop: grouped, sticky-column table with an explicit scroll
+          affordance — 17 permission columns plus identity/actions is wider
+          than any screen, and overflow-x-auto alone gave no visible sign
+          there was more to see. Arrow buttons are a deliberate second way to
+          scroll (not everyone notices a trackpad works on a table), and the
+          User/Actions columns stay pinned so identity and the edit/delete
+          controls never get scrolled out of reach. */}
+      <div className="hidden md:block">
+        <div className="flex items-center justify-between px-1 pb-1.5">
+          <p className="text-xs text-gray-400">
+            {scrollState.atStart && scrollState.atEnd ? 'Grouped: Core, Financial, Reference' : 'Scroll to see all permissions'}
+          </p>
+          <div className="flex gap-1">
+            <button
+              onClick={() => scrollTableBy(-320)} disabled={scrollState.atStart}
+              className="p-1 rounded border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:border-gray-200 transition-colors"
+              aria-label="Scroll left"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <button
+              onClick={() => scrollTableBy(320)} disabled={scrollState.atEnd}
+              className="p-1 rounded border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:border-gray-200 transition-colors"
+              aria-label="Scroll right"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
         </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="relative">
+            {!scrollState.atStart && (
+              <div className="pointer-events-none absolute left-48 top-0 bottom-0 w-6 bg-gradient-to-r from-black/10 to-transparent z-20" />
+            )}
+            {!scrollState.atEnd && (
+              <div className="pointer-events-none absolute right-16 top-0 bottom-0 w-6 bg-gradient-to-l from-black/10 to-transparent z-20" />
+            )}
+            <div ref={scrollRef} onScroll={updateScrollState} className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th rowSpan={2} className="sticky left-0 z-10 bg-gray-50 w-48 text-left px-5 py-2.5 font-medium text-gray-600 align-bottom">User</th>
+                    <th rowSpan={2} className="bg-gray-50 text-left px-5 py-2.5 font-medium text-gray-600 align-bottom">Role</th>
+                    <th rowSpan={2} className="bg-gray-50 text-left px-5 py-2.5 font-medium text-gray-600 align-bottom">Last Login</th>
+                    <th rowSpan={2} className="bg-gray-50 text-center px-5 py-2.5 font-medium text-gray-600 align-bottom">Status</th>
+                    {PERM_GROUPS.map(group => (
+                      <th key={group.label} colSpan={group.perms.length} className={`text-center px-2 py-1.5 font-semibold text-gray-500 text-[11px] uppercase tracking-wide border-l border-gray-200 ${group.tint}`}>
+                        {group.label}
+                      </th>
+                    ))}
+                    <th rowSpan={2} className="sticky right-0 z-10 bg-gray-50 w-16 px-4 py-2.5 align-bottom" />
+                  </tr>
+                  <tr className="border-b border-gray-200">
+                    {PERM_GROUPS.map(group => group.perms.map((p, i) => (
+                      <th key={p.key} className={`text-center px-3 py-2 font-medium text-gray-600 whitespace-nowrap ${i === 0 ? 'border-l border-gray-200' : ''} ${group.tint}`}>
+                        {p.label}
+                      </th>
+                    )))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {users.map(u => {
+                    const isAdmin = u.role === 'admin'
+                    return (
+                      <tr key={u.id} className="group hover:bg-gray-50">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-gray-50 px-5 py-3 w-48">
+                          <p className="font-medium text-gray-800 truncate">{u.full_name || '—'}</p>
+                          <p className="text-xs text-gray-400 truncate">{u.email}</p>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
+                            isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {u.role}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-gray-500 text-xs whitespace-nowrap">
+                          {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}
+                        </td>
+                        <td className="px-5 py-3 text-center">
+                          <button
+                            onClick={() => toggleActive(u)}
+                            className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            {u.is_active ? 'Active' : 'Inactive'}
+                          </button>
+                        </td>
+                        {PERM_GROUPS.map(group => group.perms.map((p, i) => (
+                          <td key={p.key} className={`px-3 py-3 text-center ${i === 0 ? 'border-l border-gray-100' : ''}`}>
+                            <PermToggle
+                              enabled={permEnabled(u, isAdmin, p)}
+                              locked={permLocked(u, isAdmin, p)}
+                              onChange={() => togglePerm(u, p.key)}
+                            />
+                          </td>
+                        )))}
+                        <td className="sticky right-0 z-10 bg-white group-hover:bg-gray-50 px-4 py-3 w-16">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => setEditingUser(u)}
+                              title="Edit access settings (document tags, property visibility)"
+                              className="text-gray-300 hover:text-blue-500 transition-colors"
+                            >
+                              <Edit2 size={15} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(u)}
+                              title="Delete user"
+                              className="text-gray-300 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile: a table this wide can't work as a table on a phone —
+          one card per user, with permissions collapsed by default behind a
+          count so the common actions (role, active/inactive, edit, delete)
+          are reachable without scrolling past 17 toggles first. */}
+      <div className="md:hidden space-y-3">
+        {users.map(u => (
+          <UserCard
+            key={u.id} user={u}
+            onToggleActive={toggleActive} onTogglePerm={togglePerm}
+            onEdit={setEditingUser} onDelete={handleDelete}
+          />
+        ))}
       </div>
 
       <div className="text-xs text-gray-400 space-y-0.5">
@@ -778,6 +799,85 @@ function EditTagsModal({ user, onClose, onSave }) {
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// Mobile counterpart to the desktop table row — same PERM_GROUPS data,
+// laid out as a card since a 17-column table simply doesn't fit a phone
+// screen no matter how it scrolls. Permissions default collapsed (behind
+// an enabled-count) so role/status/edit/delete — the things touched most
+// often — aren't buried under a wall of toggles on open.
+function UserCard({ user: u, onToggleActive, onTogglePerm, onEdit, onDelete }) {
+  const [expanded, setExpanded] = useState(false)
+  const isAdmin = u.role === 'admin'
+  const enabledCount = ALL_PERMS.filter(p => permEnabled(u, isAdmin, p)).length
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-medium text-gray-800 truncate">{u.full_name || '—'}</p>
+          <p className="text-xs text-gray-400 truncate">{u.email}</p>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <button onClick={() => onEdit(u)} title="Edit access settings" className="text-gray-300 hover:text-blue-500 transition-colors">
+            <Edit2 size={16} />
+          </button>
+          <button onClick={() => onDelete(u)} title="Delete user" className="text-gray-300 hover:text-red-500 transition-colors">
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap mt-2.5">
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
+          isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
+        }`}>
+          {u.role}
+        </span>
+        <button
+          onClick={() => onToggleActive(u)}
+          className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+        >
+          {u.is_active ? 'Active' : 'Inactive'}
+        </button>
+        <span className="text-xs text-gray-400">
+          {u.last_login ? `Last in ${new Date(u.last_login).toLocaleDateString()}` : 'Never logged in'}
+        </span>
+      </div>
+
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between mt-3 pt-3 border-t border-gray-100"
+      >
+        <span className="text-sm font-medium text-gray-700">
+          Page access <span className="text-gray-400 font-normal">({isAdmin ? 'all' : `${enabledCount}/${ALL_PERMS.length}`})</span>
+        </span>
+        {expanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-3">
+          {PERM_GROUPS.map(group => (
+            <div key={group.label}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">{group.label}</p>
+              <div className="space-y-1.5">
+                {group.perms.map(p => (
+                  <div key={p.key} className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">{p.label}</span>
+                    <PermToggle
+                      enabled={permEnabled(u, isAdmin, p)}
+                      locked={permLocked(u, isAdmin, p)}
+                      onChange={() => onTogglePerm(u, p.key)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
