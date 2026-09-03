@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip, BookOpen, Download } from 'lucide-react'
+import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip, BookOpen, Download, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -25,10 +25,31 @@ function parseDocLite(record) {
     id: record.id,
     name: pickDocField(f, 'Name', 'Document Name', 'Title') || 'Untitled document',
     date: pickDocField(f, 'Date', 'Document Date'),
-    summary: pickDocField(f, 'Summary', 'AI Summary') || '',
+    // 'Description' is the real field on the live Documents schema —
+    // 'Summary'/'AI Summary' don't exist there (that was this file's
+    // original guess, copied without checking against the actual base).
+    // Keeping all three as fallbacks in case a future doc type does add one.
+    summary: pickDocField(f, 'Description', 'Summary', 'AI Summary', 'Notes') || '',
     ocr: f['OCR'] || '',
     attachments: Array.isArray(pickDocField(f, 'Attachments', 'File', 'Scan', 'Document')) ? pickDocField(f, 'Attachments', 'File', 'Scan', 'Document') : [],
   }
+}
+
+// Best-effort dollar total pulled out of a receipt's OCR text — there's no
+// structured "Amount" field on the Documents table to read instead. Prefers
+// a line explicitly labeled total/amount due/balance (least likely to be a
+// line item or subtotal); falls back to the largest dollar figure anywhere
+// on the page (a receipt's total is almost always its biggest number).
+// Never throws, never guarantees correctness — it's a "does this look
+// right" aid, not a source of truth; the caller still shows it alongside
+// the entry's real amount so a mismatch is visible before attaching.
+function extractReceiptAmount(ocr) {
+  if (!ocr) return null
+  const text = String(ocr)
+  const labeled = text.match(/(?:grand\s+)?total\s*(?:due|paid|amount)?\s*[:-]?\s*\$?\s*(\d{1,5}(?:,\d{3})*\.\d{2})/i)
+  if (labeled) return parseFloat(labeled[1].replace(/,/g, ''))
+  const all = [...text.matchAll(/\$\s?(\d{1,5}(?:,\d{3})*\.\d{2})/g)].map(m => parseFloat(m[1].replace(/,/g, '')))
+  return all.length > 0 ? Math.max(...all) : null
 }
 
 // Live, clickable entities. LeadsCompanion joined Happy Cuts in Phase 0b;
@@ -892,27 +913,82 @@ function ReceiptSection({ entry, entries, total, onChanged }) {
       ) : candidates.length === 0 ? (
         <p className="text-xs text-gray-400">No documents found within 5 days of this entry's date.</p>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {suggestion && (
-            <button
-              onClick={() => attach(suggestion.documentId)} disabled={busyId === suggestion.documentId}
-              className="w-full flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-left hover:bg-amber-100 disabled:opacity-50"
-            >
-              {busyId === suggestion.documentId ? <Loader2 size={12} className="animate-spin flex-shrink-0" /> : <span className="flex-shrink-0">★</span>}
-              <span className="text-sm text-gray-800 truncate">{suggestion.name} <span className="text-xs text-gray-400">(suggested)</span></span>
-            </button>
+            <ReceiptCandidateCard
+              candidate={candidates.find(c => c.id === suggestion.documentId)}
+              total={total} suggested busy={busyId === suggestion.documentId}
+              onAttach={() => attach(suggestion.documentId)}
+            />
           )}
           {candidates.filter(c => c.id !== suggestion?.documentId).map(c => (
-            <button
-              key={c.id} onClick={() => attach(c.id)} disabled={busyId === c.id}
-              className="w-full flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2 text-left hover:bg-gray-50 disabled:opacity-50"
-            >
-              <span className="text-sm text-gray-700 truncate">{c.name}</span>
-              <span className="text-xs text-gray-400 flex-shrink-0">{busyId === c.id ? <Loader2 size={12} className="animate-spin" /> : c.date}</span>
-            </button>
+            <ReceiptCandidateCard
+              key={c.id} candidate={c} total={total} busy={busyId === c.id}
+              onAttach={() => attach(c.id)}
+            />
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// One receipt candidate — thumbnail (opens the full-size scan in a new tab,
+// so it can be checked before committing), description, and the OCR'd
+// dollar total compared against the entry's own amount so a right/wrong
+// receipt is visible without leaving the page. The thumbnail link and the
+// Attach button are deliberately separate controls (not one big clickable
+// card) since "view the receipt" and "attach the receipt" are different
+// actions with different risk — attaching is a one-click write.
+function ReceiptCandidateCard({ candidate, total, suggested, busy, onAttach }) {
+  if (!candidate) return null
+  const thumb = candidate.attachments[0]?.thumbnails?.large?.url || candidate.attachments[0]?.thumbnails?.small?.url
+  const fullUrl = candidate.attachments[0]?.url
+  const extracted = extractReceiptAmount(candidate.ocr)
+  const matches = extracted != null && Math.abs(extracted - total) < 0.01
+
+  return (
+    <div className={`flex gap-2.5 rounded-lg px-3 py-2.5 border ${suggested ? 'bg-amber-50 border-amber-100' : 'border-gray-100'}`}>
+      {fullUrl ? (
+        <a href={fullUrl} target="_blank" rel="noreferrer" className="flex-shrink-0" title="View full receipt">
+          {thumb ? (
+            <img src={thumb} alt="" className="w-14 h-14 rounded object-cover border border-gray-200" />
+          ) : (
+            <span className="w-14 h-14 rounded border border-gray-200 bg-gray-50 flex items-center justify-center text-gray-300">
+              <ExternalLink size={16} />
+            </span>
+          )}
+        </a>
+      ) : (
+        <span className="w-14 h-14 flex-shrink-0 rounded border border-gray-200 bg-gray-50" />
+      )}
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-sm font-medium text-gray-800 truncate">
+            {suggested && <span className="text-amber-500 mr-1">★</span>}{candidate.name}
+          </span>
+          <span className="text-xs text-gray-400 flex-shrink-0">{candidate.date}</span>
+        </div>
+        {candidate.summary && (
+          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{candidate.summary}</p>
+        )}
+        <div className="flex items-center justify-between gap-2 mt-1.5">
+          {extracted != null ? (
+            <span className={`text-xs font-semibold ${matches ? 'text-green-600' : 'text-amber-600'}`}>
+              {matches ? <>✓ Matches {fmtCurrency(extracted)}</> : <>{fmtCurrency(extracted)} on receipt &middot; entry is {fmtCurrency(total)}</>}
+            </span>
+          ) : (
+            <span className="text-xs text-gray-400">Amount not found on receipt</span>
+          )}
+          <button
+            onClick={onAttach} disabled={busy}
+            className="text-xs font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 flex-shrink-0 flex items-center gap-1"
+          >
+            {busy && <Loader2 size={11} className="animate-spin" />} Attach
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
