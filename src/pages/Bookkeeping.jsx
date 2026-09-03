@@ -131,6 +131,7 @@ export default function Bookkeeping() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [bankCheck, setBankCheck] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
+  const [expandedMissingId, setExpandedMissingId] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [distributionModalOpen, setDistributionModalOpen] = useState(false)
   const [contributionModalOpen, setContributionModalOpen] = useState(false)
@@ -138,6 +139,8 @@ export default function Bookkeeping() {
   const [partnerRefresh, setPartnerRefresh] = useState(0)
   const [selectedMonth, setSelectedMonth] = useState(null) // null = current month; else 'YYYY-MM'
   const [summaryLoading, setSummaryLoading] = useState(false)
+  const [missingReceipts, setMissingReceipts] = useState([])
+  const [showMissingReceipts, setShowMissingReceipts] = useState(false)
   const isPartnership = PARTNERSHIP_ENTITIES.has(selectedEntity)
 
   // Once we know which entities this user can actually see, make sure the
@@ -174,15 +177,17 @@ export default function Bookkeeping() {
   async function load(limit = entriesLimit) {
     setLoading(true)
     try {
-      const [s, e, b] = await Promise.all([
+      const [s, e, b, r] = await Promise.all([
         callBookkeeping('get_summary', { entityName: selectedEntity, ...(selectedMonth ? { periodMonth: selectedMonth } : {}) }),
         callBookkeeping('list_entries', { entityName: selectedEntity, limit }),
         callBookkeeping('get_bank_check', { entityName: selectedEntity }),
+        callBookkeeping('list_missing_receipts', { entityName: selectedEntity }),
       ])
       setSummary(s)
       setEntries(e.entries || [])
       setBankCheck(b)
       setStatementInput(b.statementBalance != null ? String(b.statementBalance) : '')
+      setMissingReceipts(r.entries || [])
     } catch (e) {
       toast.error('Failed to load Bookkeeping: ' + e.message)
     } finally {
@@ -269,6 +274,7 @@ export default function Bookkeeping() {
   // in BankConnectionsPanel, which fetches per-entity accounts itself.)
   const equityAccounts = (summary?.balanceSheet || []).filter(a => a.accountType === 'equity')
   const expenseIncomeAccounts = [...(summary?.pnl?.income || []), ...(summary?.pnl?.expenses || []), ...equityAccounts]
+  const expenseCodes = new Set((summary?.pnl?.expenses || []).map(a => a.code))
   const periodStatLabel = selectedMonth ? monthLabelShort(selectedMonth) : 'MTD'
 
   if (loading) return <LoadingSpinner />
@@ -496,6 +502,38 @@ export default function Bookkeeping() {
         <span className="flex items-center gap-1.5"><Badge tone="manual">Manual</Badge> entered directly in Bookkeeping</span>
       </div>
 
+      {/* Needs a receipt — entity-wide queue (list_missing_receipts), not
+          just whatever's in the currently-loaded page of entries below, so
+          the count is always accurate even before "Load more" is clicked.
+          Hidden entirely at 0 so a fully-receipted ledger stays quiet. */}
+      {missingReceipts.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setShowMissingReceipts(v => !v)}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left"
+          >
+            <span className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+              <Paperclip size={15} />
+              Needs a receipt
+              <span className="text-xs font-bold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full">{missingReceipts.length}</span>
+            </span>
+            {showMissingReceipts ? <ChevronUp size={16} className="text-amber-700" /> : <ChevronDown size={16} className="text-amber-700" />}
+          </button>
+          {showMissingReceipts && (
+            <div className="px-4 pb-4 space-y-2">
+              {missingReceipts.map(entry => (
+                <EntryRow
+                  key={entry.id} entry={entry} entries={entries}
+                  expanded={expandedMissingId === entry.id}
+                  onToggle={() => setExpandedMissingId(id => id === entry.id ? null : entry.id)}
+                  onVoided={load} accounts={expenseIncomeAccounts} expenseCodes={expenseCodes}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Entries */}
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -513,7 +551,7 @@ export default function Bookkeeping() {
         ) : (
           <div className="space-y-2">
             {entries.map(entry => (
-              <EntryRow key={entry.id} entry={entry} entries={entries} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} accounts={expenseIncomeAccounts} />
+              <EntryRow key={entry.id} entry={entry} entries={entries} expanded={expandedId === entry.id} onToggle={() => setExpandedId(id => id === entry.id ? null : entry.id)} onVoided={load} accounts={expenseIncomeAccounts} expenseCodes={expenseCodes} />
             ))}
             {entriesLimit < 100 && entries.length >= entriesLimit && (
               <button
@@ -595,10 +633,17 @@ function Badge({ tone, children }) {
 // old posting and repost with the corrected account.
 const RECATEGORIZABLE_MODULES = new Set(['bookkeeping_bank_feed', 'bookkeeping_bank_feed_auto'])
 
-function EntryRow({ entry, entries, expanded, onToggle, onVoided, accounts }) {
+function EntryRow({ entry, entries, expanded, onToggle, onVoided, accounts, expenseCodes }) {
   const [voiding, setVoiding] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
   const total = (entry.bk_journal_lines || []).reduce((s, l) => s + Number(l.debit || 0), 0)
+  // Only expense lines are ever expected to carry a receipt — income,
+  // transfer, and equity entries (owner draws, cashback, bank transfers)
+  // never have a document to attach, so they're left out of both the badge
+  // and the list_missing_receipts queue rather than being permanent
+  // false-positive nags.
+  const hasExpenseLine = expenseCodes && (entry.bk_journal_lines || []).some(l => expenseCodes.has(l.bk_accounts?.code) && Number(l.debit) > 0)
+  const hasReceipt = !!entry.receipt_document_id
   // Bank-feed entries (Phase 1a manual quick-categorize, Phase 1b learned
   // auto-post) are posted by the module the same way dual-write is —
   // 'dual_write' alone under-counted what actually counts as "Auto".
@@ -653,6 +698,11 @@ function EntryRow({ entry, entries, expanded, onToggle, onVoided, accounts }) {
             <Badge tone="manual">Manual</Badge>
           )}
           <Badge tone="posted"><CheckCircle2 size={10} /> Posted</Badge>
+          {hasExpenseLine && (
+            hasReceipt
+              ? <Badge><Paperclip size={10} /> Receipt</Badge>
+              : <Badge tone="bad"><Paperclip size={10} /> No receipt</Badge>
+          )}
           <span className="ml-auto">
             {expanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
           </span>
