@@ -237,6 +237,28 @@ function parseToolArgs(raw) {
   return raw || {}
 }
 
+// Loading a model's weights into VRAM can take 30+ seconds (observed:
+// ~33s for a fresh 7B model on this hardware) — an idle-model request pays
+// that cost with the connection sitting open and no bytes moving, which is
+// exactly the profile mobile carrier/NAT idle timeouts kill mid-request
+// ("Connection dropped" on the phone, even on good signal). Firing this the
+// moment a model is selected — before the user has typed anything — pays
+// that cost ahead of time instead of during their first real message.
+// `messages: []` is Ollama's documented no-op: it loads/keeps the model
+// resident and returns immediately without generating anything.
+async function warmModel(model) {
+  if (!model) return
+  try {
+    await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [] }),
+    })
+  } catch {
+    // Best-effort — if this fails, the real send below will surface it properly.
+  }
+}
+
 async function sendChatRaw(model, messages) {
   const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: 'POST',
@@ -668,6 +690,7 @@ export default function LocalAI() {
 
   useEffect(() => { checkAvailability() }, [])
   useEffect(() => { loadThreads() }, [userId])
+  useEffect(() => { warmModel(model) }, [model])
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   async function selectThread(threadId) {
