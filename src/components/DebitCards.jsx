@@ -9,7 +9,8 @@ const ENTITY = 'Entity (LLC / Personal)'
 const OWNERS = ['Thomas', 'Gabrielle']
 const TYPES = ['Checking', 'Savings']
 const STATUSES = ['Active', 'Inactive', 'Frozen / Closed']
-const EMPTY = { Name: '', [ENTITY]: 'Personal', Bank: '', 'Last 4': '', Owner: 'Thomas', 'Account Type': 'Checking', Expiration: '', Status: 'Active' }
+const FORMATS = ['Physical', 'Virtual']
+const EMPTY = { Name: '', [ENTITY]: 'Personal', Bank: '', 'Last 4': '', Owner: 'Thomas', 'Account Type': 'Checking', 'Card Format': 'Physical', Expiration: '', Status: 'Active' }
 
 const safeStr = (v, f = '') => (v == null ? f : String(v))
 const arr = (v) => (Array.isArray(v) ? v : [])
@@ -115,7 +116,7 @@ export default function DebitCards({ cards, onChanged }) {
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-slate-800 truncate">{safeStr(f.Name)}</p>
                     <p className="text-xs text-slate-400 truncate">
-                      {[f.Bank, f['Last 4'] && `•••• ${f['Last 4']}`, f['Account Type'], f.Owner, f.Expiration && `exp ${f.Expiration}`]
+                      {[f.Bank, f['Last 4'] && `•••• ${f['Last 4']}`, f['Account Type'], f['Card Format'], f.Owner, f.Expiration && `exp ${f.Expiration}`]
                         .filter(Boolean).map(safeStr).join(' · ')}
                     </p>
                   </div>
@@ -150,6 +151,7 @@ export default function DebitCards({ cards, onChanged }) {
               <Field label="Last 4"><input className={inp} maxLength={4} value={editing.form['Last 4']} onChange={(e) => set('Last 4', e.target.value.replace(/\D/g, ''))} /></Field>
               <Field label="Owner"><Select value={editing.form.Owner} options={OWNERS} onChange={(v) => set('Owner', v)} /></Field>
               <Field label="Account type"><Select value={editing.form['Account Type']} options={TYPES} onChange={(v) => set('Account Type', v)} /></Field>
+              <Field label="Physical / Virtual"><Select value={editing.form['Card Format']} options={FORMATS} onChange={(v) => set('Card Format', v)} /></Field>
               <Field label="Expiration"><input type="date" className={inp} value={editing.form.Expiration} onChange={(e) => set('Expiration', e.target.value)} /></Field>
               <Field label="Status"><Select value={editing.form.Status} options={STATUSES} onChange={(v) => set('Status', v)} /></Field>
             </div>
