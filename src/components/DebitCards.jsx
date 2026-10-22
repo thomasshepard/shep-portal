@@ -10,10 +10,12 @@ const OWNERS = ['Thomas', 'Gabrielle']
 const TYPES = ['Checking', 'Savings']
 const STATUSES = ['Active', 'Inactive', 'Frozen / Closed']
 const FORMATS = ['Physical', 'Virtual']
-const EMPTY = { Name: '', [ENTITY]: 'Personal', Bank: '', 'Card Number': '', 'Last 4': '', Owner: 'Thomas', 'Account Type': 'Checking', 'Card Format': 'Physical', Expiration: '', Status: 'Active' }
+const EMPTY = { [ENTITY]: 'Personal', Bank: '', 'Card Number': '', Owner: 'Thomas', 'Account Type': 'Checking', 'Card Format': 'Physical', Expiration: '', Status: 'Active' }
 
 const safeStr = (v, f = '') => (v == null ? f : String(v))
 const arr = (v) => (Array.isArray(v) ? v : [])
+const last4 = (f) => safeStr(f['Card Number']).replace(/\D/g, '').slice(-4) || safeStr(f['Last 4'])
+const label = (f) => [f.Bank, last4(f) && `•••• ${last4(f)}`].filter(Boolean).join(' ') || 'Debit card'
 
 const statusTone = {
   Active: 'bg-emerald-100 text-emerald-700',
@@ -36,7 +38,7 @@ export default function DebitCards({ cards, onChanged }) {
     .filter((c) => entityFilter === 'All' || safeStr(c.fields?.[ENTITY]) === entityFilter)
     .filter((c) => {
       const f = c.fields || {}
-      return [f.Name, f.Bank, f['Last 4'], f[ENTITY]].join(' ').toLowerCase().includes(q.toLowerCase())
+      return [f.Bank, last4(f), f[ENTITY]].join(' ').toLowerCase().includes(q.toLowerCase())
     })
 
   const byEntity = {}
@@ -50,12 +52,12 @@ export default function DebitCards({ cards, onChanged }) {
 
   async function save() {
     const form = editing.form
-    if (!form.Name.trim()) return toast.error('Name is required')
     if (!safeStr(form[ENTITY]).trim()) return toast.error('Pick an LLC or Personal')
     const fields = {}
     for (const [k, v] of Object.entries(form)) if (v !== '') fields[k] = v
     const digits = safeStr(form['Card Number']).replace(/\D/g, '')
-    if (digits) { fields['Card Number'] = digits; fields['Last 4'] = digits.slice(-4) }
+    if (digits) fields['Card Number'] = digits
+    fields.Name = label(fields) // Airtable primary field; derived, not entered
     setSaving(true)
     const res = editing.id
       ? await updateRecord(TABLE, editing.id, fields, CC_BASE_ID)
@@ -68,7 +70,7 @@ export default function DebitCards({ cards, onChanged }) {
   }
 
   async function remove(c) {
-    if (!window.confirm(`Delete "${safeStr(c.fields?.Name)}"?`)) return
+    if (!window.confirm(`Delete "${label(c.fields || {})}"?`)) return
     const res = await deleteRecord(TABLE, c.id, CC_BASE_ID)
     if (res.error) return toast.error('Delete failed: ' + res.error)
     toast.success('Deleted')
@@ -83,7 +85,7 @@ export default function DebitCards({ cards, onChanged }) {
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
-            value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, bank, last 4…"
+            value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search bank, last 4, LLC…"
             className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg"
           />
         </div>
@@ -116,9 +118,9 @@ export default function DebitCards({ cards, onChanged }) {
               return (
                 <div key={c.id} className="p-3 flex items-center gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-800 truncate">{safeStr(f.Name)}</p>
+                    <p className="font-medium text-slate-800 truncate">{label(f)}</p>
                     <p className="text-xs text-slate-400 truncate">
-                      {[f.Bank, f['Last 4'] && `•••• ${f['Last 4']}`, f['Account Type'], f['Card Format'], f.Owner, f.Expiration && `exp ${f.Expiration}`]
+                      {[f['Account Type'], f['Card Format'], f.Owner, f.Expiration && `exp ${f.Expiration}`]
                         .filter(Boolean).map(safeStr).join(' · ')}
                     </p>
                   </div>
@@ -141,7 +143,6 @@ export default function DebitCards({ cards, onChanged }) {
               <h3 className="font-semibold text-slate-800">{editing.id ? 'Edit' : 'Add'} debit card</h3>
               <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
             </div>
-            <Field label="Name"><input className={inp} value={editing.form.Name} onChange={(e) => set('Name', e.target.value)} /></Field>
             <Field label="LLC / Personal">
               <input className={inp} list="debit-entities" value={editing.form[ENTITY]} onChange={(e) => set(ENTITY, e.target.value)} />
               <datalist id="debit-entities">
@@ -150,7 +151,6 @@ export default function DebitCards({ cards, onChanged }) {
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Bank"><input className={inp} value={editing.form.Bank} onChange={(e) => set('Bank', e.target.value)} /></Field>
-              <Field label="Last 4 (auto from number)"><input className={inp} maxLength={4} value={editing.form['Last 4']} onChange={(e) => set('Last 4', e.target.value.replace(/\D/g, ''))} /></Field>
               <div className="col-span-2">
                 <Field label="Card number"><input className={inp} inputMode="numeric" autoComplete="off" value={editing.form['Card Number']} onChange={(e) => set('Card Number', e.target.value)} /></Field>
               </div>
