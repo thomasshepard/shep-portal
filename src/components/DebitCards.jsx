@@ -10,7 +10,7 @@ const OWNERS = ['Thomas', 'Gabrielle']
 const TYPES = ['Checking', 'Savings']
 const STATUSES = ['Active', 'Inactive', 'Frozen / Closed']
 const FORMATS = ['Physical', 'Virtual']
-const EMPTY = { Name: '', [ENTITY]: 'Personal', Bank: '', 'Last 4': '', Owner: 'Thomas', 'Account Type': 'Checking', 'Card Format': 'Physical', Expiration: '', Status: 'Active' }
+const EMPTY = { Name: '', [ENTITY]: 'Personal', Bank: '', 'Card Number': '', 'Last 4': '', Owner: 'Thomas', 'Account Type': 'Checking', 'Card Format': 'Physical', Expiration: '', Status: 'Active' }
 
 const safeStr = (v, f = '') => (v == null ? f : String(v))
 const arr = (v) => (Array.isArray(v) ? v : [])
@@ -54,6 +54,8 @@ export default function DebitCards({ cards, onChanged }) {
     if (!safeStr(form[ENTITY]).trim()) return toast.error('Pick an LLC or Personal')
     const fields = {}
     for (const [k, v] of Object.entries(form)) if (v !== '') fields[k] = v
+    const digits = safeStr(form['Card Number']).replace(/\D/g, '')
+    if (digits) { fields['Card Number'] = digits; fields['Last 4'] = digits.slice(-4) }
     setSaving(true)
     const res = editing.id
       ? await updateRecord(TABLE, editing.id, fields, CC_BASE_ID)
@@ -148,14 +150,16 @@ export default function DebitCards({ cards, onChanged }) {
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Bank"><input className={inp} value={editing.form.Bank} onChange={(e) => set('Bank', e.target.value)} /></Field>
-              <Field label="Last 4"><input className={inp} maxLength={4} value={editing.form['Last 4']} onChange={(e) => set('Last 4', e.target.value.replace(/\D/g, ''))} /></Field>
+              <Field label="Last 4 (auto from number)"><input className={inp} maxLength={4} value={editing.form['Last 4']} onChange={(e) => set('Last 4', e.target.value.replace(/\D/g, ''))} /></Field>
+              <div className="col-span-2">
+                <Field label="Card number"><input className={inp} inputMode="numeric" autoComplete="off" value={editing.form['Card Number']} onChange={(e) => set('Card Number', e.target.value)} /></Field>
+              </div>
               <Field label="Owner"><Select value={editing.form.Owner} options={OWNERS} onChange={(v) => set('Owner', v)} /></Field>
               <Field label="Account type"><Select value={editing.form['Account Type']} options={TYPES} onChange={(v) => set('Account Type', v)} /></Field>
               <Field label="Physical / Virtual"><Select value={editing.form['Card Format']} options={FORMATS} onChange={(v) => set('Card Format', v)} /></Field>
               <Field label="Expiration"><input type="date" className={inp} value={editing.form.Expiration} onChange={(e) => set('Expiration', e.target.value)} /></Field>
               <Field label="Status"><Select value={editing.form.Status} options={STATUSES} onChange={(v) => set('Status', v)} /></Field>
             </div>
-            <p className="text-xs text-slate-400">Only store the last 4 digits — never the full card number or CVV.</p>
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setEditing(null)} className="text-sm px-3 py-2 text-slate-600">Cancel</button>
               <button
