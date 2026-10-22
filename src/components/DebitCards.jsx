@@ -1,0 +1,188 @@
+import { useMemo, useState } from 'react'
+import { Plus, Pencil, Trash2, X, Search } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { createRecord, updateRecord, deleteRecord } from '../lib/airtable'
+import { CC_BASE_ID } from '../lib/statements'
+
+const TABLE = 'Debit cards'
+const ENTITY = 'Entity (LLC / Personal)'
+const OWNERS = ['Thomas', 'Gabrielle']
+const TYPES = ['Checking', 'Savings']
+const STATUSES = ['Active', 'Inactive', 'Frozen / Closed']
+const EMPTY = { Name: '', [ENTITY]: 'Personal', Bank: '', 'Last 4': '', Owner: 'Thomas', 'Account Type': 'Checking', Expiration: '', Status: 'Active' }
+
+const safeStr = (v, f = '') => (v == null ? f : String(v))
+const arr = (v) => (Array.isArray(v) ? v : [])
+
+const statusTone = {
+  Active: 'bg-emerald-100 text-emerald-700',
+  Inactive: 'bg-yellow-100 text-yellow-700',
+  'Frozen / Closed': 'bg-red-100 text-red-700',
+}
+
+export default function DebitCards({ cards, onChanged }) {
+  const [editing, setEditing] = useState(null) // null | { id?, form }
+  const [saving, setSaving] = useState(false)
+  const [q, setQ] = useState('')
+  const [entityFilter, setEntityFilter] = useState('All')
+
+  const entities = useMemo(
+    () => [...new Set(arr(cards).map((c) => safeStr(c.fields?.[ENTITY])).filter(Boolean))].sort(),
+    [cards],
+  )
+
+  const rows = arr(cards)
+    .filter((c) => entityFilter === 'All' || safeStr(c.fields?.[ENTITY]) === entityFilter)
+    .filter((c) => {
+      const f = c.fields || {}
+      return [f.Name, f.Bank, f['Last 4'], f[ENTITY]].join(' ').toLowerCase().includes(q.toLowerCase())
+    })
+
+  const byEntity = {}
+  for (const c of rows) (byEntity[safeStr(c.fields?.[ENTITY], 'Unassigned')] ||= []).push(c)
+
+  function openNew() { setEditing({ form: { ...EMPTY } }) }
+  function openEdit(c) {
+    const f = c.fields || {}
+    setEditing({ id: c.id, form: Object.fromEntries(Object.keys(EMPTY).map((k) => [k, safeStr(f[k])])) })
+  }
+
+  async function save() {
+    const form = editing.form
+    if (!form.Name.trim()) return toast.error('Name is required')
+    if (!safeStr(form[ENTITY]).trim()) return toast.error('Pick an LLC or Personal')
+    const fields = {}
+    for (const [k, v] of Object.entries(form)) if (v !== '') fields[k] = v
+    setSaving(true)
+    const res = editing.id
+      ? await updateRecord(TABLE, editing.id, fields, CC_BASE_ID)
+      : await createRecord(TABLE, fields, CC_BASE_ID)
+    setSaving(false)
+    if (res.error) return toast.error('Save failed: ' + res.error)
+    toast.success('Saved')
+    setEditing(null)
+    onChanged()
+  }
+
+  async function remove(c) {
+    if (!window.confirm(`Delete "${safeStr(c.fields?.Name)}"?`)) return
+    const res = await deleteRecord(TABLE, c.id, CC_BASE_ID)
+    if (res.error) return toast.error('Delete failed: ' + res.error)
+    toast.success('Deleted')
+    onChanged()
+  }
+
+  const set = (k, v) => setEditing((e) => ({ ...e, form: { ...e.form, [k]: v } }))
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, bank, last 4…"
+            className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg"
+          />
+        </div>
+        <select
+          value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2"
+        >
+          <option>All</option>
+          {entities.map((e) => <option key={e}>{e}</option>)}
+        </select>
+        <button
+          onClick={openNew}
+          className="flex items-center gap-1.5 text-sm font-medium bg-emerald-600 text-white px-3 py-2 rounded-lg hover:bg-emerald-700"
+        >
+          <Plus size={14} /> Add debit card
+        </button>
+      </div>
+
+      {rows.length === 0 && (
+        <p className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl p-6 text-center">No debit cards found.</p>
+      )}
+
+      {Object.entries(byEntity).map(([entity, list]) => (
+        <div key={entity}>
+          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{entity}</h2>
+          <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
+            {list.map((c) => {
+              const f = c.fields || {}
+              const status = safeStr(f.Status)
+              return (
+                <div key={c.id} className="p-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-800 truncate">{safeStr(f.Name)}</p>
+                    <p className="text-xs text-slate-400 truncate">
+                      {[f.Bank, f['Last 4'] && `•••• ${f['Last 4']}`, f['Account Type'], f.Owner, f.Expiration && `exp ${f.Expiration}`]
+                        .filter(Boolean).map(safeStr).join(' · ')}
+                    </p>
+                  </div>
+                  {status && (
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusTone[status] || 'bg-slate-100 text-slate-600'}`}>{status}</span>
+                  )}
+                  <button onClick={() => openEdit(c)} className="text-slate-400 hover:text-slate-700" aria-label="Edit"><Pencil size={15} /></button>
+                  <button onClick={() => remove(c)} className="text-slate-400 hover:text-red-600" aria-label="Delete"><Trash2 size={15} /></button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+
+      {editing && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setEditing(null)}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">{editing.id ? 'Edit' : 'Add'} debit card</h3>
+              <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+            </div>
+            <Field label="Name"><input className={inp} value={editing.form.Name} onChange={(e) => set('Name', e.target.value)} /></Field>
+            <Field label="LLC / Personal">
+              <input className={inp} list="debit-entities" value={editing.form[ENTITY]} onChange={(e) => set(ENTITY, e.target.value)} />
+              <datalist id="debit-entities">
+                {[...new Set(['Personal', ...entities])].map((e) => <option key={e} value={e} />)}
+              </datalist>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Bank"><input className={inp} value={editing.form.Bank} onChange={(e) => set('Bank', e.target.value)} /></Field>
+              <Field label="Last 4"><input className={inp} maxLength={4} value={editing.form['Last 4']} onChange={(e) => set('Last 4', e.target.value.replace(/\D/g, ''))} /></Field>
+              <Field label="Owner"><Select value={editing.form.Owner} options={OWNERS} onChange={(v) => set('Owner', v)} /></Field>
+              <Field label="Account type"><Select value={editing.form['Account Type']} options={TYPES} onChange={(v) => set('Account Type', v)} /></Field>
+              <Field label="Expiration"><input type="date" className={inp} value={editing.form.Expiration} onChange={(e) => set('Expiration', e.target.value)} /></Field>
+              <Field label="Status"><Select value={editing.form.Status} options={STATUSES} onChange={(v) => set('Status', v)} /></Field>
+            </div>
+            <p className="text-xs text-slate-400">Only store the last 4 digits — never the full card number or CVV.</p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setEditing(null)} className="text-sm px-3 py-2 text-slate-600">Cancel</button>
+              <button
+                onClick={save} disabled={saving}
+                className="text-sm font-medium bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >{saving ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const inp = 'w-full text-sm border border-slate-200 rounded-lg px-3 py-2'
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-slate-500 mb-1">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function Select({ value, options, onChange }) {
+  return (
+    <select className={inp} value={value} onChange={(e) => onChange(e.target.value)}>
+      {options.map((o) => <option key={o}>{o}</option>)}
+    </select>
+  )
+}
