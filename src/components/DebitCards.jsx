@@ -1,20 +1,25 @@
 import { useMemo, useState } from 'react'
-import { Plus, Pencil, Trash2, X, Search } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, Search, Eye, EyeOff, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { createRecord, updateRecord, deleteRecord } from '../lib/airtable'
 import { CC_BASE_ID } from '../lib/statements'
 
 const TABLE = 'Debit cards'
-const ENTITY = 'Entity (LLC / Personal)'
+const ENTITY = 'Entity'
 const OWNERS = ['Thomas', 'Gabrielle']
 const TYPES = ['Checking', 'Savings']
 const STATUSES = ['Active', 'Inactive', 'Frozen / Closed']
 const FORMATS = ['Physical', 'Virtual']
-const EMPTY = { [ENTITY]: 'Personal', Bank: '', 'Card Number': '', Owner: 'Thomas', 'Account Type': 'Checking', 'Card Format': 'Physical', Expiration: '', Status: 'Active' }
+const EMPTY = { [ENTITY]: 'Personal', Bank: '', 'Card Number': '', CVV: '', Owner: 'Thomas', 'Account Type': 'Checking', 'Card Format': 'Physical', Expiration: '', Status: 'Active' }
 
 const safeStr = (v, f = '') => (v == null ? f : String(v))
 const arr = (v) => (Array.isArray(v) ? v : [])
 const last4 = (f) => safeStr(f['Card Number']).replace(/\D/g, '').slice(-4) || safeStr(f['Last 4'])
+const expMMYY = (d) => {
+  const m = safeStr(d).match(/^(\d{4})-(\d{2})/)
+  return m ? `${m[2]}/${m[1].slice(2)}` : ''
+}
+const fmtNumber = (n) => safeStr(n).replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim()
 const label = (f) => [f.Bank, last4(f) && `•••• ${last4(f)}`].filter(Boolean).join(' ') || 'Debit card'
 
 const statusTone = {
@@ -28,6 +33,22 @@ export default function DebitCards({ cards, onChanged }) {
   const [saving, setSaving] = useState(false)
   const [q, setQ] = useState('')
   const [entityFilter, setEntityFilter] = useState('All')
+  const [revealed, setRevealed] = useState(() => new Set())
+
+  const toggleReveal = (id) => setRevealed((s) => {
+    const n = new Set(s)
+    n.has(id) ? n.delete(id) : n.add(id)
+    return n
+  })
+
+  async function copy(text, what) {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(`${what} copied`)
+    } catch {
+      toast.error('Copy failed')
+    }
+  }
 
   const entities = useMemo(
     () => [...new Set(arr(cards).map((c) => safeStr(c.fields?.[ENTITY])).filter(Boolean))].sort(),
@@ -116,7 +137,8 @@ export default function DebitCards({ cards, onChanged }) {
               const f = c.fields || {}
               const status = safeStr(f.Status)
               return (
-                <div key={c.id} className="p-3 flex items-center gap-3">
+                <div key={c.id} className="p-3">
+                <div className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-slate-800 truncate">{label(f)}</p>
                     <p className="text-xs text-slate-400 truncate">
@@ -127,8 +149,37 @@ export default function DebitCards({ cards, onChanged }) {
                   {status && (
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusTone[status] || 'bg-slate-100 text-slate-600'}`}>{status}</span>
                   )}
+                  <button
+                    onClick={() => toggleReveal(c.id)}
+                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    {revealed.has(c.id) ? <EyeOff size={14} /> : <Eye size={14} />}
+                    {revealed.has(c.id) ? 'Hide' : 'Show'}
+                  </button>
                   <button onClick={() => openEdit(c)} className="text-slate-400 hover:text-slate-700" aria-label="Edit"><Pencil size={15} /></button>
                   <button onClick={() => remove(c)} className="text-slate-400 hover:text-red-600" aria-label="Delete"><Trash2 size={15} /></button>
+                </div>
+                {revealed.has(c.id) && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {[
+                      ['Card number', safeStr(f['Card Number']).replace(/\D/g, ''), fmtNumber(f['Card Number'])],
+                      ['Expiry', expMMYY(f.Expiration), expMMYY(f.Expiration)],
+                      ['CVV', safeStr(f.CVV), safeStr(f.CVV)],
+                    ].map(([what, raw, shown]) => (
+                      <button
+                        key={what}
+                        disabled={!raw}
+                        onClick={() => copy(raw, what)}
+                        title={`Click to copy ${what}`}
+                        className="flex items-center gap-2 text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-emerald-50 hover:border-emerald-300 disabled:opacity-40"
+                      >
+                        <span className="text-[10px] font-sans uppercase tracking-wide text-slate-400">{what}</span>
+                        {shown || '—'}
+                        <Copy size={12} className="text-slate-400" />
+                      </button>
+                    ))}
+                  </div>
+                )}
                 </div>
               )
             })}
@@ -157,6 +208,7 @@ export default function DebitCards({ cards, onChanged }) {
               <Field label="Owner"><Select value={editing.form.Owner} options={OWNERS} onChange={(v) => set('Owner', v)} /></Field>
               <Field label="Account type"><Select value={editing.form['Account Type']} options={TYPES} onChange={(v) => set('Account Type', v)} /></Field>
               <Field label="Physical / Virtual"><Select value={editing.form['Card Format']} options={FORMATS} onChange={(v) => set('Card Format', v)} /></Field>
+              <Field label="CVV"><input className={inp} inputMode="numeric" autoComplete="off" maxLength={4} value={editing.form.CVV} onChange={(e) => set('CVV', e.target.value.replace(/\D/g, ''))} /></Field>
               <Field label="Expiration"><input type="date" className={inp} value={editing.form.Expiration} onChange={(e) => set('Expiration', e.target.value)} /></Field>
               <Field label="Status"><Select value={editing.form.Status} options={STATUSES} onChange={(v) => set('Status', v)} /></Field>
             </div>
