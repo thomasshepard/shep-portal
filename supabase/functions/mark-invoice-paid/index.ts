@@ -1,4 +1,5 @@
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { requireRoleOrFlag, AuthError } from '../_shared/auth.ts'
 
 const stripe = new Stripe(Deno.env.get('STRIPE_HAPPY_CUTS_KEY') ?? '', {
   apiVersion: '2024-12-18.acacia',
@@ -33,8 +34,25 @@ Deno.serve(async (req) => {
   }
 
   try {
+    await requireRoleOrFlag(req, 'can_view_happy_cuts')
+  } catch (err) {
+    const status = err instanceof AuthError ? err.status : 401
+    return new Response(
+      JSON.stringify({ error: (err as Error).message }),
+      { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
     const body = await req.json()
     const { stripeInvoiceId, mowRecordId, existingNotes, tableId, method } = body
+
+    if (tableId && tableId !== SCHEDULE_TABLE && tableId !== PROJECTS_TABLE) {
+      return new Response(
+        JSON.stringify({ error: 'tableId must be a known Happy Cuts table' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
     const targetTable = tableId || SCHEDULE_TABLE
     const tFields = TABLE_FIELDS[targetTable] ?? TABLE_FIELDS[SCHEDULE_TABLE]
     // Any out-of-band method funnels through here (cash today, check as of

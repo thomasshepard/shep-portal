@@ -1,4 +1,5 @@
 import Stripe from 'https://esm.sh/stripe@17?target=deno'
+import { requireAdmin, AuthError } from '../_shared/auth.ts'
 
 const stripe = new Stripe(Deno.env.get('STRIPE_HAPPY_CUTS_KEY') ?? '', {
   apiVersion: '2024-12-18.acacia',
@@ -73,6 +74,16 @@ async function patchAirtable(recordId: string, fields: Record<string, string>) {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  try {
+    await requireAdmin(req)
+  } catch (err) {
+    const status = err instanceof AuthError ? err.status : 401
+    return new Response(
+      JSON.stringify({ ok: false, error: (err as Error).message }),
+      { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 
   // ?dryRun=true returns the report without writing.
   const url    = new URL(req.url)

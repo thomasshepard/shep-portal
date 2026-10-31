@@ -1,5 +1,6 @@
 import { z } from 'https://deno.land/x/zod@v3.23.8/mod.ts'
 import { getStripeClientForAccount } from '../_shared/stripeAccounts.ts'
+import { requireRoleOrFlag, AuthError } from '../_shared/auth.ts'
 
 const AIRTABLE_PAT = Deno.env.get('AIRTABLE_PAT') ?? ''
 const AIRTABLE_BASE = 'appZOi48qf8SzyOml'
@@ -31,10 +32,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Only the Happy Cuts Stripe account is wired up server-side today — the
+// other three accounts aren't configured, and letting a caller pick an
+// account at all was more flexibility than this function needs. Fixed to
+// 'happy_cuts' below rather than taken from the request.
 const InvoiceRequestSchema = z.object({
-  account:         z.enum(['happy_cuts', 'east_meadow', 'shepard_holdings', 'virginia_holdings']).default('happy_cuts'),
   mowRecordId:     z.string().min(1),
-  tableId:         z.string().optional(),
+  tableId:         z.string().refine(v => v === SCHEDULE_TABLE || v === PROJECTS_TABLE, {
+    message: 'tableId must be a known Happy Cuts table',
+  }).optional(),
   contactRecordId: z.string().optional(),
   clientName:      z.string().optional(),
   clientEmail:     z.string().optional(),
@@ -82,6 +88,16 @@ Deno.serve(async (req) => {
   }
 
   try {
+    await requireRoleOrFlag(req, 'can_view_happy_cuts')
+  } catch (err) {
+    const status = err instanceof AuthError ? err.status : 401
+    return new Response(
+      JSON.stringify({ error: (err as Error).message, errorType: 'auth' }),
+      { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
     const rawBody = await req.json()
 
     const parseResult = InvoiceRequestSchema.safeParse(rawBody)
@@ -92,13 +108,13 @@ Deno.serve(async (req) => {
       )
     }
 
-    const { account, mowRecordId, tableId, contactRecordId, clientName, clientEmail, amount, description } = parseResult.data
+    const { mowRecordId, tableId, contactRecordId, clientName, clientEmail, amount, description } = parseResult.data
     const targetTable = tableId || SCHEDULE_TABLE
     const tFields = TABLE_FIELDS[targetTable] ?? TABLE_FIELDS[SCHEDULE_TABLE]
 
     let stripe
     try {
-      stripe = getStripeClientForAccount(account)
+      stripe = getStripeClientForAccount('happy_cuts')
     } catch (err: any) {
       return new Response(
         JSON.stringify({ error: err.message, errorType: 'validation' }),
@@ -106,7 +122,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    console.log(`[stripe-account: ${account}] Invoice request start — mowRecordId:`, mowRecordId, 'contactRecordId:', contactRecordId, 'clientName:', clientName, 'amount:', amount)
+    console.log('[stripe-account: happy_cuts] Invoice request start — mowRecordId:', mowRecordId, 'contactRecordId:', contactRecordId, 'clientName:', clientName, 'amount:', amount)
 
     // --- Step 1: Find or create Stripe customer ---
     let customerId: string | null = null
