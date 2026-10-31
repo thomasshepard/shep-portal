@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
   Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield, UserCog, Wrench, Calculator,
-  ChevronDown, Star, MessageSquare, Cpu, Rocket,
+  ChevronDown, Star, MessageSquare, Cpu, Rocket, Kanban,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
@@ -173,6 +173,7 @@ export default function Sidebar({ open, onClose }) {
   const topItems = [
     permissions.can_view_triage && { to: '/triage', icon: Activity, label: 'Triage', pinnable: false },
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', pinnable: false },
+    permissions.can_view_workstreams && { to: '/workstreams', icon: Kanban, label: 'Workstreams', pinnable: false },
     (isAdmin || permissions.can_view_tasks) && { to: '/tasks', icon: ListTodo, label: 'Tasks', pinnable: false },
     permissions.can_view_messages && { to: '/messages', icon: MessageSquare, label: 'Messages', pinnable: false, badge: messagesUnread || null },
   ].filter(Boolean)

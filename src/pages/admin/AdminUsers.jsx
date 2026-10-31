@@ -31,6 +31,7 @@ const PERM_GROUPS = [
       { key: 'can_view_bank_dashboard', label: 'Bank Dashboard' },
       { key: 'can_view_bookkeeping', label: 'Bookkeeping' },
       { key: 'can_view_fleet', label: 'Fleet' },
+      { key: 'can_view_workstreams', label: 'Workstreams' },
     ],
   },
   {
@@ -80,6 +81,7 @@ const emptyForm = {
   can_view_insurance: false,
   can_view_health_policies: false,
   can_view_fleet: false,
+  can_view_workstreams: false,
   can_view_bookkeeping: false,
   can_view_messages: false,
   allowed_tags: '',
@@ -192,6 +194,7 @@ export default function AdminUsers() {
           can_view_insurance: form.can_view_insurance,
           can_view_health_policies: form.can_view_health_policies,
           can_view_fleet: form.can_view_fleet,
+          can_view_workstreams: form.can_view_workstreams,
           can_view_bookkeeping: form.can_view_bookkeeping,
           can_view_messages: form.can_view_messages,
           allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
@@ -662,6 +665,15 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Fleet &amp; Equipment</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_workstreams}
+                        onChange={e => setField('can_view_workstreams', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">Workstreams</span>
                     </label>
                     <label className="flex items-center gap-2.5 cursor-pointer">
                       <input

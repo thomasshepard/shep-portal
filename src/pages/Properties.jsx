@@ -146,13 +146,6 @@ export default function Properties() {
   const ownedProperties = visibleProperties.filter(p => !isSold(p))
   const displayProperties = showAll ? visibleProperties : ownedProperties
 
-  // Lease-centric occupancy: a unit is occupied if it has any non-Closed lease
-  const occupiedUnitIds = new Set(
-    visibleLeases
-      .filter(l => (l.fields?.Status || '').toLowerCase() !== 'closed')
-      .flatMap(l => arr(l.fields?.Property))  // Lease "Property" field → Rental Unit IDs
-  )
-
   const openMaintenance = visibleMaintenance.filter(m => {
     const s = (m.fields?.Status || '').toLowerCase()
     return !['completed', 'resolved'].includes(s)
@@ -176,7 +169,7 @@ export default function Properties() {
   const totalPortfolioValue = ownedProperties.reduce((s, p) => s + (p.fields?.['Est Market Value'] || 0), 0)
   const totalEquity = ownedProperties.reduce((s, p) => s + (p.fields?.['Equity'] || 0), 0)
   const monthlyCashFlow = rentalProperties.reduce((s, p) => s + ((p.fields?.['Estimated Revenue'] || 0) - (p.fields?.['Monthly PI (from Current Loans)'] || 0)), 0)
-  const occupiedCount = rentalUnitsOnly.filter(u => occupiedUnitIds.has(u.id)).length
+  const occupancy = occupancyBreakdown(rentalUnitsOnly)
 
   // VA summary
   const paymentsDue = visibleInvoicePayments.filter(p => {
@@ -287,7 +280,11 @@ export default function Properties() {
             <SummaryCard label="Portfolio Value" value={fmtCurrency(totalPortfolioValue)} />
             <SummaryCard label="Total Equity" value={fmtCurrency(totalEquity)} />
             <SummaryCard label="Monthly Cash Flow" value={fmtCurrency(monthlyCashFlow)} highlight={monthlyCashFlow >= 0 ? 'green' : 'red'} />
-            <SummaryCard label="Occupancy" value={rentalUnitsOnly.length ? `${occupiedCount}/${rentalUnitsOnly.length}` : '—'} />
+            <SummaryCard
+              label="Occupancy"
+              value={rentalUnitsOnly.length ? `${occupancy.occupied}/${occupancy.total}` : '—'}
+              detail={rentalUnitsOnly.length ? occupancy.text : null}
+            />
             <SummaryCard label="Open Maintenance" value={openMaintenance.length} highlight={openMaintenance.length > 0 ? 'yellow' : null} />
           </>
         ) : (
@@ -327,7 +324,7 @@ export default function Properties() {
                 const isPrimaryResidence = pf['Investment Type'] === 'Primary Residence'
                 const isFixAndFlip = pf['Investment Type'] === 'Fix & Flip'
                 const isRental = pf['Investment Type'] === 'Rental Property'
-                const occupiedPropCount = units.filter(u => occupiedUnitIds.has(u.id)).length
+                const propOccupancy = occupancyBreakdown(units)
 
                 const propMaint = maintByProperty[prop.id] || []
                 const propPayments = paymentsByProperty[prop.id] || []
@@ -382,7 +379,7 @@ export default function Properties() {
                     </div>
 
                     {units.length > 0 && isRental && (
-                      <p className="text-sm text-gray-500 mb-3">{occupiedPropCount}/{units.length} units occupied</p>
+                      <p className="text-sm text-gray-500 mb-3" title={propOccupancy.text}>{propOccupancy.text}</p>
                     )}
 
                     {isAdmin ? (
@@ -672,12 +669,48 @@ function MaintenanceQueue({ maintenance, propMap, tenantMap, filter, setFilter, 
   )
 }
 
-function SummaryCard({ label, value, highlight }) {
+// Only Rental Unit Status = "Occupied" counts as occupied. Vacant, Marketing,
+// Turnover, Hold-up (and unset) are all non-occupied and reported separately.
+function occupancyBreakdown(units) {
+  const counts = {}
+  units.forEach(u => {
+    const s = (u.fields?.Status || 'no status').toLowerCase()
+    counts[s] = (counts[s] || 0) + 1
+  })
+  const occupied = counts.occupied || 0
+  const others = Object.entries(counts)
+    .filter(([s]) => s !== 'occupied')
+    .sort((a, b) => b[1] - a[1])
+    .map(([s, n]) => `${n} ${s}`)
+  return {
+    occupied,
+    total: units.length,
+    text: [`${occupied}/${units.length} occupied`, ...others].join(', '),
+  }
+}
+
+function SummaryCard({ label, value, highlight, detail }) {
+  const [open, setOpen] = useState(false)
   const colors = { green: 'text-green-600', red: 'text-red-600', yellow: 'text-amber-600' }
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
+  const body = (
+    <>
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-xl font-bold ${highlight ? colors[highlight] : 'text-gray-900'}`}>{value}</p>
-    </div>
+      {detail && open && <p className="text-xs text-gray-500 mt-1">{detail}</p>}
+    </>
+  )
+  // With a breakdown, the card is a tap target (hover shows it via title on desktop).
+  return detail ? (
+    <button
+      type="button"
+      title={detail}
+      onClick={() => setOpen(o => !o)}
+      aria-expanded={open}
+      className="bg-white rounded-xl border border-gray-200 p-4 text-left w-full"
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">{body}</div>
   )
 }
