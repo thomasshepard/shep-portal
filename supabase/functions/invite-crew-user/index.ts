@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { requireAdmin, AuthError } from '../_shared/auth.ts'
 
 // Uses the service role key — never exposed to the browser.
 // Sends a Supabase magic-link invite email so Crew Portal partners never set a
@@ -34,6 +35,13 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405)
+  }
+
+  try {
+    await requireAdmin(req)
+  } catch (err) {
+    const status = err instanceof AuthError ? err.status : 401
+    return json({ error: err.message }, status)
   }
 
   let body: { email?: string; fullName?: string }
