@@ -76,6 +76,7 @@ export function AuthProvider({ children }) {
     can_view_bank_dashboard: isAdmin || !!profile?.can_view_bank_dashboard,
     can_view_insurance:  isAdmin || !!profile?.can_view_insurance,
     can_view_fleet:      isAdmin || !!profile?.can_view_fleet,
+    can_view_workstreams: isAdmin || !!profile?.can_view_workstreams,
     can_view_bookkeeping: isAdmin || !!profile?.can_view_bookkeeping,
     can_view_messages:    isAdmin || isVA || !!profile?.can_view_messages,
     // Gates rows marked Visibility="Restricted" in Airtable (the family health

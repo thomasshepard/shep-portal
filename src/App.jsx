@@ -56,6 +56,7 @@ import FleetDetail from './pages/FleetDetail'
 import FleetMaintenance from './pages/FleetMaintenance'
 import LocalAI from './pages/LocalAI'
 import RankExpand from './pages/RankExpand'
+import Workstreams from './pages/Workstreams'
 
 export default function App() {
   return (
@@ -98,6 +99,7 @@ export default function App() {
             <Route path="fleet" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><Fleet /></ErrorBoundary></PermRoute>} />
             <Route path="fleet/maintenance" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><FleetMaintenance /></ErrorBoundary></PermRoute>} />
             <Route path="fleet/:id" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><FleetDetail /></ErrorBoundary></PermRoute>} />
+            <Route path="workstreams" element={<PermRoute permission="can_view_workstreams"><ErrorBoundary><Workstreams /></ErrorBoundary></PermRoute>} />
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="notifications/settings" element={<ProtectedRoute><NotificationSettings /></ProtectedRoute>} />
             <Route path="notifications/digest-guide" element={<ProtectedRoute><DigestGuide /></ProtectedRoute>} />
