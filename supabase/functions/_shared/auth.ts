@@ -46,3 +46,22 @@ export async function requireAdmin(req: Request) {
 
   return { user, callerClient }
 }
+
+// requireUser, plus checks profiles.role === 'admin' OR the given boolean
+// permission flag column (e.g. 'can_view_happy_cuts') — same pattern every
+// PermRoute in the frontend already uses, just enforced server-side too.
+export async function requireRoleOrFlag(req: Request, flag: string) {
+  const { user, callerClient } = await requireUser(req)
+
+  const { data: profile } = await callerClient
+    .from('profiles')
+    .select(`role, ${flag}`)
+    .eq('id', user.id)
+    .single()
+
+  if (profile?.role !== 'admin' && !profile?.[flag]) {
+    throw new AuthError('Not authorized', 403)
+  }
+
+  return { user, callerClient }
+}

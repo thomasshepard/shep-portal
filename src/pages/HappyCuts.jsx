@@ -17,7 +17,14 @@ const HC_PAT  = import.meta.env.VITE_AIRTABLE_PAT
 const AT_BASE = `https://api.airtable.com/v0/${HC_BASE}`
 const ANTH_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+// Session token for calling Stripe edge functions directly with fetch() —
+// those functions now check the caller's role, so the shared anon key no
+// longer gets past them (and shouldn't be used for user-specific actions).
+async function hcAuthHeader() {
+  const { data: { session } } = await supabase.auth.getSession()
+  return `Bearer ${session?.access_token || ''}`
+}
 
 const CONTACTS_TABLE = 'tbl1Y1siC5qV2fX8J'
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
@@ -635,8 +642,8 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
 
   async function sendInvoice() {
     // Guard: verify env vars are present before attempting
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-      console.error('[Invoice] Missing Supabase env vars:', { SUPABASE_URL, SUPABASE_ANON_KEY })
+    if (!SUPABASE_URL) {
+      console.error('[Invoice] Missing Supabase env vars:', { SUPABASE_URL })
       toast.error('Configuration error — missing Supabase credentials')
       setStep('error')
       return
@@ -660,7 +667,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Authorization': await hcAuthHeader(),
         },
         body: JSON.stringify({
           mowRecordId: mow.id,
@@ -1039,7 +1046,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+              'Authorization': await hcAuthHeader(),
             },
             body: JSON.stringify({
               stripeInvoiceId,
@@ -3311,7 +3318,7 @@ function ProjectCard({ project: p, contact, expanded, onToggle, onRefresh, onInv
       if (p.stripeInvoiceId) {
         const res = await fetch(`${SUPABASE_URL}/functions/v1/mark-invoice-paid`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+          headers: { 'Content-Type': 'application/json', Authorization: await hcAuthHeader() },
           body: JSON.stringify({
             stripeInvoiceId: p.stripeInvoiceId,
             mowRecordId: p.id,
@@ -3736,7 +3743,7 @@ function ProjectInvoiceModal({ project: p, contact, onClose, onConfirm }) {
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-stripe-invoice`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': await hcAuthHeader() },
         body: JSON.stringify({
           mowRecordId: p.id,
           tableId: PROJECTS_TABLE,
@@ -4045,7 +4052,7 @@ function PaymentRow({ row, onOpenJob, onGoToProjects, onRefresh }) {
         const stripeInvoiceId = row.kind === 'project' ? row.record.stripeInvoiceId : row.record.stripeId
         const res = await fetch(`${SUPABASE_URL}/functions/v1/mark-invoice-paid`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+          headers: { 'Content-Type': 'application/json', Authorization: await hcAuthHeader() },
           body: JSON.stringify({ stripeInvoiceId, mowRecordId: row.id, tableId, existingNotes: notes, method }),
         })
         const data = await res.json()
