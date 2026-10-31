@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Wallet, ExternalLink, Upload, ListChecks, BarChart3, CheckCircle2,
   AlertTriangle, ChevronDown, ChevronRight, Sparkles, TrendingUp, TrendingDown,
-  Repeat, X, Loader2, CreditCard,
+  Repeat, X, Loader2,
 } from 'lucide-react'
-import DebitCards from '../components/DebitCards'
 import {
   fetchAllRecords, createRecords, fmtCurrency, airtableConfigured,
 } from '../lib/airtable'
@@ -24,27 +23,22 @@ const TABS = [
   { id: 'checklist', label: 'Export Checklist', icon: ListChecks },
   { id: 'import', label: 'Import CSV', icon: Upload },
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
-  { id: 'debit', label: 'Debit Cards', icon: CreditCard },
 ]
 
 export default function Finances() {
   const [tab, setTab] = useState('checklist')
   const [cards, setCards] = useState([])
   const [txns, setTxns] = useState([])
-  const [debitCards, setDebitCards] = useState([])
   const [existingKeys, setExistingKeys] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [uploadedCards, setUploadedCards] = useState(new Set()) // session checkmarks
 
   async function load() {
     setLoading(true)
-    const [cardRes, txRes, debitRes] = await Promise.all([
+    const [cardRes, txRes] = await Promise.all([
       fetchAllRecords(CARDS_TABLE, { fields: ['Name', 'Owner', 'Status', 'Download URL'] }, CC_BASE_ID),
       fetchAllRecords(TX_TABLE, {}, CC_BASE_ID),
-      fetchAllRecords('Debit cards', {}, CC_BASE_ID),
     ])
-    if (debitRes.error) toast.error('Failed to load debit cards: ' + debitRes.error)
-    setDebitCards(arr(debitRes.data))
     if (cardRes.error) toast.error('Failed to load cards: ' + cardRes.error)
     if (txRes.error) toast.error('Failed to load transactions: ' + txRes.error)
     setCards(arr(cardRes.data))
@@ -103,7 +97,6 @@ export default function Finances() {
             />
           )}
           {tab === 'dashboard' && <Dashboard txns={txns} />}
-          {tab === 'debit' && <DebitCards cards={debitCards} onChanged={load} />}
         </>
       )}
     </div>

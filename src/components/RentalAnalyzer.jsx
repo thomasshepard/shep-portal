@@ -51,6 +51,15 @@ function fmt(n) {
   return '$' + Number(n).toLocaleString()
 }
 
+// Escapes text before it goes into the binder HTML built with document.write()
+// below — that popup shares the portal's origin, so unescaped Airtable/Rentcast/
+// Claude text (address, comps, AI narrative) could otherwise run as script there.
+function escapeHtml(val) {
+  return String(val ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]))
+}
+
 function PriorityBadge({ priority }) {
   const map = { high: 'bg-red-100 text-red-700', medium: 'bg-yellow-100 text-yellow-700', low: 'bg-gray-100 text-gray-600' }
   return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[priority] || map.low}`}>{priority}</span>
@@ -390,7 +399,7 @@ Return ONLY a JSON object with exactly this structure:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rental Market Analysis — ${address}</title>
+<title>Rental Market Analysis — ${escapeHtml(address)}</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; background: #fff; font-size: 13px; line-height: 1.55; }
@@ -496,7 +505,7 @@ Return ONLY a JSON object with exactly this structure:
 </head>
 <body>
 <div class="print-bar">
-  <span>📋 Rental Market Analysis — <strong>${address}${unitLabel ? ' · ' + unitLabel : ''}</strong></span>
+  <span>📋 Rental Market Analysis — <strong>${escapeHtml(address)}${unitLabel ? ' · ' + escapeHtml(unitLabel) : ''}</strong></span>
   <button class="print-btn" onclick="window.print()">🖨 Print / Save PDF</button>
 </div>
 <div class="spacer"></div>
@@ -508,12 +517,12 @@ Return ONLY a JSON object with exactly this structure:
     <div class="co-tag">Residential Real Estate · Cookeville, TN</div>
     <div class="doc-title">Rental Market Comparative Analysis</div>
     <div class="doc-meta">
-      <span><strong>Property:</strong> ${address}</span>
-      ${unitLabel ? `<span><strong>Unit:</strong> ${unitLabel}</span>` : ''}
+      <span><strong>Property:</strong> ${escapeHtml(address)}</span>
+      ${unitLabel ? `<span><strong>Unit:</strong> ${escapeHtml(unitLabel)}</span>` : ''}
       <span><strong>Date:</strong> ${today}</span>
-      ${beds ? `<span><strong>Bed/Bath:</strong> ${beds}BR / ${baths || '?'}BA</span>` : ''}
+      ${beds ? `<span><strong>Bed/Bath:</strong> ${escapeHtml(beds)}BR / ${escapeHtml(baths || '?')}BA</span>` : ''}
       ${sqft ? `<span><strong>Size:</strong> ${Number(sqft).toLocaleString()} sf</span>` : ''}
-      <span><strong>Type:</strong> ${propertyType}</span>
+      <span><strong>Type:</strong> ${escapeHtml(propertyType)}</span>
     </div>
   </div>
 
@@ -551,16 +560,16 @@ Return ONLY a JSON object with exactly this structure:
   ${hasNarrative ? `
   <div class="section">
     <div class="stitle">Market Analysis</div>
-    <div class="narrative">${aiAnalysis.marketNarrative || aiAnalysis.rationale}</div>
-    ${aiAnalysis?.qualityRationale ? `<div class="quality-note"><strong>Quality Adjustment (${aiAnalysis.qualityAdjustment >= 0 ? '+' : ''}${fmt(aiAnalysis.qualityAdjustment)}/mo):</strong> ${aiAnalysis.qualityRationale}</div>` : ''}
+    <div class="narrative">${escapeHtml(aiAnalysis.marketNarrative || aiAnalysis.rationale)}</div>
+    ${aiAnalysis?.qualityRationale ? `<div class="quality-note"><strong>Quality Adjustment (${aiAnalysis.qualityAdjustment >= 0 ? '+' : ''}${fmt(aiAnalysis.qualityAdjustment)}/mo):</strong> ${escapeHtml(aiAnalysis.qualityRationale)}</div>` : ''}
   </div>` : ''}
 
   <!-- Unit Features -->
   ${selectedQuality.length > 0 ? `
   <div class="section">
     <div class="stitle">Unit Features &amp; Amenities</div>
-    <div class="tags">${selectedQuality.map(q => `<span class="tag">${q}</span>`).join('')}</div>
-    ${qualityNotes ? `<div class="quality-note" style="margin-top:9px">${qualityNotes}</div>` : ''}
+    <div class="tags">${selectedQuality.map(q => `<span class="tag">${escapeHtml(q)}</span>`).join('')}</div>
+    ${qualityNotes ? `<div class="quality-note" style="margin-top:9px">${escapeHtml(qualityNotes)}</div>` : ''}
   </div>` : ''}
 
   <!-- Comparable Properties -->
@@ -582,8 +591,8 @@ Return ONLY a JSON object with exactly this structure:
       <tbody>
         <tr class="subject-row">
           <td>★</td>
-          <td><strong>Subject Property${unitLabel ? ' – ' + unitLabel : ''}</strong></td>
-          <td>${beds || '?'}bd / ${baths || '?'}ba</td>
+          <td><strong>Subject Property${unitLabel ? ' – ' + escapeHtml(unitLabel) : ''}</strong></td>
+          <td>${escapeHtml(beds || '?')}bd / ${escapeHtml(baths || '?')}ba</td>
           <td>${sqft ? Number(sqft).toLocaleString() + ' sf' : '—'}</td>
           <td>—</td>
           <td class="rent-col">${fmt(recommended)} <span style="font-size:9.5px;font-weight:400;color:#6b7280;">(proposed)</span></td>
@@ -593,7 +602,7 @@ Return ONLY a JSON object with exactly this structure:
           return `<tr>
           <td>${i + 1}</td>
           <td>${addr
-            ? `<a href="${zillowUrl(addr)}" target="_blank" class="zillow-link">${addr}<span class="zillow-badge">Zillow ↗</span></a>`
+            ? `<a href="${zillowUrl(addr)}" target="_blank" rel="noopener noreferrer" class="zillow-link">${escapeHtml(addr)}<span class="zillow-badge">Zillow ↗</span></a>`
             : '—'}</td>
           <td>${c.bedrooms || '?'}bd / ${c.bathrooms || '?'}ba</td>
           <td>${c.squareFootage ? Number(c.squareFootage).toLocaleString() + ' sf' : '—'}</td>
@@ -614,7 +623,7 @@ Return ONLY a JSON object with exactly this structure:
   <div class="section">
     <div class="stitle">Conversation Talking Points</div>
     <ul class="tp-list">
-      ${talkingPoints.map((tp, i) => `<li class="tp-item"><span class="tp-num">${i + 1}</span><span>${tp}</span></li>`).join('')}
+      ${talkingPoints.map((tp, i) => `<li class="tp-item"><span class="tp-num">${i + 1}</span><span>${escapeHtml(tp)}</span></li>`).join('')}
     </ul>
   </div>` : ''}
 
@@ -624,14 +633,14 @@ Return ONLY a JSON object with exactly this structure:
     <div class="stitle">Value-Add Improvement Opportunities</div>
     ${improvements.map(item => `
     <div class="imp-row">
-      <span class="imp-badge ${item.priority}">${item.priority}</span>
+      <span class="imp-badge ${escapeHtml(item.priority)}">${escapeHtml(item.priority)}</span>
       <div class="imp-body">
-        <div class="imp-name">${item.item}</div>
-        ${item.detail ? `<div class="imp-detail">${item.detail}</div>` : ''}
+        <div class="imp-name">${escapeHtml(item.item)}</div>
+        ${item.detail ? `<div class="imp-detail">${escapeHtml(item.detail)}</div>` : ''}
       </div>
       <div class="imp-nums">
-        <div class="imp-cost">${item.estimatedCost}</div>
-        <div class="imp-boost">+${item.rentBoost}</div>
+        <div class="imp-cost">${escapeHtml(item.estimatedCost)}</div>
+        <div class="imp-boost">+${escapeHtml(item.rentBoost)}</div>
       </div>
     </div>`).join('')}
   </div>` : ''}

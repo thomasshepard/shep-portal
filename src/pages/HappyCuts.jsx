@@ -4201,18 +4201,28 @@ const emptyCrewForm = {
   agreementSigned: false, insuranceOnFile: false, w9OnFile: false, notes: '',
 }
 
+// Escapes text before it goes into an HTML string built with document.write()
+// (buildPayStatementHtml below, and RentalAnalyzer's generateBinder) — those
+// popups share the portal's origin, so unescaped Airtable/AI text (client
+// names, notes, addresses) could otherwise run as script in that origin.
+function escapeHtml(val) {
+  return String(val ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]))
+}
+
 function buildPayStatementHtml(crewMember, jobs) {
   const total = jobs.reduce((sum, j) => sum + (j.contractorPayout || 0), 0)
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
   const rows = jobs.map(j => `
     <tr>
-      <td>${j.date}</td>
-      <td>${j.clientName}</td>
-      <td>${j.jobMode || ''}</td>
+      <td>${escapeHtml(j.date)}</td>
+      <td>${escapeHtml(j.clientName)}</td>
+      <td>${escapeHtml(j.jobMode || '')}</td>
       <td style="text-align:right">${fmtCurrency(j.amount)}</td>
       <td style="text-align:right">${fmtCurrency(j.contractorPayout)}</td>
     </tr>`).join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Pay Statement — ${crewMember.name}</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Pay Statement — ${escapeHtml(crewMember.name)}</title>
     <style>
       body{font-family:Arial,sans-serif;color:#1f2937;padding:32px;max-width:700px;margin:0 auto}
       h1{color:#16A34A;font-size:22px;margin-bottom:2px}
@@ -4224,7 +4234,7 @@ function buildPayStatementHtml(crewMember, jobs) {
       .foot{margin-top:32px;font-size:11px;color:#9ca3af}
     </style></head><body>
     <h1>Happy Cuts Lawn Care — Pay Statement</h1>
-    <div class="sub">${crewMember.name}${crewMember.businessName ? ` · ${crewMember.businessName}` : ''} — ${today}</div>
+    <div class="sub">${escapeHtml(crewMember.name)}${crewMember.businessName ? ` · ${escapeHtml(crewMember.businessName)}` : ''} — ${today}</div>
     <table>
       <thead><tr><th>Date</th><th>Client</th><th>Mode</th><th style="text-align:right">Job Total</th><th style="text-align:right">Payout</th></tr></thead>
       <tbody>${rows}</tbody>
