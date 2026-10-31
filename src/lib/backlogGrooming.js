@@ -2,7 +2,7 @@
 // Classifies a raw one-liner idea into Kind/Category/Effort/Value + a fleshed-out
 // description, so the Groom view has something to pre-fill instead of a blank form.
 
-const ANTH_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
+import { callClaude } from './aiProxy'
 
 export const KIND_OPTIONS = ['Build', 'Do', 'Decide / Research']
 export const CATEGORY_OPTIONS = ['Operations', 'Real Estate', 'Happy Cuts', 'Homestead', 'Personal', 'Technical', 'Finance', 'Infrastructure']
@@ -15,7 +15,7 @@ export const EFFORT_OPTIONS = ['S', 'M', 'L', 'XL']
  * assist, not a blocker: callers should fall back to an empty editable form.
  */
 export async function groomBacklogIdea(rawText) {
-  if (!ANTH_KEY || !rawText?.trim()) return null
+  if (!rawText?.trim()) return null
 
   const system = `You groom a raw, half-formed idea captured into a personal/business dev backlog into a structured card. Return ONLY JSON, no markdown, no preamble. Shape:
 {"kind":string|null,"category":string|null,"effort":string|null,"value":number|null,"description":string,"buildPrompt":string|null,"checkInDate":"YYYY-MM-DD"|null}
@@ -29,23 +29,12 @@ export async function groomBacklogIdea(rawText) {
 Never invent a value outside the given lists -- use null if unsure.`
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTH_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 500,
-        system,
-        messages: [{ role: 'user', content: rawText }],
-      }),
+    const json = await callClaude({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 500,
+      system,
+      messages: [{ role: 'user', content: rawText }],
     })
-    if (!res.ok) return null
-    const json = await res.json()
     let text = json?.content?.[0]?.text || '{}'
     text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
     const parsed = JSON.parse(text)

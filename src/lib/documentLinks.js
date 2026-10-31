@@ -11,8 +11,8 @@
 // and reuses the AI-call shape already established in Finances.jsx's fetchNudges.
 
 import { DOCS_BASE_ID } from './airtable'
+import { callClaude } from './aiProxy'
 
-const ANTH_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
 const PAT = import.meta.env.VITE_AIRTABLE_PAT
 
 // ── Closed lists ─────────────────────────────────────────────────────────
@@ -98,7 +98,6 @@ Never invent a value outside that list — use null if unsure. If a field isn't 
 /** Calls Claude to pull structured fields out of a document's OCR/summary text.
  *  Returns the parsed object, or null on any failure (never throws). */
 export async function extractLinkedFields(doc, kind) {
-  if (!ANTH_KEY) return null
   const buildSystemPrompt = SYSTEM_PROMPTS[kind]
   if (!buildSystemPrompt) return null
 
@@ -112,23 +111,12 @@ export async function extractLinkedFields(doc, kind) {
   }
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTH_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 500,
-        system: buildSystemPrompt(CLOSED_LISTS),
-        messages: [{ role: 'user', content: JSON.stringify(payload) }],
-      }),
+    const json = await callClaude({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 500,
+      system: buildSystemPrompt(CLOSED_LISTS),
+      messages: [{ role: 'user', content: JSON.stringify(payload) }],
     })
-    if (!res.ok) return null
-    const json = await res.json()
     let text = json?.content?.[0]?.text || '{}'
     text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
     return JSON.parse(text)
@@ -151,7 +139,7 @@ export async function extractLinkedFields(doc, kind) {
  *  same as extractLinkedFields) — a missing suggestion just means the
  *  manual candidate list is the fallback, never a blocker. */
 export async function suggestReceiptForTransaction(transaction, candidates) {
-  if (!ANTH_KEY || !Array.isArray(candidates) || candidates.length === 0) return null
+  if (!Array.isArray(candidates) || candidates.length === 0) return null
 
   const compact = candidates.map(c => ({
     id: c.id,
@@ -169,23 +157,12 @@ export async function suggestReceiptForTransaction(transaction, candidates) {
   })
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTH_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 100,
-        system,
-        messages: [{ role: 'user', content: message }],
-      }),
+    const json = await callClaude({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 100,
+      system,
+      messages: [{ role: 'user', content: message }],
     })
-    if (!res.ok) return null
-    const json = await res.json()
     let text = json?.content?.[0]?.text || '{}'
     text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
     const parsed = JSON.parse(text)

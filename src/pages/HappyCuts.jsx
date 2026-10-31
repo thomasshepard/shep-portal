@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import { notify, getAdminUserIds } from '../lib/notifications'
 import { supabase } from '../lib/supabase'
+import { callClaude } from '../lib/aiProxy'
 import {
   Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
   CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen, TreePine,
@@ -15,7 +16,6 @@ import {
 const HC_BASE = import.meta.env.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID
 const HC_PAT  = import.meta.env.VITE_AIRTABLE_PAT
 const AT_BASE = `https://api.airtable.com/v0/${HC_BASE}`
-const ANTH_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
 // Session token for calling Stripe edge functions directly with fetch() —
@@ -1718,7 +1718,6 @@ function NudgesPanel({ contacts, schedules, nudges, nudgesFetched, setNudges, se
 
   async function fetchNudges() {
     if (nudgesFetched || loading) return
-    if (!ANTH_KEY) return
     setLoading(true)
     setError(false)
     try {
@@ -1726,23 +1725,12 @@ function NudgesPanel({ contacts, schedules, nudges, nudgesFetched, setNudges, se
         clients: contacts.slice(0, 20).map(c => ({ name: c.name, status: c.status, lastContact: c.lastContact, rate: c.rate })),
         recentMows: schedules.slice(0, 20).map(m => ({ clientName: m.clientName, date: m.date, status: m.status, amount: m.amount })),
       })
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': ANTH_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 600,
-          system: `You are a business advisor for Happy Cuts, a small lawn mowing business in Cookeville, TN run by Thomas Shepard. Review the client and schedule data and return 2-4 short, actionable nudges. Each nudge must be 1-2 sentences, specific to the data, and directly actionable. Return ONLY a JSON array: [{"priority":"high|medium|low","icon":"emoji","text":"nudge text"}]. No preamble, no markdown, just the JSON array.`,
-          messages: [{ role: 'user', content: contextStr }],
-        }),
+      const data = await callClaude({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        system: `You are a business advisor for Happy Cuts, a small lawn mowing business in Cookeville, TN run by Thomas Shepard. Review the client and schedule data and return 2-4 short, actionable nudges. Each nudge must be 1-2 sentences, specific to the data, and directly actionable. Return ONLY a JSON array: [{"priority":"high|medium|low","icon":"emoji","text":"nudge text"}]. No preamble, no markdown, just the JSON array.`,
+        messages: [{ role: 'user', content: contextStr }],
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
       const raw = data.content?.[0]?.text || '[]'
       const match = raw.match(/\[[\s\S]*\]/)
       const parsed = JSON.parse(match ? match[0] : '[]')
