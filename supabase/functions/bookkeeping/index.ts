@@ -60,6 +60,37 @@ const DUAL_WRITE_ONLY_ACTIONS = new Set([
   'post_obligation_payment', 'post_bills_payment',
 ])
 
+// Security audit AC-6 (log-only, 2026-10-31): a valid session is enough to
+// reach any DUAL_WRITE_ONLY_ACTIONS today, which also means someone with
+// zero relevant permission flags can hit this edge function directly (not
+// through the UI) and post a ledger entry. This map is what each action
+// SHOULD require — matching the permission flag the page that actually
+// triggers it is already gated by. Not enforced yet: these are fire-and-forget
+// posts, so a wrong denial would silently drop a real ledger entry. Deno.serve
+// below only logs a mismatch for now; flip DUAL_WRITE_ENFORCE to true once a
+// few days of production logs show no unexpected denials.
+const DUAL_WRITE_ENFORCE = false
+const DUAL_WRITE_PERMISSION_MAP: Record<string, (profile: any, isAdmin: boolean) => boolean> = {
+  post_mow_completion:     (p, isAdmin) => isAdmin || p?.can_view_happy_cuts === true,
+  post_mow_payment:        (p, isAdmin) => isAdmin || p?.can_view_happy_cuts === true,
+  post_crew_payout:        (p, isAdmin) => isAdmin || p?.can_view_happy_cuts === true,
+  post_obligation_payment: (p, isAdmin) => isAdmin || p?.can_view_insurance === true,
+  post_bills_payment:      (p, isAdmin) => isAdmin || p?.role === 'va' || p?.can_view_properties === true,
+}
+
+// Sanity bound for the three mow dual-write actions — not a real business
+// limit, just enough to flag an obviously wrong amount (typo, bad client
+// math) before it hits the ledger. $0 is valid on purpose: comp/guest mows
+// are a real, zero-dollar case and must never be treated as out of bounds,
+// now or once this starts enforcing. Log-only for the same reason as
+// DUAL_WRITE_ENFORCE above — flip together once the logs are clean.
+const MOW_AMOUNT_MAX = 2000
+function checkMowAmountBounds(amount: number, action: string, userId: string) {
+  if (amount < 0 || amount > MOW_AMOUNT_MAX) {
+    console.warn(`[bookkeeping] AC-6 log-only: ${action} amount ${amount} outside expected bounds (0-${MOW_AMOUNT_MAX}) for user ${userId}`)
+  }
+}
+
 function assertEntityScope(entityName: string, ctx?: BkContext) {
   if (ctx && ctx.scope !== null && !ctx.scope.includes(entityName)) {
     throw new Error(`You do not have access to ${entityName} in Bookkeeping`)
@@ -370,6 +401,7 @@ async function actionPostMowCompletion(payload: any, userId: string) {
   if (!scheduleRecordId) throw new Error('scheduleRecordId is required')
   const amount = num(payload?.amount)
   const payout = payload?.contractorPayout != null ? num(payload.contractorPayout) : 0
+  checkMowAmountBounds(amount, 'post_mow_completion', userId)
 
   const entityId = await getEntityId(DEFAULT_ENTITY)
   const codes = payout > 0 ? ['1100', '4000', '5000', '2000'] : ['1100', '4000']
@@ -401,6 +433,7 @@ async function actionPostMowPayment(payload: any, userId: string) {
   const scheduleRecordId = String(payload?.scheduleRecordId || '')
   if (!scheduleRecordId) throw new Error('scheduleRecordId is required')
   const amount = num(payload?.amount)
+  checkMowAmountBounds(amount, 'post_mow_payment', userId)
 
   // HappyCuts.jsx only calls this from the no-Stripe-invoice cash path —
   // physical cash handed to Thomas in person. Per him, that money usually
@@ -435,6 +468,7 @@ async function actionPostCrewPayout(payload: any, userId: string) {
   const scheduleRecordIds: string[] = Array.isArray(payload?.scheduleRecordIds) ? payload.scheduleRecordIds.map(String) : []
   if (scheduleRecordIds.length === 0) throw new Error('scheduleRecordIds is required')
   const totalAmount = num(payload?.totalAmount)
+  checkMowAmountBounds(totalAmount, 'post_crew_payout', userId)
 
   const entityId = await getEntityId(DEFAULT_ENTITY)
   const acct = await getAccountIds(entityId, ['2000', '1000'])
@@ -1442,9 +1476,22 @@ async function actionVoidEntry(payload: any, _userId?: string, ctx?: BkContext) 
   return { ok: true }
 }
 
-async function actionRemoveFeedClaim(payload: any) {
+async function actionRemoveFeedClaim(payload: any, _userId?: string, ctx?: BkContext) {
   const claimId = String(payload?.claimId || '')
   if (!claimId) throw new Error('claimId is required')
+
+  // A claim covers a whole bank connection, which can carry accounts across
+  // more than one entity — same join actionListTriageCandidates already
+  // uses to label reauth cards. Scoped the same way as every other action:
+  // admin/unrestricted sees everything, a scoped user needs every entity
+  // the claim touches.
+  if (ctx && ctx.scope !== null) {
+    const { data: accounts } = await sb.from('bk_bank_accounts')
+      .select('bk_entities(name)').eq('claim_id', claimId)
+    const entityNames = [...new Set((accounts || []).map((a: any) => a.bk_entities?.name).filter(Boolean))]
+    for (const name of entityNames) assertEntityScope(name, ctx)
+  }
+
   const { error } = await sb.from('bk_feed_claims').update({ status: 'removed' }).eq('id', claimId)
   if (error) throw new Error(error.message)
   return { ok: true }
@@ -1638,7 +1685,9 @@ Deno.serve(async (req) => {
   const handler = ACTIONS[action]
   if (!handler) return json({ ok: false, error: `Unknown action: ${action}. Valid: ${Object.keys(ACTIONS).join(', ')}` }, 400)
 
-  const { data: profile } = await sb.from('profiles').select('role, can_view_bookkeeping, bookkeeping_entities').eq('id', userData.user.id).single()
+  const { data: profile } = await sb.from('profiles')
+    .select('role, can_view_bookkeeping, bookkeeping_entities, can_view_happy_cuts, can_view_insurance, can_view_properties')
+    .eq('id', userData.user.id).single()
   const isAdmin = profile?.role === 'admin'
 
   // Dual-write actions (Happy Cuts mow/crew payout, Insurance obligation
@@ -1652,6 +1701,18 @@ Deno.serve(async (req) => {
   // legitimate reason to trigger — a valid session is enough.
   const allowed = isAdmin || profile?.can_view_bookkeeping === true || DUAL_WRITE_ONLY_ACTIONS.has(action)
   if (!allowed) return json({ ok: false, error: 'You do not have access to Bookkeeping' }, 403)
+
+  // AC-6 log-only: see DUAL_WRITE_PERMISSION_MAP above. Once DUAL_WRITE_ENFORCE
+  // flips to true, this starts returning 403 instead of just logging.
+  if (DUAL_WRITE_ONLY_ACTIONS.has(action)) {
+    const checkFn = DUAL_WRITE_PERMISSION_MAP[action]
+    const wouldAllow = !checkFn || checkFn(profile, isAdmin)
+    if (!wouldAllow) {
+      const msg = `[bookkeeping] AC-6 log-only: would have denied ${action} for user ${userData.user.id} (role=${profile?.role}, can_view_happy_cuts=${profile?.can_view_happy_cuts}, can_view_insurance=${profile?.can_view_insurance}, can_view_properties=${profile?.can_view_properties})`
+      if (DUAL_WRITE_ENFORCE) return json({ ok: false, error: 'You do not have access to this action' }, 403)
+      console.warn(msg)
+    }
+  }
 
   // export_backup dumps every entity's full ledger — admin only, not just
   // can_view_bookkeeping, regardless of entity scope.
