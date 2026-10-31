@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { requireAdmin, AuthError } from '../_shared/auth.ts'
 
 // Uses the service role key — never exposed to the browser.
 // Creates the auth user with email_confirm: true so no confirmation
@@ -12,6 +13,16 @@ const supabaseAdmin = createClient(
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 })
+  }
+
+  try {
+    await requireAdmin(req)
+  } catch (err) {
+    const status = err instanceof AuthError ? err.status : 401
+    return new Response(JSON.stringify({ error: err.message }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    })
   }
 
   let body: { email?: string; password?: string }
