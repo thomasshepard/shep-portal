@@ -5,16 +5,9 @@ import {
   MessageSquare, CheckSquare, Square, Save, Clock, ExternalLink,
 } from 'lucide-react'
 import { createRecord, PM_BASE_ID } from '../lib/airtable'
+import { callClaude, callRentcast } from '../lib/aiProxy'
 
-const ANTH_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
-const RENTCAST_KEY = import.meta.env.VITE_RENTCAST_API_KEY
 const AT_PAT = import.meta.env.VITE_AIRTABLE_PAT
-
-// In dev, proxy through Vite to avoid CORS (localhost → Anthropic not allowed).
-// In production (GitHub Pages HTTPS), call Anthropic directly.
-const CLAUDE_URL = import.meta.env.DEV
-  ? '/api/anthropic/v1/messages'
-  : 'https://api.anthropic.com/v1/messages'
 
 const PROPERTY_TYPES = ['Single Family', 'Condo', 'Townhouse', 'Apartment', 'Multi Family']
 const RENTCAST_TYPE_MAP = {
@@ -154,23 +147,17 @@ export default function RentalAnalyzer({ property, unit, currentRent = 0, onClos
 
   // ── Rentcast API ────────────────────────────────────────────────────────────
   async function fetchRentcast() {
-    if (!RENTCAST_KEY) return { data: null, error: 'Rentcast API key not configured (VITE_RENTCAST_API_KEY)' }
     if (!address.trim()) return { data: null, error: 'No address provided' }
     try {
-      const params = new URLSearchParams({ address: address.trim(), compCount: '12' })
-      if (beds)  params.set('bedrooms', beds)
-      if (baths) params.set('bathrooms', baths)
-      if (sqft)  params.set('squareFootage', sqft)
-      params.set('propertyType', RENTCAST_TYPE_MAP[propertyType] || 'Single Family')
-
-      const res = await fetch(`https://api.rentcast.io/v1/avm/rent/long-term?${params}`, {
-        headers: { 'X-Api-Key': RENTCAST_KEY },
+      const data = await callRentcast({
+        address: address.trim(),
+        bedrooms: beds || undefined,
+        bathrooms: baths || undefined,
+        squareFootage: sqft || undefined,
+        propertyType: RENTCAST_TYPE_MAP[propertyType] || 'Single Family',
+        compCount: 12,
       })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        return { data: null, error: err?.message || `Rentcast error: HTTP ${res.status}` }
-      }
-      return { data: await res.json(), error: null }
+      return { data, error: null }
     } catch (e) {
       return { data: null, error: e.message }
     }
@@ -178,8 +165,6 @@ export default function RentalAnalyzer({ property, unit, currentRent = 0, onClos
 
   // ── Claude AI ───────────────────────────────────────────────────────────────
   async function fetchClaudeAnalysis(rc) {
-    if (!ANTH_KEY) return { data: null, error: 'Anthropic API key not configured' }
-
     const curRentNum = Number(curRent) || 0
     const unitLabel  = unit ? (uf.Name || 'Unit') : null
     const qualityStr = selectedQuality.length > 0
@@ -250,32 +235,19 @@ Return ONLY a JSON object with exactly this structure:
       : userText
 
     try {
-      const claudeHeaders = {
-        'x-api-key': ANTH_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      }
-
-      const res = await fetch(CLAUDE_URL, {
-        method: 'POST',
-        headers: claudeHeaders,
-        body: JSON.stringify({
-          model: 'claude-opus-4-6',
-          max_tokens: 1800,
-          system: systemPrompt,
-          messages: [{ role: 'user', content }],
-        }),
+      const data = await callClaude({
+        model: 'claude-opus-4-6',
+        max_tokens: 1800,
+        system: systemPrompt,
+        messages: [{ role: 'user', content }],
       })
-      const data = await res.json()
-      if (!res.ok) return { data: null, error: data?.error?.message || `Claude error: HTTP ${res.status}` }
       // Strip markdown code fences Claude sometimes wraps around JSON
       let rawText = data.content?.[0]?.text || '{}'
       rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
       const parsed = JSON.parse(rawText)
       return { data: parsed, error: null }
     } catch (e) {
-      return { data: null, error: `Response parse error: ${e.message}` }
+      return { data: null, error: e.message }
     }
   }
 
@@ -866,11 +838,7 @@ Return ONLY a JSON object with exactly this structure:
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-yellow-800">Claude AI didn't run — Rentcast data only</p>
                     <p className="text-xs text-yellow-700 mt-0.5">{claudeError}</p>
-                    {ANTH_KEY ? (
-                      <p className="text-xs text-yellow-600 mt-1">API key is configured — try restarting the dev server if this is local, or re-run the analysis.</p>
-                    ) : (
-                      <p className="text-xs text-yellow-600 mt-1">Add <code className="bg-yellow-100 px-1 rounded">VITE_ANTHROPIC_API_KEY</code> to your <code className="bg-yellow-100 px-1 rounded">.env</code> file and restart the dev server.</p>
-                    )}
+                    <p className="text-xs text-yellow-600 mt-1">Try re-running the analysis.</p>
                   </div>
                 </div>
               )}

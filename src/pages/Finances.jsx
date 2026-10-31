@@ -13,6 +13,7 @@ import {
   cardTail, makeDedupKey, merchantKey,
 } from '../lib/statements'
 import LoadingSpinner from '../components/LoadingSpinner'
+import { callClaude } from '../lib/aiProxy'
 import toast from 'react-hot-toast'
 
 const arr = (v) => (Array.isArray(v) ? v : [])
@@ -591,8 +592,6 @@ function buildAnalytics(txns) {
 // ── AI nudges (aggregates only — no raw transactions sent) ─
 
 async function fetchNudges(data) {
-  const ANTH_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY
-  if (!ANTH_KEY) throw new Error('VITE_ANTHROPIC_API_KEY not set')
   const payload = {
     currentMonth: data.curLabel,
     totalSpend: Math.round(-data.curSpend),
@@ -600,23 +599,12 @@ async function fetchNudges(data) {
     categories: data.categories.map((c) => ({ name: c.name, spend: Math.round(-c.amount), changePct: c.delta == null ? null : Math.round(c.delta) })),
     subscriptions: data.subscriptions.map((s) => ({ name: s.name, monthly: Math.round(-s.typical), months: s.months })),
   }
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': ANTH_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 700,
-      system: 'You are a personal-finance advisor reviewing aggregated monthly credit-card spending (no individual transactions). Return 3-5 short, specific, actionable money-saving nudges: flag subscriptions to cancel, categories trending up, and concrete cut targets with dollar figures. Return ONLY a JSON array: [{"icon":"emoji","text":"nudge"}]. No preamble, no markdown.',
-      messages: [{ role: 'user', content: JSON.stringify(payload) }],
-    }),
+  const json = await callClaude({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 700,
+    system: 'You are a personal-finance advisor reviewing aggregated monthly credit-card spending (no individual transactions). Return 3-5 short, specific, actionable money-saving nudges: flag subscriptions to cancel, categories trending up, and concrete cut targets with dollar figures. Return ONLY a JSON array: [{"icon":"emoji","text":"nudge"}]. No preamble, no markdown.',
+    messages: [{ role: 'user', content: JSON.stringify(payload) }],
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const json = await res.json()
   const text = json?.content?.[0]?.text || '[]'
   const match = text.match(/\[[\s\S]*\]/)
   return JSON.parse(match ? match[0] : '[]')
