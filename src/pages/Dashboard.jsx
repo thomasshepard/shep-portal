@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { fetchAllRecords, PM_BASE_ID, CHICKENS_BASE_ID } from '../lib/airtable'
+import { fetchAllRecords, PM_BASE_ID, CHICKENS_BASE_ID, airtableFetch } from '../lib/airtable'
 import { FLEET_BASE_ID, EQUIPMENT_TABLE, MAINT_TABLE, maintenanceUrgency } from '../lib/fleet'
 import { createTask } from '../lib/tasks'
 import { useAuth } from '../hooks/useAuth'
@@ -93,7 +93,7 @@ async function fetchHCSchedule(sinceISO) {
     let qs = '?returnFieldsByFieldId=true'
     if (formula) qs += `&filterByFormula=${encodeURIComponent(formula)}`
     if (offset) qs += `&offset=${offset}`
-    const res = await fetch(`${HC_URL}/${SCHEDULE_TABLE}${qs}`, {
+    const res = await airtableFetch(`${HC_URL}/${SCHEDULE_TABLE}${qs}`, {
       headers: { Authorization: `Bearer ${HC_PAT}` },
     })
     const json = await res.json()

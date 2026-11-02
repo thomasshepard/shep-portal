@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronLeft, X, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
-import { CHICKENS_BASE_ID } from '../lib/airtable'
+import { CHICKENS_BASE_ID, airtableFetch } from '../lib/airtable'
 import { getSpecies, phaseName as speciesPhaseName, targetsForDay as speciesTargets, SPECIES } from '../lib/incubation'
 import toast from 'react-hot-toast'
 
@@ -510,7 +510,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     if (newRoosterDesc.trim()) fields['Color/Description'] = newRoosterDesc.trim()
     if (newRoosterNotes.trim()) fields['Notes'] = newRoosterNotes.trim()
     try {
-      const res = await fetch(`${BASE_URL}/${ROOSTERS_TABLE}`, {
+      const res = await airtableFetch(`${BASE_URL}/${ROOSTERS_TABLE}`, {
         method: 'POST', headers: hdrs(),
         body: JSON.stringify({ records: [{ fields }], typecast: true }),
       })
@@ -578,7 +578,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     Object.keys(fields).forEach(k => { if (fields[k] === null) delete fields[k] })
 
     try {
-      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
+      const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
         headers: hdrs(),
         body: JSON.stringify({ fields, typecast: true }),
@@ -615,7 +615,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
       : { 'Day 14 Developing': devNum, 'Day 14 Removed': Math.max(0, prevTotal - devNum), ...(notes.trim() && { 'Day 14 Notes': notes.trim() }) }
 
     try {
-      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
+      const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
         headers: hdrs(),
         body: JSON.stringify({ fields, typecast: true }),
@@ -638,7 +638,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
   async function handleAddEntry(newEntry) {
     const updatedLog = [newEntry, ...logEntries]
     try {
-      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
+      const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
         headers: hdrs(),
         body: JSON.stringify({ fields: { 'Incubation Log': JSON.stringify(updatedLog) }, typecast: true }),
@@ -659,7 +659,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     setDeletingLogId(entryId)
     const updatedLog = logEntries.filter(e => e.id !== entryId)
     try {
-      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
+      const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
         headers: hdrs(),
         body: JSON.stringify({ fields: { 'Incubation Log': JSON.stringify(updatedLog) }, typecast: true }),
@@ -681,7 +681,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
   async function handleDelete() {
     setDeleting(true)
     try {
-      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
+      const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${PAT}` },
       })

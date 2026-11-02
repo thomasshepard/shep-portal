@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js'
 import { notify } from './notifications.js'
+import { airtableFetch } from './airtable.js'
 
 // ── Bulk-assignment debounce (Step 8h) ───────────────────────────────────────
 // Buffers assignment notifications keyed by (actorId:recipientId) for 5 seconds.
@@ -73,7 +74,7 @@ function headers() {
 }
 
 async function apiRequest(method, url, body) {
-  const res = await fetch(url, {
+  const res = await airtableFetch(url, {
     method,
     headers: headers(),
     ...(body != null ? { body: JSON.stringify(body) } : {}),
@@ -95,7 +96,7 @@ export async function fetchTasks(userId) {
 
   do {
     const url = offset ? `${base}&offset=${offset}` : base
-    const res = await fetch(url, { headers: headers() })
+    const res = await airtableFetch(url, { headers: headers() })
     if (!res.ok) {
       const err = await res.text()
       console.error('[fetchTasks] error:', res.status, err)

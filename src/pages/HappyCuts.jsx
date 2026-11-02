@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { notify, getAdminUserIds } from '../lib/notifications'
 import { supabase } from '../lib/supabase'
 import { callClaude } from '../lib/aiProxy'
+import { airtableFetch } from '../lib/airtable'
 import {
   Leaf, MapPin, ChevronLeft, ChevronRight, ChevronDown, X, Plus,
   CheckCircle, Calendar, DollarSign, Users, BarChart2, Loader2, BookOpen, TreePine,
@@ -102,15 +103,15 @@ function safeNum(val, fallback = null) {
 }
 
 async function atGet(table, query = '') {
-  const r = await fetch(`${AT_BASE}/${table}${query}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+  const r = await airtableFetch(`${AT_BASE}/${table}${query}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
   return r.json()
 }
 async function atPost(table, body) {
-  const r = await fetch(`${AT_BASE}/${table}`, { method: 'POST', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const r = await airtableFetch(`${AT_BASE}/${table}`, { method: 'POST', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   return r.json()
 }
 async function atPatch(table, id, fields) {
-  const r = await fetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields, typecast: true }) })
+  const r = await airtableFetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields, typecast: true }) })
   return r.json()
 }
 // Bookkeeping dual-write — best-effort, never fatal. Airtable (above) is the
@@ -615,7 +616,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
     console.warn('[Invoice] Contact mismatch — re-fetching correct contact for mow', mow.id, 'expected:', mowContactId, 'got:', contact?.id)
     ;(async () => {
       try {
-        const res = await fetch(
+        const res = await airtableFetch(
           `${AT_BASE}/${CONTACTS_TABLE}/${mowContactId}?returnFieldsByFieldId=true`,
           { headers: { Authorization: `Bearer ${HC_PAT}` } }
         )
@@ -1234,7 +1235,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         url: `data:${file.type};base64,${base64}`,
         filename: file.name || `photo-${Date.now()}.jpg`,
       }
-      const res = await fetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
+      const res = await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { [SF.photos]: [...existing, newAttachment] }, typecast: true }),
@@ -2009,7 +2010,7 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
     setLocalGroups(prev => ({ ...prev, [date]: reordered }))
     const updates = reordered.map((mow, i) => ({ id: mow.id, fields: { [SF.sortOrder]: i + 1 } }))
     for (let i = 0; i < updates.length; i += 10) {
-      await fetch(`${AT_BASE}/${SCHEDULE_TABLE}`, {
+      await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ records: updates.slice(i, i + 10), typecast: true }),

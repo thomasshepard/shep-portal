@@ -7,8 +7,6 @@ import {
 import { createRecord, PM_BASE_ID } from '../lib/airtable'
 import { callClaude, callRentcast } from '../lib/aiProxy'
 
-const AT_PAT = import.meta.env.VITE_AIRTABLE_PAT
-
 const PROPERTY_TYPES = ['Single Family', 'Condo', 'Townhouse', 'Apartment', 'Multi Family']
 const RENTCAST_TYPE_MAP = {
   'Single Family': 'Single Family',

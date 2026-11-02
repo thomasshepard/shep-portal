@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Plus, X, ScrollText, ShieldAlert } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { airtableFetch } from '../../lib/airtable'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
@@ -41,7 +42,7 @@ async function fetchCrewFromAirtable() {
   do {
     let qs = '?returnFieldsByFieldId=true'
     if (offset) qs += `&offset=${offset}`
-    const r = await fetch(`${AT_BASE}/${CREW_TABLE}${qs}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+    const r = await airtableFetch(`${AT_BASE}/${CREW_TABLE}${qs}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
     const json = await r.json()
     if (!json.records) throw new Error(json.error?.message || 'Airtable fetch failed')
     records.push(...json.records)
