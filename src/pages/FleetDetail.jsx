@@ -8,7 +8,7 @@ import {
 import { fetchAllRecords, createRecord, updateRecord, deleteRecord, fmtCurrency, fmtDate } from '../lib/airtable'
 import {
   FLEET_BASE_ID, EQUIPMENT_TABLE, COST_TABLE, COST_CATEGORIES, VENDOR_PRESETS, STATUS_BADGE, STATUS_DOT,
-  uploadFleetPhoto, uploadFleetDocument, parsePhotos, parseDocuments, daysSince, STALE_DAYS,
+  uploadFleetPhoto, uploadFleetDocument, getFleetDocumentUrl, parsePhotos, parseDocuments, daysSince, STALE_DAYS,
   MAINT_TABLE, MAINT_CATEGORIES, MAINT_PRIORITIES, MAINT_INTERVAL_TYPES,
   MAINT_CATEGORY_BADGE, MAINT_PRIORITY_BADGE, computeNextDueDate, maintenanceUrgency, todayISO,
   computeMarkDoneFields, isMoneyPit,
@@ -163,6 +163,19 @@ export default function FleetDetail() {
     if (res.error) return toast.error('Saved the file but failed to attach it: ' + res.error)
     toast.success('Document added')
     load()
+  }
+
+  async function openDocument(doc) {
+    // Open the tab first so the browser treats it as a click, then point it at the signed link.
+    const win = window.open('', '_blank')
+    if (win) win.opener = null
+    const url = await getFleetDocumentUrl(doc)
+    if (!url) {
+      win?.close()
+      return toast.error('Could not open that document')
+    }
+    if (win) win.location.href = url
+    else window.location.href = url
   }
 
   async function removeDocument(target) {
@@ -434,9 +447,9 @@ export default function FleetDetail() {
             <div className="space-y-1.5">
               {documents.map(d => (
                 <div key={d.url} className="flex items-center justify-between gap-2 border border-gray-200 rounded-lg px-3 py-2">
-                  <a href={d.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:text-blue-800 truncate flex-1 min-w-0">
+                  <button type="button" onClick={() => openDocument(d)} className="text-sm text-blue-600 hover:text-blue-800 truncate flex-1 min-w-0 text-left">
                     {safeStr(d.label) || 'Document'}
-                  </a>
+                  </button>
                   <button onClick={() => removeDocument(d)} className="text-gray-300 hover:text-red-500 flex-shrink-0">
                     <Trash2 size={13} />
                   </button>
