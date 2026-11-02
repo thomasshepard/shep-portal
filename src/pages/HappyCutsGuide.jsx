@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
 import {
   ChevronLeft, ChevronDown,
   CloudSun, AlertCircle, FileText, MapPin, Navigation, GripVertical,
@@ -842,10 +841,7 @@ const CHAPTERS = [
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function HappyCutsGuide() {
   const navigate = useNavigate()
-  const { profile } = useAuth()
   const [openChapter, setOpenChapter] = useState(0)
-
-  if (profile?.role !== 'admin') return null
 
   return (
     <div className="min-h-screen bg-gray-50">
