@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
-import { fetchAllRecords, createRecord, PM_BASE_ID } from '../lib/airtable'
+import { supabase } from '../lib/supabase'
 import { notify, getUserIdsWithPermission } from '../lib/notifications'
 import { Toaster } from 'react-hot-toast'
 import toast from 'react-hot-toast'
+
+// This page is logged-out (no ProtectedRoute), so it can't go through the
+// session-gated airtable-proxy like every other page. It calls the narrow,
+// public maintenance-request function instead — see that function's own
+// comment for why it doesn't take a baseId/table from the client.
+async function invokeMaintenanceRequest(body) {
+  const { data, error } = await supabase.functions.invoke('maintenance-request', { body })
+  if (error) throw new Error(error.message || 'Request failed')
+  if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : data.error.message || 'Request failed')
+  return data
+}
 
 const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 
@@ -20,10 +31,10 @@ export default function MaintenanceSubmit() {
   })
 
   useEffect(() => {
-    fetchAllRecords('Property', { fields: ['Address'] }, PM_BASE_ID).then(res => {
-      setProperties(res.data || [])
-      setLoadingProps(false)
-    })
+    invokeMaintenanceRequest({ action: 'listProperties' })
+      .then(res => setProperties(res.records || []))
+      .catch(() => setProperties([]))
+      .finally(() => setLoadingProps(false))
   }, [])
 
   function set(key, val) { setForm(prev => ({ ...prev, [key]: val })) }
@@ -47,17 +58,15 @@ export default function MaintenanceSubmit() {
     // Remove undefined values
     Object.keys(fields).forEach(k => fields[k] === undefined && delete fields[k])
 
-    const { error, data: createdRecord } = await createRecord('Maintenance Requests', fields, PM_BASE_ID)
-    if (error) {
-      toast.error('Failed to submit request. Please try again.')
-    } else {
+    try {
+      const created = await invokeMaintenanceRequest({ action: 'create', fields })
       setSubmitted(true)
       // Notify all users with property access
       try {
         const propName = properties.find(p => p.id === form.propertyId)?.fields?.Address || 'a property'
         const pmUserIds = await getUserIdsWithPermission('can_view_properties')
         const desc = form.description.slice(0, 80)
-        const recordId = createdRecord?.records?.[0]?.id || ''
+        const recordId = created?.id || ''
         notify({
           userIds:   pmUserIds,
           title:     `${form.name} at ${propName}: "${desc}"`,
@@ -68,6 +77,8 @@ export default function MaintenanceSubmit() {
           sourceKey: `maint:${recordId}`,
         })
       } catch {}
+    } catch {
+      toast.error('Failed to submit request. Please try again.')
     }
     setSubmitting(false)
   }

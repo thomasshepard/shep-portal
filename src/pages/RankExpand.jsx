@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Rocket, Circle, Clock, CheckCircle2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAccessLog } from '../hooks/useAccessLog'
+import { airtableFetch } from '../lib/airtable'
 
 const BASE_ID = 'appp0rx0SV1WuIUrh'
 const TABLE_ID = 'tblvPPFE3IxJA9f8W'
@@ -50,7 +51,7 @@ async function fetchRecords() {
   do {
     const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`)
     if (offset) url.searchParams.set('offset', offset)
-    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
+    const res = await airtableFetch(url.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
     if (!res.ok) throw new Error(`Airtable error: ${res.status}`)
     const data = await res.json()
     all.push(...(data.records || []))
@@ -60,7 +61,7 @@ async function fetchRecords() {
 }
 
 async function patchStatus(recordId, status) {
-  const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
+  const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields: { [F.STATUS]: status }, typecast: true }),

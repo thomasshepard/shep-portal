@@ -2,6 +2,8 @@
 // Field IDs: run scripts/setup-recipes-tables.js (needs schema.bases:write PAT scope)
 // then replace all 'fld...' / 'tbl...' placeholders below.
 
+import { airtableFetch } from './airtable.js'
+
 const BASE_ID = 'appPKrIVr569rWySg'
 const PAT = () => import.meta.env.VITE_AIRTABLE_PAT
 
@@ -53,7 +55,7 @@ function headers() {
 
 export async function fetchRecipes() {
   const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}?sort[0][field]=${RECIPE_FIELDS.NAME}&sort[0][direction]=asc&returnFieldsByFieldId=true`
-  const res = await fetch(url, { headers: headers() })
+  const res = await airtableFetch(url, { headers: headers() })
   if (!res.ok) throw new Error(`fetchRecipes failed: ${res.status}`)
   const data = await res.json()
   return data.records || []
@@ -62,7 +64,7 @@ export async function fetchRecipes() {
 export async function fetchIngredients(recipeId) {
   const formula = encodeURIComponent(`FIND("${recipeId}", ARRAYJOIN({${ING_FIELDS.RECIPE}}))`)
   const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.INGREDIENTS}?filterByFormula=${formula}&sort[0][field]=${ING_FIELDS.DISPLAY_ORDER}&sort[0][direction]=asc&returnFieldsByFieldId=true`
-  const res = await fetch(url, { headers: headers() })
+  const res = await airtableFetch(url, { headers: headers() })
   if (!res.ok) throw new Error(`fetchIngredients failed: ${res.status}`)
   const data = await res.json()
   return data.records || []
@@ -71,7 +73,7 @@ export async function fetchIngredients(recipeId) {
 export async function fetchSteps(recipeId) {
   const formula = encodeURIComponent(`FIND("${recipeId}", ARRAYJOIN({${STEP_FIELDS.RECIPE}}))`)
   const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.STEPS}?filterByFormula=${formula}&sort[0][field]=${STEP_FIELDS.STEP_NUMBER}&sort[0][direction]=asc&returnFieldsByFieldId=true`
-  const res = await fetch(url, { headers: headers() })
+  const res = await airtableFetch(url, { headers: headers() })
   if (!res.ok) throw new Error(`fetchSteps failed: ${res.status}`)
   const data = await res.json()
   return data.records || []
@@ -79,7 +81,7 @@ export async function fetchSteps(recipeId) {
 
 // ingredientsText and instructionsText are pre-formatted plain text strings
 export async function createRecipe(recipeData, ingredientsText, instructionsText) {
-  const recipeRes = await fetch(
+  const recipeRes = await airtableFetch(
     `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}`,
     {
       method: 'POST',
@@ -110,7 +112,7 @@ export async function createRecipe(recipeData, ingredientsText, instructionsText
 }
 
 export async function updateRecipe(recordId, fields) {
-  const res = await fetch(
+  const res = await airtableFetch(
     `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}/${recordId}?returnFieldsByFieldId=true`,
     {
       method: 'PATCH',
@@ -126,7 +128,7 @@ export async function deleteRecipe(recipeId, ingredientIds, stepIds) {
   for (let i = 0; i < ingredientIds.length; i += 10) {
     const chunk = ingredientIds.slice(i, i + 10)
     const params = chunk.map(id => `records[]=${id}`).join('&')
-    await fetch(
+    await airtableFetch(
       `https://api.airtable.com/v0/${BASE_ID}/${TABLES.INGREDIENTS}?${params}`,
       { method: 'DELETE', headers: headers() }
     )
@@ -134,12 +136,12 @@ export async function deleteRecipe(recipeId, ingredientIds, stepIds) {
   for (let i = 0; i < stepIds.length; i += 10) {
     const chunk = stepIds.slice(i, i + 10)
     const params = chunk.map(id => `records[]=${id}`).join('&')
-    await fetch(
+    await airtableFetch(
       `https://api.airtable.com/v0/${BASE_ID}/${TABLES.STEPS}?${params}`,
       { method: 'DELETE', headers: headers() }
     )
   }
-  await fetch(
+  await airtableFetch(
     `https://api.airtable.com/v0/${BASE_ID}/${TABLES.RECIPES}/${recipeId}`,
     { method: 'DELETE', headers: headers() }
   )

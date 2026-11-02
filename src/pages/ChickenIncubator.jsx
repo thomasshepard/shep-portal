@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, X, Check, BookOpen } from 'lucide-react'
 import ChickenBatchDetail from './ChickenBatchDetail'
-import { CHICKENS_BASE_ID } from '../lib/airtable'
+import { CHICKENS_BASE_ID, airtableFetch } from '../lib/airtable'
 import { getSpecies, SPECIES } from '../lib/incubation'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -156,7 +156,7 @@ async function fetchBatches() {
       query.set('sort[0][field]', 'Set Date')
       query.set('sort[0][direction]', 'desc')
       if (offset) query.set('offset', offset)
-      const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}?${query}`, { headers: headers() })
+      const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}?${query}`, { headers: headers() })
       if (!res.ok) { const e = await res.json().catch(() => ({})); return { data: null, error: e?.error?.message || `HTTP ${res.status}` } }
       const json = await res.json()
       records.push(...(json.records || []))
@@ -168,7 +168,7 @@ async function fetchBatches() {
 
 async function createBatch(fields) {
   try {
-    const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}`, {
+    const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}`, {
       method: 'POST', headers: headers(),
       body: JSON.stringify({ fields, typecast: true }),
     })
@@ -180,7 +180,7 @@ async function createBatch(fields) {
 
 async function updateBatch(recordId, fields) {
   try {
-    const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${recordId}`, {
+    const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${recordId}`, {
       method: 'PATCH', headers: headers(),
       body: JSON.stringify({ fields, typecast: true }),
     })
@@ -192,7 +192,7 @@ async function updateBatch(recordId, fields) {
 
 async function deleteBatch(recordId) {
   try {
-    const res = await fetch(`${BASE_URL}/${BATCHES_TABLE}/${recordId}`, {
+    const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${recordId}`, {
       method: 'DELETE', headers: headers(),
     })
     const json = await res.json()
@@ -356,7 +356,7 @@ function NewBatchSheet({ onClose, onSaved, roosters, onRoosterAdded }) {
     if (newRoosterDesc.trim()) fields['Color/Description'] = newRoosterDesc.trim()
     if (newRoosterNotes.trim()) fields['Notes'] = newRoosterNotes.trim()
     try {
-      const res = await fetch(`${BASE_URL}/${ROOSTERS_TABLE}`, {
+      const res = await airtableFetch(`${BASE_URL}/${ROOSTERS_TABLE}`, {
         method: 'POST', headers: headers(),
         body: JSON.stringify({ records: [{ fields }], typecast: true }),
       })
@@ -788,7 +788,7 @@ export default function ChickenIncubator() {
 
   async function loadRoosters() {
     try {
-      const res = await fetch(`${BASE_URL}/${ROOSTERS_TABLE}?sort[0][field]=Name&sort[0][direction]=asc`, { headers: headers() })
+      const res = await airtableFetch(`${BASE_URL}/${ROOSTERS_TABLE}?sort[0][field]=Name&sort[0][direction]=asc`, { headers: headers() })
       const json = await res.json()
       setRoosters(json.records || [])
     } catch { /* non-critical */ }

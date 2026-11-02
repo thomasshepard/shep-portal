@@ -9,6 +9,7 @@ import BacklogModal from '../components/BacklogModal'
 import BacklogComposer from '../components/BacklogComposer'
 import BacklogGroomView from '../components/BacklogGroomView'
 import BacklogFilterBar from '../components/BacklogFilterBar'
+import { airtableFetch } from '../lib/airtable'
 
 const BASE_ID = 'appp0qWrN24f8wqho'
 const TABLE_ID = 'tblHUG1CGxrirONPB'
@@ -28,7 +29,7 @@ async function fetchRecords() {
     url.searchParams.set('sort[0][direction]', 'asc')
     if (offset) url.searchParams.set('offset', offset)
 
-    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
+    const res = await airtableFetch(url.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
     if (!res.ok) throw new Error(`Airtable error: ${res.status}`)
 
     const data = await res.json()
@@ -52,7 +53,7 @@ async function saveRecord(record) {
     'Build Prompt': record.buildPrompt,
     Kind: 'Build',
   }
-  const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
+  const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ records: [{ fields }], typecast: true }),
@@ -72,7 +73,7 @@ async function updateRecord(recordId, record) {
     'Build Prompt': record.buildPrompt,
     Kind: 'Build',
   }
-  const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
+  const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields, typecast: true }),
@@ -90,7 +91,7 @@ async function createInboxRecords(featureNames) {
 
   const created = []
   for (const chunk of chunks) {
-    const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
+    const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ records: chunk, typecast: true }),
@@ -104,7 +105,7 @@ async function createInboxRecords(featureNames) {
 
 // Generic field patch, used by the groom Accept/Discard flow.
 async function patchFields(recordId, fields) {
-  const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
+  const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields, typecast: true }),

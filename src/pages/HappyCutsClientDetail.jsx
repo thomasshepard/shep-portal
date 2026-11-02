@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { supabase } from '../lib/supabase'
+import { airtableFetch } from '../lib/airtable'
 import {
   ChevronLeft, ChevronRight, MapPin, X, Loader2, CheckCircle, Trash2,
   Plus, DollarSign, TreePine,
@@ -142,15 +143,15 @@ function safeNum(val, fallback = null) {
 }
 
 async function atGet(table, query = '') {
-  const r = await fetch(`${AT_BASE}/${table}${query}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+  const r = await airtableFetch(`${AT_BASE}/${table}${query}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
   return r.json()
 }
 async function atPost(table, body) {
-  const r = await fetch(`${AT_BASE}/${table}`, { method: 'POST', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const r = await airtableFetch(`${AT_BASE}/${table}`, { method: 'POST', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   return r.json()
 }
 async function atPatch(table, id, fields) {
-  const r = await fetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields, typecast: true }) })
+  const r = await airtableFetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields, typecast: true }) })
   return r.json()
 }
 async function fetchAll(table) {
@@ -385,7 +386,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
     console.warn('[Invoice] Contact mismatch — re-fetching correct contact for mow', mow.id, 'expected:', mowContactId, 'got:', contact?.id)
     ;(async () => {
       try {
-        const res = await fetch(
+        const res = await airtableFetch(
           `${AT_BASE}/${CONTACTS_TABLE}/${mowContactId}?returnFieldsByFieldId=true`,
           { headers: { Authorization: `Bearer ${HC_PAT}` } }
         )
@@ -881,7 +882,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         url: `data:${file.type};base64,${base64}`,
         filename: file.name || `photo-${Date.now()}.jpg`,
       }
-      const res = await fetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
+      const res = await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { [SF.photos]: [...existing, newAttachment] }, typecast: true }),
@@ -1997,7 +1998,7 @@ export default function HappyCutsClientDetail() {
     setLoading(true)
     try {
       // Fetch contact directly
-      const r = await fetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}?returnFieldsByFieldId=true`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+      const r = await airtableFetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}?returnFieldsByFieldId=true`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
       const contactData = await r.json()
       if (!contactData.fields) throw new Error('Contact not found')
       const parsed = parseContact(contactData)
@@ -2057,7 +2058,7 @@ export default function HappyCutsClientDetail() {
   async function handleDelete() {
     if (!window.confirm(`Delete ${contact?.name}? This cannot be undone.`)) return
     try {
-      await fetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}`, {
+      await airtableFetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${HC_PAT}` },
       })

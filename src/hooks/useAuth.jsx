@@ -31,6 +31,7 @@ export function AuthProvider({ children }) {
         setProfile(null)
         setRecoveryMode(false)
         setLoading(false)
+        window.__shepIsAdmin = false
       }
     })
 
@@ -45,6 +46,9 @@ export function AuthProvider({ children }) {
       .single()
     setProfile(data)
     setLoading(false)
+    // Phase 7 airtable-proxy rollout gate (lib/airtable.js) — those are plain
+    // utility files with no React context, so this is how they learn the role.
+    window.__shepIsAdmin = data?.role === 'admin'
   }
 
   const isAdmin = profile?.role === 'admin'

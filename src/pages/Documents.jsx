@@ -4,7 +4,7 @@ import {
   Search, X, FileText, AlertTriangle, ExternalLink, Calendar,
   ChevronLeft, ChevronRight, ChevronDown, Plus, Upload, Share2, Flag, Mail, Link2,
 } from 'lucide-react'
-import { fetchAllRecords, updateRecord, DOCS_BASE_ID, PM_BASE_ID, LLC_BASE_ID } from '../lib/airtable'
+import { fetchAllRecords, updateRecord, DOCS_BASE_ID, PM_BASE_ID, LLC_BASE_ID, airtableFetch } from '../lib/airtable'
 import { classifyDocument, extractLinkedFields, fuzzyMatchName, ensureLinkFields, LINK_KIND_LABELS } from '../lib/documentLinks'
 import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -133,7 +133,7 @@ const STANDARD_KEYS = new Set([
 async function ensureDocsFields() {
   if (!PAT || !DOCS_BASE_ID) return
   try {
-    const res = await fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`, {
+    const res = await airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`, {
       headers: { Authorization: `Bearer ${PAT}` },
     })
     if (!res.ok) return
@@ -143,7 +143,7 @@ async function ensureDocsFields() {
     const fieldNames = new Set((table.fields || []).map(f => f.name))
     const creates = []
     if (!fieldNames.has('Duplicate')) {
-      creates.push(fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
+      creates.push(airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'Duplicate', type: 'checkbox', options: { icon: 'check', color: 'redBright' } }),

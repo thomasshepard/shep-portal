@@ -10,7 +10,7 @@
 // Pattern follows lib/incubation.js / lib/fleet.js (shared per-feature config)
 // and reuses the AI-call shape already established in Finances.jsx's fetchNudges.
 
-import { DOCS_BASE_ID } from './airtable'
+import { DOCS_BASE_ID, airtableFetch } from './airtable'
 import { callClaude } from './aiProxy'
 
 const PAT = import.meta.env.VITE_AIRTABLE_PAT
@@ -241,7 +241,7 @@ const LINK_FIELD_DEFS = [
 export async function ensureLinkFields() {
   if (!PAT || !DOCS_BASE_ID) return
   try {
-    const res = await fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`, {
+    const res = await airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`, {
       headers: { Authorization: `Bearer ${PAT}` },
     })
     if (!res.ok) return
@@ -251,7 +251,7 @@ export async function ensureLinkFields() {
     const fieldNames = new Set((table.fields || []).map(f => f.name))
     const creates = LINK_FIELD_DEFS
       .filter(def => !fieldNames.has(def.name))
-      .map(def => fetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
+      .map(def => airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: def.name, type: def.type, ...(def.options ? { options: def.options } : {}) }),

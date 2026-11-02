@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { ShoppingBag, ThumbsDown, RotateCcw, X, ExternalLink, Search } from 'lucide-react'
-import { fetchAllRecords, updateRecord, FBM_BASE_ID } from '../lib/airtable'
+import { fetchAllRecords, updateRecord, FBM_BASE_ID, airtableFetch } from '../lib/airtable'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
@@ -107,7 +107,7 @@ async function fetchMatchPage(formula, offset) {
   query.set('sort[0][direction]', 'desc')
   if (formula) query.set('filterByFormula', formula)
   if (offset) query.set('offset', offset)
-  const res = await fetch(
+  const res = await airtableFetch(
     `https://api.airtable.com/v0/${FBM_BASE_ID}/${encodeURIComponent('matches')}?${query}`,
     { headers: { Authorization: `Bearer ${PAT}` } }
   )
