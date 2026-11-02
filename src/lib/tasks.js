@@ -1,41 +1,5 @@
 import { supabase } from './supabase.js'
-import { notify } from './notifications.js'
 import { airtableFetch } from './airtable.js'
-
-// ── Bulk-assignment debounce (Step 8h) ───────────────────────────────────────
-// Buffers assignment notifications keyed by (actorId:recipientId) for 5 seconds.
-// If multiple tasks are assigned to the same user within the window, one collapsed
-// notification fires instead of N individual ones.
-const _assignBuffer = new Map()
-
-function notifyAssignmentDebounced({ actorId, actorName, recipientId, taskTitle, dueDate, recordId }) {
-  const key = `${actorId}:${recipientId}`
-  const existing = _assignBuffer.get(key)
-  if (existing) {
-    clearTimeout(existing.timer)
-    existing.count++
-    existing.items.push({ taskTitle, dueDate, recordId })
-  } else {
-    _assignBuffer.set(key, { count: 1, items: [{ taskTitle, dueDate, recordId }], actorName, recipientId })
-  }
-  const entry = _assignBuffer.get(key)
-  entry.timer = setTimeout(() => {
-    _assignBuffer.delete(key)
-    const { count, items } = entry
-    const single = count === 1
-    notify({
-      userIds:   recipientId,
-      title:     single
-        ? `${actorName} assigned: "${items[0].taskTitle}"${items[0].dueDate ? ` · Due ${items[0].dueDate}` : ''}`
-        : `${actorName} assigned ${count} tasks to you`,
-      module:    'system',
-      category:  'tasks',
-      severity:  'action_needed',
-      actionUrl: single ? `/#/tasks/${items[0].recordId}` : '/#/tasks',
-      sourceKey: single ? `task_assigned:${items[0].recordId}` : `task_assigned_bulk:${recipientId}:${Date.now()}`,
-    }).catch(() => {})
-  }, 5000)
-}
 
 // Tasks Airtable helper — all CRUD for the Tasks module.
 // Field IDs discovered by running scripts/setup-tasks-table.js against appYVLCn1NVLevdry.
@@ -52,6 +16,8 @@ const FIELDS = {
   USER_ID:      'fldTjTxZgy6RZHyaf',
   COMPLETED_AT: 'fldK1GKFJSdceoVtT',
   TODAY:        'fldXBwD9Pf7yDgkAR',
+  WORKSTREAM:   'fldCon6trmhdKj3nr',   // Workstreams record ID (text; cross-base links aren't possible)
+  WS_ORDER:     'fldOVL4rRmjGvj8qw',   // position in the workstream checklist
 }
 
 export { FIELDS }
@@ -111,20 +77,43 @@ export async function fetchTasks(userId) {
   return records.filter(r => safeStr(r.fields[FIELDS.USER_ID]).trim() === userId.trim())
 }
 
+/** Fetch every task attached to a workstream (any user), keyed by field ID. */
+export async function fetchWorkstreamTasks() {
+  const formula = encodeURIComponent(`{Workstream}!=''`)
+  const base = `${BASE_URL}?${FIELD_ID_PARAM}&filterByFormula=${formula}`
+  const records = []
+  let offset
+  do {
+    const res = await airtableFetch(offset ? `${base}&offset=${offset}` : base, { headers: headers() })
+    if (!res.ok) throw new Error(`Airtable fetch failed: ${res.status}`)
+    const json = await res.json()
+    records.push(...(json.records || []))
+    offset = json.offset
+  } while (offset)
+  return records
+}
+
+/** Create many tasks at once (Airtable caps a request at 10 records). Order is preserved. */
+export async function createTasksBatch(fieldsList) {
+  const out = []
+  for (let i = 0; i < fieldsList.length; i += 10) {
+    const chunk = fieldsList.slice(i, i + 10).map(fields => ({ fields }))
+    // On create, returnFieldsByFieldId is a body option (the query param is ignored for POST).
+    const json = await apiRequest('POST', BASE_URL, { records: chunk, typecast: true, returnFieldsByFieldId: true })
+    out.push(...(json.records || []))
+  }
+  return out
+}
+
 /** Fetch a single task record by Airtable record ID. */
 export async function fetchTaskById(recordId) {
   const json = await apiRequest('GET', withFieldIds(`${BASE_URL}/${recordId}`))
   return json
 }
 
-/**
- * Create a new task record.
- * If assignedBy is provided and differs from userId, the assignee receives
- * an assignment notification.
- */
+/** Create a new task record. (Assignment notifications were removed — they were too noisy.) */
 export async function createTask({
   title, module, dueDate, body, notes, sourceKey, actionUrl, userId,
-  assignedBy, assignedByName,
 }) {
   const fields = {
     [FIELDS.TITLE]:   title,
@@ -141,19 +130,6 @@ export async function createTask({
   const json = await apiRequest('POST', withFieldIds(BASE_URL), { records: [{ fields }], typecast: true })
   const record = json.records[0]
 
-  // Notify the assignee when an admin creates the task on their behalf.
-  // Uses debounced helper so bulk-assigning 5 tasks fires one notification, not five.
-  if (assignedBy && userId && userId !== assignedBy) {
-    notifyAssignmentDebounced({
-      actorId:    assignedBy,
-      actorName:  assignedByName || 'A teammate',
-      recipientId: userId,
-      taskTitle:  title,
-      dueDate,
-      recordId:   record.id,
-    })
-  }
-
   return record
 }
 
@@ -167,23 +143,9 @@ export async function deleteTask(recordId) {
   return apiRequest('DELETE', `${BASE_URL}/${recordId}`)
 }
 
-/**
- * Reassign a task to a new user and notify them.
- * Does not notify if reassigning to self.
- */
-export async function reassignTask(recordId, newUserId, byUserId, byName, title) {
+/** Reassign a task to a new user. No notification is sent. */
+export async function reassignTask(recordId, newUserId) {
   await updateTask(recordId, { [FIELDS.USER_ID]: newUserId })
-  if (newUserId && newUserId !== byUserId) {
-    notify({
-      userIds:   newUserId,
-      title:     `${byName || 'Admin'} assigned: "${title}"`,
-      module:    'system',
-      category:  'tasks',
-      severity:  'action_needed',
-      actionUrl: `/#/tasks/${recordId}`,
-      sourceKey: `task_assigned:${recordId}`,
-    }).catch(() => {})
-  }
 }
 
 /** Dismiss any unread notification linked to this sourceKey (fire-and-forget). */

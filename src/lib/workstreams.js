@@ -1,4 +1,5 @@
 import { PM_BASE_ID } from './airtable'
+import { FIELDS as TF } from './tasks'
 
 // Workstreams live in the Property Management base (they link to Rental Units).
 export const WS_BASE_ID = PM_BASE_ID
@@ -122,6 +123,61 @@ export function formValuesToPayload(v) {
     [WF.sessionUrl]: clearable(v.sessionUrl?.trim()),
   }
 }
+
+// ── Checklist tasks ──────────────────────────────────────────────────────────
+// Tasks live in the portal Tasks base (see lib/tasks.js); a task belongs to a
+// workstream when its Workstream text field holds that workstream's record ID.
+
+export const TURNOVER_TEMPLATE = [
+  'Walkthrough + punch list (photos of any damage)',
+  'Repairs from the punch list',
+  'Touch-up paint (walls, trim, doors)',
+  'Deep clean (appliances, floors, bathrooms)',
+  'Re-key locks',
+  'Smoke/CO detectors + HVAC filter',
+  'Utilities switched to our name for the vacancy',
+  'Final walkthrough',
+  'Take listing photos',
+]
+
+export function turnoverSourceKey(wsId, index) {
+  return `ws-turnover:${wsId}:${index}`
+}
+
+export function taskView(t) {
+  const f = t.fields || {}
+  return {
+    id: t.id,
+    title: f[TF.TITLE] || 'Untitled task',
+    done: f[TF.STATUS] === 'Done',
+    due: f[TF.DUE_DATE] || '',
+    notes: f[TF.NOTES] || '',
+    order: typeof f[TF.WS_ORDER] === 'number' ? f[TF.WS_ORDER] : Number.MAX_SAFE_INTEGER,
+    sourceKey: f[TF.SOURCE_KEY] || '',
+    workstream: f[TF.WORKSTREAM] || '',
+    created: t.createdTime || '',
+  }
+}
+
+export function byOrder(a, b) {
+  return a.order - b.order || (a.created < b.created ? -1 : a.created > b.created ? 1 : 0)
+}
+
+/** { [workstreamId]: { open: TaskView[], done: TaskView[], total } } */
+export function groupTasks(records) {
+  const map = {}
+  for (const r of records) {
+    const v = taskView(r)
+    if (!v.workstream) continue
+    const g = (map[v.workstream] ||= { open: [], done: [], total: 0 })
+    ;(v.done ? g.done : g.open).push(v)
+    g.total++
+  }
+  for (const g of Object.values(map)) { g.open.sort(byOrder); g.done.sort(byOrder) }
+  return map
+}
+
+export const EMPTY_TASKS = { open: [], done: [], total: 0 }
 
 /** Only allow http(s) links out to a new tab. */
 export function safeUrl(u) {

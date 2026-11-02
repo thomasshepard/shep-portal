@@ -10,8 +10,6 @@ const PM_BASE       = 'appeuX9BHNgVXxdYZ'
 const HC_BASE       = 'appZOi48qf8SzyOml'
 const CHICKENS_BASE = 'apppIiT84EaowkQVR'
 const LLC_BASE      = 'appvX3Tu1OGxOZB8k'
-const TASKS_BASE    = 'appYVLCn1NVLevdry'
-const TASKS_TABLE   = 'tbl3Di18kSLwEj1vN'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin':  '*',
@@ -86,12 +84,6 @@ async function buildSnapshot(_userId: string) {
   const llcOverdue  = llcs.filter(l => { const d = l.fields['Annual Report Due Date']; return d && daysBetween(today, d) < 0 }).length
   const llcDueSoon  = llcs.filter(l => { const d = l.fields['Annual Report Due Date']; if (!d) return false; const n = daysBetween(today, d); return n >= 0 && n <= 30 }).length
 
-  const tasks = await safeList(TASKS_BASE, TASKS_TABLE, {
-    filterByFormula: "AND({Status}!='Done', {Due Date}!='')", returnFieldsByFieldId: 'true',
-  })
-  const tasksDueToday = tasks.filter(t => t.fields['fldLxGJRu1XeK4z7t'] === today).length
-  const tasksOverdue  = tasks.filter(t => { const d = t.fields['fldLxGJRu1XeK4z7t']; return d && d < today }).length
-
   return {
     properties: {
       open_maintenance: maintTickets.length,
@@ -102,7 +94,8 @@ async function buildSnapshot(_userId: string) {
     happy_cuts: { mows_today: todaysMowsCount, revenue_booked_today_cents: Math.round(todaysMowsRevenue * 100) },
     chickens: { active_flocks: activeFlocks },
     llcs: { overdue: llcOverdue, due_30d: llcDueSoon },
-    tasks: { open: tasks.length, due_today: tasksDueToday, overdue: tasksOverdue },
+    // Tasks were dropped from the digest (too noisy); kept in the snapshot shape so older rows still read.
+    tasks: { open: 0, due_today: 0, overdue: 0 },
   }
 }
 
@@ -118,7 +111,6 @@ function computeDeltas(today: any, yesterday: any | null): string[] {
     fmtDelta('Open maintenance',   yesterday.properties.open_maintenance,    today.properties.open_maintenance),
     fmtDelta('Overdue rent count', yesterday.properties.overdue_rent.count,  today.properties.overdue_rent.count),
     fmtDelta('Expired leases',     yesterday.properties.leases_expired,      today.properties.leases_expired),
-    fmtDelta('Tasks overdue',      yesterday.tasks.overdue,                  today.tasks.overdue),
     fmtDelta('LLCs overdue',       yesterday.llcs.overdue,                   today.llcs.overdue),
   ]
   return candidates.filter(Boolean) as string[]
@@ -160,8 +152,6 @@ function renderDigest(snap: any, deltas: string[], actionableTasks: any[]) {
     const f = snap.chickens.active_flocks[0]
     lines.push(`• Chickens: ${f.name} day ${f.day}, ${f.count} birds`)
   }
-  if (snap.tasks.due_today > 0)  lines.push(`• ${snap.tasks.due_today} tasks due today`)
-  if (snap.tasks.overdue > 0)    lines.push(`• ${snap.tasks.overdue} tasks overdue`)
 
   if (deltas.length) {
     lines.push('', '**Yesterday → today**')
@@ -239,15 +229,8 @@ Deno.serve(async (req) => {
         .maybeSingle()
       const deltas = computeDeltas(snap, ySnapRow?.snapshot ?? null)
 
-      // Fetch this user's top actionable tasks (due today + overdue, oldest first, max 5)
-      const tasksRes = await fetch(
-        `https://api.airtable.com/v0/${TASKS_BASE}/${TASKS_TABLE}?` +
-        `filterByFormula=${encodeURIComponent(`AND({User ID}='${p.user_id}', {Status}!='Done', {Due Date}<='${today}')`)}` +
-        `&sort[0][field]=Due Date&sort[0][direction]=asc&maxRecords=5&returnFieldsByFieldId=true`,
-        { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } }
-      )
-      const taskJson      = await tasksRes.json()
-      const actionableTasks = taskJson.records ?? []
+      // Tasks are intentionally not part of the digest anymore (no task lines, no quick-action buttons).
+      const actionableTasks: any[] = []
 
       const text       = renderDigest(snap, deltas, actionableTasks)
       const components = buildButtons(actionableTasks)
