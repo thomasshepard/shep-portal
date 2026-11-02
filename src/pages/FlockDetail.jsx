@@ -605,10 +605,11 @@ export default function FlockDetail() {
             <div className="px-5 pt-5 pb-2">
               <ResponsiveContainer width="100%" height={180}>
                 <AreaChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="week" tickFormatter={w => `W${w}`} tick={{ fontSize: 11, fill: '#9ca3af' }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} unit=" qt" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--c-gray-100))" />
+                  <XAxis dataKey="week" tickFormatter={w => `W${w}`} tick={{ fontSize: 11, fill: 'rgb(var(--c-gray-400))' }} />
+                  <YAxis tick={{ fontSize: 11, fill: 'rgb(var(--c-gray-400))' }} unit=" qt" />
                   <Tooltip
+                    contentStyle={{ background: 'rgb(var(--surface))', color: 'rgb(var(--c-gray-900))', border: '1px solid rgb(var(--c-gray-200))', fontSize: 12, borderRadius: 8 }}
                     formatter={v => [`${v} qts`, 'Quarts/Day']}
                     labelFormatter={w => `Week ${w}`}
                   />
@@ -624,7 +625,7 @@ export default function FlockDetail() {
                     type="monotone"
                     dataKey="quarts"
                     stroke="#3b82f6"
-                    fill="#eff6ff"
+                    fill="rgb(var(--c-blue-50))"
                     strokeWidth={2}
                     dot={{ r: 3, fill: '#3b82f6' }}
                   />
