@@ -9,12 +9,12 @@ import {
   fetchAllRecords, createRecord, updateRecord, CHICKENS_BASE_ID, fmtDate, fmtCurrency,
 } from '../lib/airtable'
 import { useAuth } from '../hooks/useAuth'
+import { supabase } from '../lib/supabase'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
-const FEEDING_FN_URL    = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/generate-feeding-schedule` : ''
+const FEEDING_FN_URL   = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/generate-feeding-schedule` : ''
 
 const CORNISH_CROSS_SCHEDULE = [
   { week: 1, oz_per_bird: 0.66 },
@@ -68,8 +68,13 @@ const STATUS_COLORS = {
 }
 
 async function fireWebhook(payload) {
-  if (!FEEDING_FN_URL || !SUPABASE_ANON_KEY) {
-    toast.error('Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY')
+  if (!FEEDING_FN_URL) {
+    toast.error('Supabase not configured — set VITE_SUPABASE_URL')
+    return
+  }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) {
+    toast.error('Please sign in again')
     return
   }
   try {
@@ -77,7 +82,7 @@ async function fireWebhook(payload) {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Authorization': `Bearer ${session.access_token}`,
       },
       body: JSON.stringify(payload),
     })

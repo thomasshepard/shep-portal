@@ -1,6 +1,7 @@
 // Replaces the n8n "Create Chicken Feeding Schedule" workflow.
 //
 // Receives the same payload shape as the n8n webhook so the frontend swap is one URL change.
+import { guardCaller } from '../_shared/cronAuth.ts'
 // All math is deterministic — no LLM, no retries-because-the-model-rounded-wrong.
 
 const AIRTABLE_PAT  = Deno.env.get('AIRTABLE_PAT') ?? ''
@@ -68,6 +69,9 @@ Deno.serve(async (req) => {
       status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
+
+  const denied = await guardCaller(req, 'generate-feeding-schedule', { session: { flag: 'can_view_chickens' }, corsHeaders })
+  if (denied) return denied
 
   try {
     const body = await parseBody(req)

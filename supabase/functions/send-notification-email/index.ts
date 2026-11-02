@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { guardCaller } from '../_shared/cronAuth.ts'
 
 const RESEND_API_KEY   = Deno.env.get('RESEND_API_KEY')!
 const SUPABASE_URL     = Deno.env.get('SUPABASE_URL')!
@@ -7,6 +8,9 @@ const FROM_EMAIL       = 'onboarding@resend.dev'
 const PORTAL_URL       = 'https://thomasshepard.github.io/shep-portal/'
 
 Deno.serve(async (req) => {
+  const denied = await guardCaller(req, 'send-notification-email', { cron: true })
+  if (denied) return denied
+
   try {
     const payload      = await req.json()
     const notification = payload.record

@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { guardCaller } from '../_shared/cronAuth.ts'
 
 const RESEND_API_KEY   = Deno.env.get('RESEND_API_KEY')!
 const SUPABASE_URL     = Deno.env.get('SUPABASE_URL')!
@@ -117,6 +118,9 @@ function buildLookaheadHtml(opts: {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  const denied = await guardCaller(req, 'send-weekly-lookahead', { cron: true, session: 'admin', corsHeaders })
+  if (denied) return denied
 
   try {
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)

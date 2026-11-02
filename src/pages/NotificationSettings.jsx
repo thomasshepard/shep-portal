@@ -6,8 +6,6 @@ import { usePushSubscription } from '../hooks/usePushSubscription'
 import { supabase } from '../lib/supabase'
 import { notify } from '../lib/notifications'
 
-const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 const MODULE_LABELS = {
   tasks:      { label: 'Tasks',      color: 'bg-slate-100 text-slate-700'   },
@@ -122,12 +120,8 @@ export default function NotificationSettings() {
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 2500) }
 
   async function handleTestDigest() {
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-daily-digest`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-    })
-    if (res.ok) showToast('Digest sent to Discord')
+    const { error } = await supabase.functions.invoke('send-daily-digest')
+    if (!error) showToast('Digest sent to Discord')
     else showToast('Digest send failed — check logs')
   }
 

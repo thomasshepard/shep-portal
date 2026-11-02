@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { guardCaller } from '../_shared/cronAuth.ts'
 
 const SB_URL       = Deno.env.get('SUPABASE_URL')!
 const SVC_KEY      = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -200,6 +201,9 @@ function buildButtons(actionableTasks: any[]) {
 // ── Main handler ──────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
+  const denied = await guardCaller(req, 'send-daily-digest', { cron: true, session: 'admin', corsHeaders })
+  if (denied) return denied
 
   try {
     const sb = createClient(SB_URL, SVC_KEY)

@@ -1,3 +1,5 @@
+import { guardCaller } from '../_shared/cronAuth.ts'
+
 const AIRTABLE_PAT    = Deno.env.get('AIRTABLE_PAT')!
 const GOOGLE_MAPS_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY')!
 const FBM_BASE_ID     = 'app25IsSJz9bATUV7'
@@ -93,7 +95,10 @@ async function scoreAddress(sellerAddress: string, hubs: Hub[]): Promise<ScoredR
   return best
 }
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  const denied = await guardCaller(req, 'score-fbm-distances', { cron: true, session: 'admin' })
+  if (denied) return denied
+
   try {
     // 1. Load active hubs
     const hubRecords = await fetchAll('hubs', { filterByFormula: '{Active} = TRUE()' })
