@@ -14,6 +14,14 @@
     <meta name="apple-mobile-web-app-title" content="Shep Portal" />
     <link rel="apple-touch-icon" href="/shep-portal/icons/icon-192.png" />
     <title>Shep Portal</title>
+    <script>
+      try {
+        var t = localStorage.getItem('shep_theme');
+        if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   </head>

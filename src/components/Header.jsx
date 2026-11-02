@@ -1,9 +1,15 @@
-import { Menu } from 'lucide-react'
+import { Menu, Sun, Moon, Monitor } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
+import { useTheme } from '../hooks/useTheme'
 import NotificationBell from './NotificationBell'
+
+const THEME_ICON = { system: Monitor, light: Sun, dark: Moon }
+const NEXT_THEME = { system: 'light', light: 'dark', dark: 'system' }
 
 export default function Header({ onMenuToggle }) {
   const { session, profile } = useAuth()
+  const [theme, setTheme] = useTheme()
+  const ThemeIcon = THEME_ICON[theme]
   const displayName = profile?.full_name || session?.user?.email || ''
 
   return (
@@ -18,6 +24,14 @@ export default function Header({ onMenuToggle }) {
       <div className="lg:flex-1" />
 
       <div className="flex items-center gap-3">
+        <button
+          onClick={() => setTheme(NEXT_THEME[theme])}
+          title={`Theme: ${theme} (click to change)`}
+          aria-label={`Theme: ${theme}`}
+          className="p-2 rounded-md text-gray-500 hover:bg-gray-100"
+        >
+          <ThemeIcon size={18} />
+        </button>
         <NotificationBell />
         <div className="text-right">
           <p className="text-sm font-medium text-gray-800">{profile?.full_name || 'User'}</p>

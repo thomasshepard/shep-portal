@@ -3154,11 +3154,11 @@ function RevenueTab({ onOpenJob }) {
               </p>
               <ResponsiveContainer width="100%" height={140}>
                 <BarChart data={weeklyData} margin={{ top: 4, right: 4, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="2 2" stroke="#e5e7eb" />
-                  <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={40} tickFormatter={v => `$${v}`} />
+                  <CartesianGrid strokeDasharray="2 2" stroke="rgb(var(--c-gray-200))" />
+                  <XAxis dataKey="week" tick={{ fontSize: 11, fill: 'rgb(var(--c-gray-500))' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: 'rgb(var(--c-gray-500))' }} axisLine={false} tickLine={false} width={40} tickFormatter={v => `$${v}`} />
                   <Tooltip
-                    contentStyle={{ background: 'white', border: '1px solid #e5e7eb', fontSize: 12, borderRadius: 8 }}
+                    contentStyle={{ background: 'rgb(var(--surface))', color: 'rgb(var(--c-gray-900))', border: '1px solid rgb(var(--c-gray-200))', fontSize: 12, borderRadius: 8 }}
                     formatter={v => [fmtCurrency(v), 'Revenue']}
                   />
                   <Bar dataKey="revenue" fill="#16a34a" radius={[4, 4, 0, 0]} />
