@@ -155,6 +155,8 @@ export function taskView(t) {
     order: typeof f[TF.WS_ORDER] === 'number' ? f[TF.WS_ORDER] : Number.MAX_SAFE_INTEGER,
     sourceKey: f[TF.SOURCE_KEY] || '',
     workstream: f[TF.WORKSTREAM] || '',
+    addedBy: f[TF.ADDED_BY] || '',
+    completedBy: f[TF.COMPLETED_BY] || '',
     created: t.createdTime || '',
   }
 }

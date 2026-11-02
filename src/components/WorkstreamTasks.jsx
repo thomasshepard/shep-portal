@@ -91,6 +91,8 @@ function TaskEditor({ task, onSave, onDelete, onClose }) {
 
 function TaskRow({ task, actions }) {
   const [editing, setEditing] = useState(false)
+  // Names typed on a shared link: who finished it, else who added it.
+  const byline = task.done && task.completedBy ? `done by ${task.completedBy}` : task.addedBy ? `added by ${task.addedBy}` : ''
   return (
     <li className="border-b border-gray-100 last:border-0">
       <div className="flex items-start gap-1">
@@ -102,10 +104,11 @@ function TaskRow({ task, actions }) {
           className="flex-1 min-w-0 text-left py-2.5 min-h-[44px]"
         >
           <span className={`block text-[15px] leading-snug ${task.done ? 'line-through text-gray-400' : 'text-gray-900'}`}>{task.title}</span>
-          {(task.due || task.notes) && (
+          {(task.due || task.notes || byline) && (
             <span className="mt-1 flex flex-wrap items-center gap-1.5">
               <DueChip due={task.due} done={task.done} />
               {task.notes && <StickyNote size={13} className="text-gray-400" aria-label="Has notes" />}
+              {byline && <span className="text-xs text-gray-400">{byline}</span>}
             </span>
           )}
         </button>
