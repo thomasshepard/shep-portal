@@ -61,7 +61,7 @@ Properties has a parallel visibility layer for the same reason: non-admin users 
 - RLS is strict; admin access uses the `is_admin()` helper function defined in `supabase-setup.sql`
 - Run `supabase-setup.sql` once in the Supabase SQL editor to create all tables, RLS policies, and triggers
 
-**Airtable** — all business data. Client wrapper is `src/lib/airtable.js` (fetchAllRecords, createRecord, updateRecord, deleteRecord + formatters).
+**Airtable** — all business data. Client wrapper is `src/lib/airtable.js` (fetchAllRecords, createRecord, updateRecord, deleteRecord + formatters), which routes every request through the session-gated `airtable-proxy` edge function (`airtableFetch()`) — no client-bundled PAT.
 
 | Base | Env Var | Purpose |
 |------|---------|---------|
@@ -82,7 +82,7 @@ Properties has a parallel visibility layer for the same reason: non-admin users 
 
 **Supabase Edge Function `generate-feeding-schedule`** — generates and recalculates chicken feeding schedules. Called from `Chickens.jsx` (new flock) and `FlockDetail.jsx` (mortality-driven recalculate or manual trigger). Accepts the same JSON payload shape: `{ action, flockId, flockName, hatchDate, birdCount/newBirdCount, targetWeeks, breed, version, schedule[] }`. All math is deterministic (oz × birds ÷ 12) — no LLM involved. Requires `AIRTABLE_PAT` as a Supabase secret.
 
-**Claude API** — used client-side (`VITE_ANTHROPIC_API_KEY`) for AI summaries in Documents and HappyCuts pages.
+**Claude API** — used via the `ai-proxy` edge function (session-gated; see `src/lib/aiProxy.js`) for AI summaries in Documents and HappyCuts pages. No client-bundled key.
 
 ### Pages & Routes
 
@@ -225,7 +225,7 @@ Cron scheduling for the digest/lookahead/reminder functions lives in Supabase `p
 - `src/components/Layout.jsx` — Shell with sidebar + header + route-change logging
 - `src/components/Sidebar.jsx` — Navigation sidebar (permission-gated items)
 - `src/components/DocumentActionCenter.jsx` — AI-classified document action items
-- `src/components/RentalAnalyzer.jsx` — Rent estimate panel on `PropertyDetail.jsx`, calls the Rentcast API (`VITE_RENTCAST_API_KEY`)
+- `src/components/RentalAnalyzer.jsx` — Rent estimate panel on `PropertyDetail.jsx`, calls the Rentcast API via the `ai-proxy` edge function. No client-bundled key.
 - `src/components/BacklogKanban.jsx` / `BacklogModal.jsx` — Kanban board + create/edit modal for `Backlog.jsx`
 - `src/pages/PropertyListings.jsx` — Hardcoded index of active for-sale listings; edit the `properties` array by hand to add/remove a listing
 - `src/pages/CrossvilleDashboard.jsx` — Manually-updated market dashboard for the 73 Benwick Dr listing (`dashboardData` object at the top — "UPDATE WEEKLY" per its own comment); no Airtable/Supabase source
@@ -304,20 +304,19 @@ All `VITE_*` vars must also exist as GitHub repo secrets and be wired into `depl
 ```
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
-VITE_AIRTABLE_PAT                    # Single PAT covering all Airtable bases
 VITE_AIRTABLE_BASE_ID                # Shepard Owned Companies (LLCs)
 VITE_AIRTABLE_PM_BASE_ID             # Property Management
 VITE_AIRTABLE_CHICKENS_BASE_ID       # Chicken Farm
 VITE_AIRTABLE_DOCS_BASE_ID           # Desk Paper Cleanup
 VITE_AIRTABLE_HAPPY_CUTS_BASE_ID     # Happy Cuts lawn care
-VITE_ANTHROPIC_API_KEY               # Claude API for AI summaries
 VITE_GOOGLE_CLIENT_ID                # Google OAuth (if applicable)
 VITE_TASKS_BASE_ID=appYVLCn1NVLevdry # Shep Portal – Tasks Airtable base
-VITE_RENTCAST_API_KEY               # Rentcast API key for rental market estimates (used by RentalAnalyzer)
 VITE_AIRTABLE_BTC_BASE_ID           # Bitcoin Transactions Airtable base (appLvE5luEWaM5dWe)
 VITE_VAPID_PUBLIC_KEY               # Web Push public key, used by usePushSubscription.jsx
 VITE_RECIPES_BASE_ID                # Wired into deploy.yml as a build secret but NOT read in src — recipes.js hardcodes its base ID instead. Dead var; safe to leave or remove.
 ```
+
+> `VITE_AIRTABLE_PAT`, `VITE_ANTHROPIC_API_KEY`, and `VITE_RENTCAST_API_KEY` were removed from the client bundle in the Phase 8 key-rotation cutover (2026-11-02, part of the SEC-1/SEC-2/SEC-3 remediation). The real values now live server-side only: `AIRTABLE_PAT` as a Supabase secret (used by `airtable-proxy`, `maintenance-request`, and the ~14 other edge functions that read Airtable), and Anthropic/Rentcast keys as Supabase secrets consumed by `ai-proxy`. Do not reintroduce any of these three as `VITE_*` vars.
 
 > Note: `FBM_BASE_ID` (FB Marketplace Monitor, `app25IsSJz9bATUV7`) and the Recipes/Backlog base IDs are hardcoded in source (`src/lib/airtable.js`, `src/lib/recipes.js`, `src/pages/Backlog.jsx`), not read from `.env`.
 

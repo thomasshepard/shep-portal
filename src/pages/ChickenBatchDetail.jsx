@@ -8,7 +8,6 @@ import toast from 'react-hot-toast'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PAT = import.meta.env.VITE_AIRTABLE_PAT
 const BATCHES_TABLE = 'tblKomWeHkj9aGFDC'
 const ROOSTERS_TABLE = 'tblhZ5Mzr2aNh02Fm'
 const BASE_URL = `https://api.airtable.com/v0/${CHICKENS_BASE_ID}`
@@ -21,11 +20,6 @@ const EGG_COLORS = [
   { key: 'whiteEggs',     field: 'White Eggs',       label: 'White',      emoji: '⬜', formKey: 'white'     },
   { key: 'tanPinkEggs',   field: 'Tan/Pink Eggs',    label: 'Tan/Pink',   emoji: '🩷', formKey: 'tan'       },
 ]
-
-const hdrs = () => ({
-  Authorization: `Bearer ${PAT}`,
-  'Content-Type': 'application/json',
-})
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -511,7 +505,7 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     if (newRoosterNotes.trim()) fields['Notes'] = newRoosterNotes.trim()
     try {
       const res = await airtableFetch(`${BASE_URL}/${ROOSTERS_TABLE}`, {
-        method: 'POST', headers: hdrs(),
+        method: 'POST',
         body: JSON.stringify({ records: [{ fields }], typecast: true }),
       })
       const json = await res.json()
@@ -580,7 +574,6 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     try {
       const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
-        headers: hdrs(),
         body: JSON.stringify({ fields, typecast: true }),
       })
       const json = await res.json()
@@ -617,7 +610,6 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     try {
       const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
-        headers: hdrs(),
         body: JSON.stringify({ fields, typecast: true }),
       })
       const json = await res.json()
@@ -640,7 +632,6 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     try {
       const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
-        headers: hdrs(),
         body: JSON.stringify({ fields: { 'Incubation Log': JSON.stringify(updatedLog) }, typecast: true }),
       })
       const json = await res.json()
@@ -661,7 +652,6 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     try {
       const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'PATCH',
-        headers: hdrs(),
         body: JSON.stringify({ fields: { 'Incubation Log': JSON.stringify(updatedLog) }, typecast: true }),
       })
       const json = await res.json()
@@ -683,7 +673,6 @@ export default function ChickenBatchDetail({ batch, roosters = [], onRoosterAdde
     try {
       const res = await airtableFetch(`${BASE_URL}/${BATCHES_TABLE}/${batch.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${PAT}` },
       })
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error?.message || `HTTP ${res.status}`) }
       toast.success('Batch deleted')

@@ -10,7 +10,6 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HC_BASE = import.meta.env.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID
-const HC_PAT  = import.meta.env.VITE_AIRTABLE_PAT
 const AT_BASE = `https://api.airtable.com/v0/${HC_BASE}`
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
@@ -143,15 +142,15 @@ function safeNum(val, fallback = null) {
 }
 
 async function atGet(table, query = '') {
-  const r = await airtableFetch(`${AT_BASE}/${table}${query}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+  const r = await airtableFetch(`${AT_BASE}/${table}${query}`)
   return r.json()
 }
 async function atPost(table, body) {
-  const r = await airtableFetch(`${AT_BASE}/${table}`, { method: 'POST', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const r = await airtableFetch(`${AT_BASE}/${table}`, { method: 'POST', body: JSON.stringify(body) })
   return r.json()
 }
 async function atPatch(table, id, fields) {
-  const r = await airtableFetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields, typecast: true }) })
+  const r = await airtableFetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', body: JSON.stringify({ fields, typecast: true }) })
   return r.json()
 }
 async function fetchAll(table) {
@@ -387,8 +386,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
     ;(async () => {
       try {
         const res = await airtableFetch(
-          `${AT_BASE}/${CONTACTS_TABLE}/${mowContactId}?returnFieldsByFieldId=true`,
-          { headers: { Authorization: `Bearer ${HC_PAT}` } }
+          `${AT_BASE}/${CONTACTS_TABLE}/${mowContactId}?returnFieldsByFieldId=true`
         )
         const data = await res.json()
         if (data.id) {
@@ -884,7 +882,6 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
       }
       const res = await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: { [SF.photos]: [...existing, newAttachment] }, typecast: true }),
       })
       if (!res.ok) throw new Error('Upload failed')
@@ -1998,7 +1995,7 @@ export default function HappyCutsClientDetail() {
     setLoading(true)
     try {
       // Fetch contact directly
-      const r = await airtableFetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}?returnFieldsByFieldId=true`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+      const r = await airtableFetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}?returnFieldsByFieldId=true`)
       const contactData = await r.json()
       if (!contactData.fields) throw new Error('Contact not found')
       const parsed = parseContact(contactData)
@@ -2060,7 +2057,6 @@ export default function HappyCutsClientDetail() {
     try {
       await airtableFetch(`${AT_BASE}/${CONTACTS_TABLE}/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${HC_PAT}` },
       })
       toast.success('Contact deleted')
       navigate('/happy-cuts', { state: { tab: 'clients' } })

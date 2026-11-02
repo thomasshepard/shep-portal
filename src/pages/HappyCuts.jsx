@@ -15,7 +15,6 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const HC_BASE = import.meta.env.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID
-const HC_PAT  = import.meta.env.VITE_AIRTABLE_PAT
 const AT_BASE = `https://api.airtable.com/v0/${HC_BASE}`
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
@@ -103,15 +102,15 @@ function safeNum(val, fallback = null) {
 }
 
 async function atGet(table, query = '') {
-  const r = await airtableFetch(`${AT_BASE}/${table}${query}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+  const r = await airtableFetch(`${AT_BASE}/${table}${query}`)
   return r.json()
 }
 async function atPost(table, body) {
-  const r = await airtableFetch(`${AT_BASE}/${table}`, { method: 'POST', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const r = await airtableFetch(`${AT_BASE}/${table}`, { method: 'POST', body: JSON.stringify(body) })
   return r.json()
 }
 async function atPatch(table, id, fields) {
-  const r = await airtableFetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ fields, typecast: true }) })
+  const r = await airtableFetch(`${AT_BASE}/${table}/${id}`, { method: 'PATCH', body: JSON.stringify({ fields, typecast: true }) })
   return r.json()
 }
 // Bookkeeping dual-write — best-effort, never fatal. Airtable (above) is the
@@ -617,8 +616,7 @@ function InvoiceModal({ mow, contact: initialContact, onClose, onConfirm }) {
     ;(async () => {
       try {
         const res = await airtableFetch(
-          `${AT_BASE}/${CONTACTS_TABLE}/${mowContactId}?returnFieldsByFieldId=true`,
-          { headers: { Authorization: `Bearer ${HC_PAT}` } }
+          `${AT_BASE}/${CONTACTS_TABLE}/${mowContactId}?returnFieldsByFieldId=true`
         )
         const data = await res.json()
         if (data.id) {
@@ -1236,8 +1234,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         filename: file.name || `photo-${Date.now()}.jpg`,
       }
       const res = await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
+        method: 'PATCH',
         body: JSON.stringify({ fields: { [SF.photos]: [...existing, newAttachment] }, typecast: true }),
       })
       if (!res.ok) throw new Error('Upload failed')
@@ -2011,8 +2008,7 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
     const updates = reordered.map((mow, i) => ({ id: mow.id, fields: { [SF.sortOrder]: i + 1 } }))
     for (let i = 0; i < updates.length; i += 10) {
       await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${HC_PAT}`, 'Content-Type': 'application/json' },
+        method: 'PATCH',
         body: JSON.stringify({ records: updates.slice(i, i + 10), typecast: true }),
       })
     }

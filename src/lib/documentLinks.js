@@ -13,8 +13,6 @@
 import { DOCS_BASE_ID, airtableFetch } from './airtable'
 import { callClaude } from './aiProxy'
 
-const PAT = import.meta.env.VITE_AIRTABLE_PAT
-
 // ── Closed lists ─────────────────────────────────────────────────────────
 // Fixed singleSelect choice lists on the target tables (confirmed against live
 // Airtable schema + existing local constants in Insurance.jsx/ComplianceForm.jsx).
@@ -239,11 +237,9 @@ const LINK_FIELD_DEFS = [
 ]
 
 export async function ensureLinkFields() {
-  if (!PAT || !DOCS_BASE_ID) return
+  if (!DOCS_BASE_ID) return
   try {
-    const res = await airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`, {
-      headers: { Authorization: `Bearer ${PAT}` },
-    })
+    const res = await airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`)
     if (!res.ok) return
     const json = await res.json()
     const table = (json.tables || []).find(t => t.name === 'Documents')
@@ -253,7 +249,6 @@ export async function ensureLinkFields() {
       .filter(def => !fieldNames.has(def.name))
       .map(def => airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: def.name, type: def.type, ...(def.options ? { options: def.options } : {}) }),
       }))
     if (creates.length > 0) await Promise.all(creates)

@@ -5,7 +5,6 @@ import { fetchAllRecords, updateRecord, FBM_BASE_ID, airtableFetch } from '../li
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
-const PAT = import.meta.env.VITE_AIRTABLE_PAT
 const PAGE_SIZE = 24
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -108,8 +107,7 @@ async function fetchMatchPage(formula, offset) {
   if (formula) query.set('filterByFormula', formula)
   if (offset) query.set('offset', offset)
   const res = await airtableFetch(
-    `https://api.airtable.com/v0/${FBM_BASE_ID}/${encodeURIComponent('matches')}?${query}`,
-    { headers: { Authorization: `Bearer ${PAT}` } }
+    `https://api.airtable.com/v0/${FBM_BASE_ID}/${encodeURIComponent('matches')}?${query}`
   )
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

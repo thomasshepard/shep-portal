@@ -18,7 +18,6 @@ const arr = (v) => Array.isArray(v) ? v : []
 
 // ── Happy Cuts constants ──────────────────────────────────────────────────────
 const HC_BASE = import.meta.env.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID
-const HC_PAT  = import.meta.env.VITE_AIRTABLE_PAT
 const SCHEDULE_TABLE = 'tbli7OArESf2SHL10'
 const SF = {
   clientName: 'fldjSJ0x5rJ3S0FYm',
@@ -83,7 +82,7 @@ function formatBatchName(name) {
 // ever needs the current month forward, so there's no reason to pull the whole
 // mow history on every load.
 async function fetchHCSchedule(sinceISO) {
-  if (!HC_BASE || !HC_PAT) return []
+  if (!HC_BASE) return []
   const HC_URL = `https://api.airtable.com/v0/${HC_BASE}`
   const formula = sinceISO
     ? `OR(IS_SAME({${SF.date}}, "${sinceISO}", 'day'), IS_AFTER({${SF.date}}, "${sinceISO}"))`
@@ -93,9 +92,7 @@ async function fetchHCSchedule(sinceISO) {
     let qs = '?returnFieldsByFieldId=true'
     if (formula) qs += `&filterByFormula=${encodeURIComponent(formula)}`
     if (offset) qs += `&offset=${offset}`
-    const res = await airtableFetch(`${HC_URL}/${SCHEDULE_TABLE}${qs}`, {
-      headers: { Authorization: `Bearer ${HC_PAT}` },
-    })
+    const res = await airtableFetch(`${HC_URL}/${SCHEDULE_TABLE}${qs}`)
     const json = await res.json()
     if (!json.records) break
     records.push(...json.records)

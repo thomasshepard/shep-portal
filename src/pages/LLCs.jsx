@@ -62,7 +62,7 @@ export default function LLCs() {
       <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-8 text-center">
         <AlertTriangle size={32} className="mx-auto text-yellow-500 mb-3" />
         <p className="font-medium text-yellow-800">Airtable is not configured.</p>
-        <p className="text-sm text-yellow-700 mt-1">Add <code>VITE_AIRTABLE_PAT</code> and <code>VITE_AIRTABLE_BASE_ID</code> to your <code>.env</code> file.</p>
+        <p className="text-sm text-yellow-700 mt-1">Add <code>VITE_AIRTABLE_BASE_ID</code> to your <code>.env</code> file.</p>
       </div>
     )
   }

@@ -24,7 +24,6 @@ export { FIELDS }
 
 const BASE_ID  = import.meta.env.VITE_TASKS_BASE_ID
 const TABLE_ID = 'tbl3Di18kSLwEj1vN'
-const PAT      = import.meta.env.VITE_AIRTABLE_PAT
 
 const BASE_URL = `https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`
 const FIELD_ID_PARAM = 'returnFieldsByFieldId=true'
@@ -35,14 +34,9 @@ function withFieldIds(url) {
 
 const DEBUG_FETCH_ALL = false
 
-function headers() {
-  return { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' }
-}
-
 async function apiRequest(method, url, body) {
   const res = await airtableFetch(url, {
     method,
-    headers: headers(),
     ...(body != null ? { body: JSON.stringify(body) } : {}),
   })
   const json = await res.json()
@@ -62,7 +56,7 @@ export async function fetchTasks(userId) {
 
   do {
     const url = offset ? `${base}&offset=${offset}` : base
-    const res = await airtableFetch(url, { headers: headers() })
+    const res = await airtableFetch(url)
     if (!res.ok) {
       const err = await res.text()
       console.error('[fetchTasks] error:', res.status, err)
@@ -84,7 +78,7 @@ export async function fetchWorkstreamTasks() {
   const records = []
   let offset
   do {
-    const res = await airtableFetch(offset ? `${base}&offset=${offset}` : base, { headers: headers() })
+    const res = await airtableFetch(offset ? `${base}&offset=${offset}` : base)
     if (!res.ok) throw new Error(`Airtable fetch failed: ${res.status}`)
     const json = await res.json()
     records.push(...(json.records || []))
