@@ -181,7 +181,10 @@ export default function Dashboard() {
     // Properties + related — run as one parallel group; each sub-result fails independently.
     // Filtered server-side to the subset the dashboard actually reads (open/unpaid/active),
     // so payment and maintenance history that's already resolved never gets pulled down.
-    Promise.allSettled([
+    // Each block below only runs for users who can open that module; the proxy
+    // refuses the rest, and a skipped block must still clear its loading flag.
+    if (!permissions.properties) setPropLoading(false)
+    else Promise.allSettled([
       fetchAllRecords('Property', {}, PM_BASE_ID),
       fetchAllRecords('Rental Units', {}, PM_BASE_ID),
       fetchAllRecords('Lease Agreements', { filterByFormula: `LOWER({Status})!='closed'` }, PM_BASE_ID),
@@ -202,7 +205,8 @@ export default function Dashboard() {
     })
 
     // LLC compliance (uses default Airtable base — Shepard Owned Companies)
-    fetchAllRecords('Compliance Log', { filterByFormula: `{Status}='Pending'` })
+    if (!permissions.llcs) setComplianceLoading(false)
+    else fetchAllRecords('Compliance Log', { filterByFormula: `{Status}='Pending'` })
       .then(res => {
         const data = res.data || []
         setComplianceData(data)
@@ -212,7 +216,8 @@ export default function Dashboard() {
       .finally(() => setComplianceLoading(false))
 
     // Incubator active batches
-    fetchAllRecords(BATCHES_TABLE, { filterByFormula: `{Status}='Active'` }, CHICKENS_BASE_ID)
+    if (!permissions.chickens) setIncubatorLoading(false)
+    else fetchAllRecords(BATCHES_TABLE, { filterByFormula: `{Status}='Active'` }, CHICKENS_BASE_ID)
       .then(res => {
         const data = res.data || []
         setIncubatorData(data)
@@ -222,7 +227,8 @@ export default function Dashboard() {
       .finally(() => setIncubatorLoading(false))
 
     // Happy Cuts schedule — current month forward only (field-ID-based fetch)
-    fetchHCSchedule(monthStartISO)
+    if (!permissions.can_view_happy_cuts) setHcLoading(false)
+    else fetchHCSchedule(monthStartISO)
       .then(records => {
         setHcData(records)
         dashCacheSet('hc', records)
@@ -231,7 +237,8 @@ export default function Dashboard() {
       .finally(() => setHcLoading(false))
 
     // Fleet equipment
-    fetchAllRecords(EQUIPMENT_TABLE, {}, FLEET_BASE_ID)
+    if (!permissions.can_view_fleet) setFleetLoading(false)
+    else fetchAllRecords(EQUIPMENT_TABLE, {}, FLEET_BASE_ID)
       .then(res => {
         const data = res.data || []
         setFleetData(data)
@@ -242,7 +249,7 @@ export default function Dashboard() {
 
     // Fleet maintenance — just for the one due-count line on the Fleet widget.
     // Done/Watch List items never register as overdue/dueSoon, so they're excluded server-side.
-    fetchAllRecords(MAINT_TABLE, { filterByFormula: `{Status}='Active'` }, FLEET_BASE_ID)
+    if (permissions.can_view_fleet) fetchAllRecords(MAINT_TABLE, { filterByFormula: `{Status}='Active'` }, FLEET_BASE_ID)
       .then(res => {
         const data = res.data || []
         setFleetMaintData(data)
@@ -258,6 +265,7 @@ export default function Dashboard() {
         dashCacheSet('activity', data || [])
       })
       .finally(() => setActivityLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- permissions are final once a protected page mounts
   }, [])
 
   // ── Date anchors ──────────────────────────────────────────────────────────
