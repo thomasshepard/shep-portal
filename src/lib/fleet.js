@@ -98,19 +98,19 @@ export function parsePhotos(fields) {
   }
 }
 
-/** Upload a title/registration doc to the fleet-photos bucket (same bucket,
- *  separate folder) — returns its public URL, or null on failure. */
+/** Upload a title/registration doc to the private fleet-documents bucket.
+ *  Returns a "fleet-documents/<path>" reference (not a URL — open it with
+ *  getFleetDocumentUrl), or null on failure. */
 export async function uploadFleetDocument(file) {
   try {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const path = `documents/${Date.now()}_${safeName}`
-    const { data, error } = await supabase.storage.from('fleet-photos').upload(path, file, {
+    const path = `${Date.now()}_${safeName}`
+    const { data, error } = await supabase.storage.from('fleet-documents').upload(path, file, {
       upsert: false,
       contentType: file.type,
     })
     if (error) throw error
-    const { data: urlData } = supabase.storage.from('fleet-photos').getPublicUrl(data.path)
-    return urlData.publicUrl
+    return `fleet-documents/${data.path}`
   } catch (e) {
     console.error('Document upload failed:', e)
     toast.error('Document upload failed: ' + (e?.message || JSON.stringify(e)))
@@ -128,6 +128,18 @@ export function parseDocuments(fields) {
   } catch {
     return []
   }
+}
+
+/** Link for opening a stored document: legacy entries hold a full public URL,
+ *  newer ones a "fleet-documents/<path>" reference that needs a signed link. */
+export async function getFleetDocumentUrl(doc) {
+  const ref = doc?.url
+  if (!ref) return null
+  if (/^https?:\/\//.test(ref)) return ref
+  const { data, error } = await supabase.storage
+    .from('fleet-documents')
+    .createSignedUrl(ref.replace(/^fleet-documents\//, ''), 120)
+  return error ? null : data?.signedUrl || null
 }
 
 export function daysSince(dateStr) {
