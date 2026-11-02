@@ -10,7 +10,6 @@ import { useAuth } from '../hooks/useAuth'
 import LoadingSpinner from '../components/LoadingSpinner'
 import toast from 'react-hot-toast'
 
-const PAT = import.meta.env.VITE_AIRTABLE_PAT
 const DOCS_TABLE_ID = 'tbltkTOMpJHPIUBXN'
 const DRIVE_FOLDER_ID = '1RTkUVNYXnbYjd8gNPBgzgx_N9RWWFNTD'
 const PAGE_SIZE = 25
@@ -131,11 +130,9 @@ const STANDARD_KEYS = new Set([
 
 // Ensure Tags, Shared, Duplicate fields exist; create if missing
 async function ensureDocsFields() {
-  if (!PAT || !DOCS_BASE_ID) return
+  if (!DOCS_BASE_ID) return
   try {
-    const res = await airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`, {
-      headers: { Authorization: `Bearer ${PAT}` },
-    })
+    const res = await airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables`)
     if (!res.ok) return
     const json = await res.json()
     const table = (json.tables || []).find(t => t.name === 'Documents')
@@ -145,7 +142,6 @@ async function ensureDocsFields() {
     if (!fieldNames.has('Duplicate')) {
       creates.push(airtableFetch(`https://api.airtable.com/v0/meta/bases/${DOCS_BASE_ID}/tables/${table.id}/fields`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${PAT}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'Duplicate', type: 'checkbox', options: { icon: 'check', color: 'redBright' } }),
       }))
     }

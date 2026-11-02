@@ -699,7 +699,7 @@ export const TRIAGE_RULES = [
       return cache.get('backlog:decide-research-open', async () => {
         const formula = encodeURIComponent("AND({Kind}='Decide / Research', NOT({Resolved}))")
         const url = `https://api.airtable.com/v0/appp0qWrN24f8wqho/tblHUG1CGxrirONPB?filterByFormula=${formula}`
-        const res = await airtableFetch(url, { headers: { Authorization: `Bearer ${import.meta.env.VITE_AIRTABLE_PAT}` } })
+        const res = await airtableFetch(url)
         if (!res.ok) return []
         const json = await res.json()
         return json.records || []

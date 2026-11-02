@@ -13,7 +13,6 @@ import { airtableFetch } from '../lib/airtable'
 
 const BASE_ID = 'appp0qWrN24f8wqho'
 const TABLE_ID = 'tblHUG1CGxrirONPB'
-const AIRTABLE_PAT = import.meta.env.VITE_AIRTABLE_PAT
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
@@ -29,7 +28,7 @@ async function fetchRecords() {
     url.searchParams.set('sort[0][direction]', 'asc')
     if (offset) url.searchParams.set('offset', offset)
 
-    const res = await airtableFetch(url.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
+    const res = await airtableFetch(url.toString())
     if (!res.ok) throw new Error(`Airtable error: ${res.status}`)
 
     const data = await res.json()
@@ -55,7 +54,6 @@ async function saveRecord(record) {
   }
   const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ records: [{ fields }], typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to create record')
@@ -75,7 +73,6 @@ async function updateRecord(recordId, record) {
   }
   const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields, typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to update record')
@@ -93,7 +90,6 @@ async function createInboxRecords(featureNames) {
   for (const chunk of chunks) {
     const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ records: chunk, typecast: true }),
     })
     if (!res.ok) throw new Error('Failed to create record')
@@ -107,7 +103,6 @@ async function createInboxRecords(featureNames) {
 async function patchFields(recordId, fields) {
   const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields, typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to update record')

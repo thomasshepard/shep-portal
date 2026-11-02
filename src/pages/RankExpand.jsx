@@ -6,7 +6,6 @@ import { airtableFetch } from '../lib/airtable'
 
 const BASE_ID = 'appp0rx0SV1WuIUrh'
 const TABLE_ID = 'tblvPPFE3IxJA9f8W'
-const AIRTABLE_PAT = import.meta.env.VITE_AIRTABLE_PAT
 
 const F = {
   TASK: 'Task',
@@ -51,7 +50,7 @@ async function fetchRecords() {
   do {
     const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`)
     if (offset) url.searchParams.set('offset', offset)
-    const res = await airtableFetch(url.toString(), { headers: { Authorization: `Bearer ${AIRTABLE_PAT}` } })
+    const res = await airtableFetch(url.toString())
     if (!res.ok) throw new Error(`Airtable error: ${res.status}`)
     const data = await res.json()
     all.push(...(data.records || []))
@@ -63,7 +62,6 @@ async function fetchRecords() {
 async function patchStatus(recordId, status) {
   const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields: { [F.STATUS]: status }, typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to update status')

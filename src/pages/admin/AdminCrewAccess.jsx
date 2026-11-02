@@ -11,7 +11,6 @@ import toast from 'react-hot-toast'
 // the Crew Portal site itself never gets it (see design doc §1).
 
 const HC_BASE = import.meta.env.VITE_AIRTABLE_HAPPY_CUTS_BASE_ID
-const HC_PAT = import.meta.env.VITE_AIRTABLE_PAT
 const AT_BASE = `https://api.airtable.com/v0/${HC_BASE}`
 const CREW_TABLE = 'tblDqfsBT67Erlwwu'
 
@@ -36,13 +35,13 @@ function safeStr(val, fallback = '') {
 }
 
 async function fetchCrewFromAirtable() {
-  if (!HC_BASE || !HC_PAT) return []
+  if (!HC_BASE) return []
   const records = []
   let offset = null
   do {
     let qs = '?returnFieldsByFieldId=true'
     if (offset) qs += `&offset=${offset}`
-    const r = await airtableFetch(`${AT_BASE}/${CREW_TABLE}${qs}`, { headers: { Authorization: `Bearer ${HC_PAT}` } })
+    const r = await airtableFetch(`${AT_BASE}/${CREW_TABLE}${qs}`)
     const json = await r.json()
     if (!json.records) throw new Error(json.error?.message || 'Airtable fetch failed')
     records.push(...json.records)
