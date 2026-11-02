@@ -66,10 +66,11 @@ const DUAL_WRITE_ONLY_ACTIONS = new Set([
 // through the UI) and post a ledger entry. This map is what each action
 // SHOULD require — matching the permission flag the page that actually
 // triggers it is already gated by. Not enforced yet: these are fire-and-forget
-// posts, so a wrong denial would silently drop a real ledger entry. Deno.serve
-// below only logs a mismatch for now; flip DUAL_WRITE_ENFORCE to true once a
-// few days of production logs show no unexpected denials.
-const DUAL_WRITE_ENFORCE = false
+// posts, so a wrong denial would silently drop a real ledger entry. Enforced
+// 2026-11-02 after checking each caller (HappyCuts.jsx, Insurance.jsx,
+// PropertyDetail.jsx) is routed behind the same flag as its map entry. The
+// amount bounds below stay log-only.
+const DUAL_WRITE_ENFORCE = true
 const DUAL_WRITE_PERMISSION_MAP: Record<string, (profile: any, isAdmin: boolean) => boolean> = {
   post_mow_completion:     (p, isAdmin) => isAdmin || p?.can_view_happy_cuts === true,
   post_mow_payment:        (p, isAdmin) => isAdmin || p?.can_view_happy_cuts === true,
@@ -82,8 +83,8 @@ const DUAL_WRITE_PERMISSION_MAP: Record<string, (profile: any, isAdmin: boolean)
 // limit, just enough to flag an obviously wrong amount (typo, bad client
 // math) before it hits the ledger. $0 is valid on purpose: comp/guest mows
 // are a real, zero-dollar case and must never be treated as out of bounds,
-// now or once this starts enforcing. Log-only for the same reason as
-// DUAL_WRITE_ENFORCE above — flip together once the logs are clean.
+// now or once this starts enforcing. Still log-only: unlike the permission
+// map, there is no evidence yet of what a legitimate upper bound is.
 const MOW_AMOUNT_MAX = 2000
 function checkMowAmountBounds(amount: number, action: string, userId: string) {
   if (amount < 0 || amount > MOW_AMOUNT_MAX) {

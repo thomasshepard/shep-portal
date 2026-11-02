@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 import { notify, getAdminUserIds } from '../lib/notifications'
 import { supabase } from '../lib/supabase'
@@ -4482,11 +4481,8 @@ function CrewTab({ crew, schedules, onRefresh }) {
 }
 
 export default function HappyCuts() {
-  const { profile } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-
-  if (profile?.role !== 'admin') return null
 
   const [contacts, setContacts] = useState([])
   const [schedules, setSchedules] = useState([])
