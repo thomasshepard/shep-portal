@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, ChevronDown, AlertTriangle, CalendarClock, ExternalLink, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuth } from '../hooks/useAuth'
+import useWorkstreamTasks from '../hooks/useWorkstreamTasks'
 import { fetchAllRecords, createRecord, updateRecord } from '../lib/airtable'
 import {
   WS_BASE_ID, WS_TABLE, WF, STATUSES, TYPES, OWNERS, TYPE_COLORS, OWNER_COLORS,
-  funnelCounts, checkpointState, fmtCheckpoint, formValuesToPayload, safeUrl,
+  funnelCounts, checkpointState, fmtCheckpoint, formValuesToPayload, safeUrl, EMPTY_TASKS,
 } from '../lib/workstreams'
 import LoadingSpinner from '../components/LoadingSpinner'
 import WorkstreamDrawer from '../components/WorkstreamDrawer'
+import { TaskCheck, ProgressBar } from '../components/WorkstreamTasks'
 
 const COLUMN_STYLE = {
   Active:  { dot: 'bg-green-500',  head: 'text-gray-800',  wrap: 'bg-gray-50 border-gray-200' },
@@ -69,7 +73,34 @@ function LeadFunnel({ fields }) {
   )
 }
 
-function WorkstreamCard({ ws, onOpen, onMove, onDragStart, onDragEnd, dragging }) {
+function TaskPreview({ tasks, onToggleTask }) {
+  if (!tasks.total) return null
+  const shown = tasks.open.slice(0, 3)
+  const more = tasks.open.length - shown.length
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2">
+        <ProgressBar done={tasks.done.length} total={tasks.total} className="flex-1" />
+        <span className="text-xs font-medium text-gray-500 tabular-nums">{tasks.done.length}/{tasks.total}</span>
+      </div>
+      {tasks.open.length === 0 ? (
+        <p className="mt-1.5 text-sm font-medium text-green-700">All tasks done</p>
+      ) : (
+        <ul className="mt-1">
+          {shown.map(t => (
+            <li key={t.id} className="flex items-center gap-1">
+              <TaskCheck done={false} onToggle={() => onToggleTask(t)} label={t.title} />
+              <span className="text-sm text-gray-800 leading-snug py-1.5 line-clamp-2">{t.title}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {more > 0 && <p className="text-xs text-gray-500 pl-9">+{more} more</p>}
+    </div>
+  )
+}
+
+function WorkstreamCard({ ws, tasks, onToggleTask, onOpen, onMove, onDragStart, onDragEnd, dragging }) {
   const f = ws.fields || {}
   const status = f.Status || 'Active'
   const sessionHref = safeUrl(f['Claude Session URL'])
@@ -106,6 +137,8 @@ function WorkstreamCard({ ws, onOpen, onMove, onDragStart, onDragEnd, dragging }
       {f['Next Action'] && (
         <p className="mt-2.5 text-[15px] text-gray-800 leading-snug whitespace-pre-line line-clamp-4">{f['Next Action']}</p>
       )}
+
+      <TaskPreview tasks={tasks} onToggleTask={onToggleTask} />
 
       {f['Waiting On'] && (
         <p className="mt-2 text-xs text-gray-500">
@@ -144,7 +177,7 @@ function WorkstreamCard({ ws, onOpen, onMove, onDragStart, onDragEnd, dragging }
   )
 }
 
-function Column({ status, items, collapsed, onToggle, dragId, onDropCard, onOpen, onMove, setDragId }) {
+function Column({ status, items, tasksFor, onToggleTask, collapsed, onToggle, dragId, onDropCard, onOpen, onMove, setDragId }) {
   const [over, setOver] = useState(false)
   const st = COLUMN_STYLE[status]
   const isDone = status === 'Done'
@@ -175,6 +208,8 @@ function Column({ status, items, collapsed, onToggle, dragId, onDropCard, onOpen
             <WorkstreamCard
               key={ws.id}
               ws={ws}
+              tasks={tasksFor(ws.id)}
+              onToggleTask={onToggleTask}
               onOpen={onOpen}
               onMove={onMove}
               dragging={dragId === ws.id}
@@ -204,6 +239,9 @@ function SummaryChip({ label, value, tone }) {
 }
 
 export default function Workstreams() {
+  const { session } = useAuth()
+  const wt = useWorkstreamTasks(session?.user?.id)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -223,7 +261,33 @@ export default function Workstreams() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load]) // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, [load])
+
+  // Deep link: #/workstreams?ws=<recordId> opens that workstream's drawer.
+  const deepLinkId = searchParams.get('ws')
+  useEffect(() => {
+    if (!deepLinkId || loading) return
+    const rec = records.find(r => r.id === deepLinkId)
+    if (rec) setDrawer({ record: rec })
+    setSearchParams({}, { replace: true })
+  }, [deepLinkId, loading, records, setSearchParams])
+
+  const tasksFor = id => wt.grouped[id] || EMPTY_TASKS
+
+  function toggleFromCard(task) {
+    wt.toggle(task.id, true)
+    toast(t => (
+      <span className="flex items-center gap-3 text-sm">
+        <span className="truncate max-w-[14rem]">Done: {task.title}</span>
+        <button
+          className="font-semibold text-blue-600 min-h-[32px] px-1"
+          onClick={() => { wt.toggle(task.id, false); toast.dismiss(t.id) }}
+        >
+          Undo
+        </button>
+      </span>
+    ), { duration: 4000 })
+  }
 
   const filtered = useMemo(
     () => records.filter(r =>
@@ -379,6 +443,8 @@ export default function Workstreams() {
               items={byStatus[s]}
               collapsed={!!collapsed[s]}
               onToggle={() => setCollapsed(c => ({ ...c, [s]: !c[s] }))}
+              tasksFor={tasksFor}
+              onToggleTask={toggleFromCard}
               dragId={dragId}
               setDragId={setDragId}
               onDropCard={handleDrop}
@@ -396,6 +462,11 @@ export default function Workstreams() {
           saving={saving}
           onSave={handleSave}
           onClose={() => setDrawer(null)}
+          tasks={drawer.record ? tasksFor(drawer.record.id) : EMPTY_TASKS}
+          taskActions={wt}
+          tasksLoading={wt.loading}
+          tasksError={wt.error}
+          onRetryTasks={wt.reload}
         />
       )}
     </div>
