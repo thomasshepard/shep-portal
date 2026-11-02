@@ -3,6 +3,8 @@ import { X, Copy, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { STATUSES, TYPES, OWNERS, workstreamToFormValues, safeUrl } from '../lib/workstreams'
 import WorkstreamTasks from './WorkstreamTasks'
+import WorkstreamShareLinks from './WorkstreamShareLinks'
+import { useAuth } from '../hooks/useAuth'
 
 const inputCls =
   'w-full min-h-[44px] rounded-lg border border-gray-300 px-3 py-2 text-base md:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
@@ -36,6 +38,7 @@ export default function WorkstreamDrawer({
   const [form, setForm] = useState(() => workstreamToFormValues(record?.fields))
   const [error, setError] = useState('')
   const isNew = !record
+  const { session, isAdmin } = useAuth()
   const [tab, setTab] = useState(isNew ? 'details' : 'tasks')
 
   useEffect(() => {
@@ -106,10 +109,19 @@ export default function WorkstreamDrawer({
             <button role="tab" aria-selected={tab === 'details'} className={tabCls(tab === 'details')} onClick={() => setTab('details')}>
               Details
             </button>
+            {isAdmin && (
+              <button role="tab" aria-selected={tab === 'share'} className={tabCls(tab === 'share')} onClick={() => setTab('share')}>
+                Share
+              </button>
+            )}
           </div>
         )}
 
-        {tab === 'tasks' && !isNew ? (
+        {tab === 'share' && !isNew && isAdmin ? (
+          <div className="flex-1 min-h-0">
+            <WorkstreamShareLinks ws={record} userId={session?.user?.id} />
+          </div>
+        ) : tab === 'tasks' && !isNew ? (
           <div className="flex-1 min-h-0">
             <WorkstreamTasks
               ws={record}

@@ -57,6 +57,7 @@ import FleetMaintenance from './pages/FleetMaintenance'
 import LocalAI from './pages/LocalAI'
 import RankExpand from './pages/RankExpand'
 import Workstreams from './pages/Workstreams'
+import WorkstreamShare from './pages/WorkstreamShare'
 
 export default function App() {
   return (
@@ -171,6 +172,7 @@ export default function App() {
             />
           </Route>
           <Route path="maintenance-request" element={<MaintenanceSubmit />} />
+          <Route path="share/:token" element={<WorkstreamShare />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
         </ErrorBoundary>

@@ -18,6 +18,8 @@ const FIELDS = {
   TODAY:        'fldXBwD9Pf7yDgkAR',
   WORKSTREAM:   'fldCon6trmhdKj3nr',   // Workstreams record ID (text; cross-base links aren't possible)
   WS_ORDER:     'fldOVL4rRmjGvj8qw',   // position in the workstream checklist
+  ADDED_BY:     'fldL44oi9SmnGgYKG',   // name typed on a shared workstream link
+  COMPLETED_BY: 'fldCoLBTf1jlGp75w',   // name typed on a shared workstream link
 }
 
 export { FIELDS }
