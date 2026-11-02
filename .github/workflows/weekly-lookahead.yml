@@ -13,5 +13,6 @@ jobs:
         run: |
           curl -f -X POST \
             "https://zhboqhhjijktsanxhwjv.supabase.co/functions/v1/send-weekly-lookahead" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            -H "x-cron-key: ${{ secrets.CRON_SHARED_KEY }}" \
             -H "Content-Type: application/json"

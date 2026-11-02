@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import webpush from 'npm:web-push'
+import { guardCaller } from '../_shared/cronAuth.ts'
 
 const sb = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -87,6 +88,9 @@ async function handleMessageInsert(message: any) {
 }
 
 Deno.serve(async (req) => {
+  const denied = await guardCaller(req, 'send-push-notification', { cron: true })
+  if (denied) return denied
+
   try {
     const payload = await req.json()
 

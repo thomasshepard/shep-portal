@@ -118,7 +118,10 @@ Deno.serve(async (req) => {
       // Fire async — Discord requires response within 3 seconds
       fetch(`${SB_URL}/functions/v1/send-daily-digest`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${SVC_KEY}` },
+        headers: {
+          Authorization: `Bearer ${SVC_KEY}`,
+          'x-cron-key': Deno.env.get('CRON_SHARED_KEY') ?? Deno.env.get('BOOKKEEPING_CRON_KEY') ?? '',
+        },
       }).catch(() => {})
       return new Response(JSON.stringify({
         type: 4,

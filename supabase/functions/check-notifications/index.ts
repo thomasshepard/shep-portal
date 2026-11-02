@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { guardCaller } from '../_shared/cronAuth.ts'
 
 // Airtable base IDs (hardcoded — see CLAUDE.md for base ID notes)
 const CHICKENS_BASE = 'apppIiT84EaowkQVR'
@@ -137,6 +138,9 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
+
+  const denied = await guardCaller(req, 'check-notifications', { cron: true, session: 'admin', corsHeaders })
+  if (denied) return denied
 
   try {
     const supabaseUrl      = Deno.env.get('SUPABASE_URL')!
