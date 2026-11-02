@@ -30,12 +30,13 @@ export function airtableConfigured() {
 }
 
 // ── Phase 7 server-side proxy (SEC-1/KEY-6/API-2) ──────────────────────────
-// Rollout: admin-only for now (window.__shepIsAdmin, set by useAuth.jsx once
-// the profile loads — a lib file has no React context to read it from).
-// Once VA/member testing confirms no regressions, flip this to `true`
-// unconditionally; flipping it back to the admin-only check is the rollback.
+// Rolled out to everyone (admin-only staging verified clean: 653 proxy
+// requests, all 200s, across every module, 2026-11-01). VA/member accounts
+// weren't separately tested before this flip — watch airtable-proxy's logs
+// for errors from non-admin sessions. Rollback is reverting to the
+// window.__shepIsAdmin check this replaced.
 function shouldUseProxy() {
-  return typeof window !== 'undefined' && window.__shepIsAdmin === true
+  return true
 }
 
 function parseAirtableUrl(urlStr) {
