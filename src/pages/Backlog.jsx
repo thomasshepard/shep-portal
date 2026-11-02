@@ -53,7 +53,7 @@ async function saveRecord(record) {
     Kind: 'Build',
   }
   const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
-    method: 'POST',
+    method: 'POST',
     body: JSON.stringify({ records: [{ fields }], typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to create record')
@@ -72,7 +72,7 @@ async function updateRecord(recordId, record) {
     Kind: 'Build',
   }
   const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
-    method: 'PATCH',
+    method: 'PATCH',
     body: JSON.stringify({ fields, typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to update record')
@@ -89,7 +89,7 @@ async function createInboxRecords(featureNames) {
   const created = []
   for (const chunk of chunks) {
     const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}`, {
-      method: 'POST',
+      method: 'POST',
       body: JSON.stringify({ records: chunk, typecast: true }),
     })
     if (!res.ok) throw new Error('Failed to create record')
@@ -102,7 +102,7 @@ async function createInboxRecords(featureNames) {
 // Generic field patch, used by the groom Accept/Discard flow.
 async function patchFields(recordId, fields) {
   const res = await airtableFetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLE_ID}/${recordId}`, {
-    method: 'PATCH',
+    method: 'PATCH',
     body: JSON.stringify({ fields, typecast: true }),
   })
   if (!res.ok) throw new Error('Failed to update record')

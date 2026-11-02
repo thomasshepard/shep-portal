@@ -1234,7 +1234,7 @@ function JobDetail({ mow, contact, crew = [], onBack, onRefresh }) {
         filename: file.name || `photo-${Date.now()}.jpg`,
       }
       const res = await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}/${mow.id}`, {
-        method: 'PATCH',
+        method: 'PATCH',
         body: JSON.stringify({ fields: { [SF.photos]: [...existing, newAttachment] }, typecast: true }),
       })
       if (!res.ok) throw new Error('Upload failed')
@@ -2008,7 +2008,7 @@ function TodayTab({ schedules, contactsById, weather, onOpenJob, onRefresh, nudg
     const updates = reordered.map((mow, i) => ({ id: mow.id, fields: { [SF.sortOrder]: i + 1 } }))
     for (let i = 0; i < updates.length; i += 10) {
       await airtableFetch(`${AT_BASE}/${SCHEDULE_TABLE}`, {
-        method: 'PATCH',
+        method: 'PATCH',
         body: JSON.stringify({ records: updates.slice(i, i + 10), typecast: true }),
       })
     }
