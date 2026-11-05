@@ -64,7 +64,7 @@ function taskRow(t: any, today: string) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  const denied = await guardCaller(req, 'send-task-reminder', { session: 'user', corsHeaders })
+  const denied = await guardCaller(req, 'send-task-reminder', { session: 'admin', corsHeaders })
   if (denied) return denied
 
   try {
