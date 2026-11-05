@@ -15,7 +15,17 @@
 // Schema-modifying "meta" calls (ensureLinkFields/ensureDocsFields creating
 // missing fields) are admin-only regardless of base — more sensitive than a
 // record read/write, and that code already tolerates a failed/skipped call.
+//
+// Record-level rules (_shared/recordFilters.ts): inside an allowed base, Tasks,
+// Documents and owner-scoped Property Management data are narrowed to what the
+// caller's pages already show. They log "record-filter log-only: would ..." until the
+// AIRTABLE_RECORD_FILTER_ENFORCE secret is "true". Call Recordings is admin only,
+// always enforced.
 import { requireUser, AuthError } from '../_shared/auth.ts'
+import {
+  PM_BASE_ID, ruleKind, neededFields, recordAllowed, filterRecords, computePmScope, writeAllowed,
+  type FilterProfile, type PmScope, type RuleKind, type TableRef, type AtRecord,
+} from '../_shared/recordFilters.ts'
 
 const AIRTABLE_PAT = Deno.env.get('AIRTABLE_PAT') ?? ''
 
@@ -115,6 +125,105 @@ function airtableUrl(baseId: string, table: string, recordId?: string, query?: u
   return qs ? `${url}?${qs}` : url
 }
 
+// ── Record-level filtering helpers ───────────────────────────────────────────
+
+const filterEnforced = () => Deno.env.get('AIRTABLE_RECORD_FILTER_ENFORCE') === 'true'
+const atHeaders = () => ({ Authorization: `Bearer ${AIRTABLE_PAT}`, 'Content-Type': 'application/json' })
+const REC_ID = /^rec[A-Za-z0-9]{14}$/
+
+// Rules are keyed by table name; the client sometimes sends a table ID instead.
+const tableNames = new Map<string, { at: number; names: Map<string, string> }>()
+async function resolveTable(baseId: string, table: string): Promise<TableRef> {
+  if (!/^tbl[A-Za-z0-9]{14}$/.test(table)) return { id: '', name: table }
+  let hit = tableNames.get(baseId)
+  if (!hit || Date.now() - hit.at > 600_000) {
+    try {
+      const res = await fetch(`https://api.airtable.com/v0/meta/bases/${baseId}/tables`, { headers: atHeaders() })
+      const data = await res.json()
+      if (Array.isArray(data?.tables)) {
+        hit = { at: Date.now(), names: new Map(data.tables.map((t: any) => [t.id, t.name])) }
+        tableNames.set(baseId, hit)
+      }
+    } catch (e) {
+      console.warn('[airtable-proxy] table name lookup failed:', (e as Error).message)
+    }
+  }
+  return { id: table, name: hit?.names.get(table) ?? '' }
+}
+
+async function fetchAllRecords(baseId: string, table: string, fields: string[]): Promise<AtRecord[]> {
+  const out: AtRecord[] = []
+  let offset: string | undefined
+  do {
+    const p = new URLSearchParams()
+    for (const f of fields) p.append('fields[]', f)
+    if (offset) p.set('offset', offset)
+    const res = await fetch(`https://api.airtable.com/v0/${baseId}/${encodeURIComponent(table)}?${p}`, { headers: atHeaders() })
+    if (!res.ok) throw new Error(`scope fetch ${table} failed (${res.status})`)
+    const d = await res.json()
+    out.push(...(d.records ?? []))
+    offset = d.offset
+  } while (offset)
+  return out
+}
+
+const pmScopes = new Map<string, { at: number; scope: PmScope }>()
+async function getPmScope(profile: FilterProfile): Promise<PmScope> {
+  const key = String(profile.property_owner_filter)
+  const hit = pmScopes.get(key)
+  if (hit && Date.now() - hit.at < 60_000) return hit.scope
+  const [props, units] = await Promise.all([
+    fetchAllRecords(PM_BASE_ID, 'Property', ['Owner']),
+    fetchAllRecords(PM_BASE_ID, 'Rental Units', ['Property']),
+  ])
+  const scope = computePmScope(profile, props, units)
+  pmScopes.set(key, { at: Date.now(), scope })
+  return scope
+}
+
+// Airtable omits empty fields, so a client asking for `fields[]=Name` would leave the
+// rule nothing to evaluate. Add the fields the rule needs to such queries.
+function withNeededFields(query: unknown, kind: RuleKind, t: TableRef): unknown {
+  if (!Array.isArray(query)) return query
+  const has = (re: RegExp) => query.some((p) => Array.isArray(p) && re.test(String(p[0])))
+  if (!has(/^fields(\[.*\])?$/)) return query
+  const byId = query.some((p) => Array.isArray(p) && p[0] === 'returnFieldsByFieldId' && String(p[1]) === 'true')
+  return [...query, ...neededFields(kind, t).map(([name, id]) => ['fields[]', byId ? id : name])]
+}
+
+// Returns why each write would be refused (empty = fine). Looks up the stored
+// record first, so reassigning or editing someone else's record is caught.
+async function checkWrite(
+  kind: RuleKind, profile: FilterProfile, t: TableRef, baseId: string, table: string, method: string,
+  recordId: string | undefined, query: unknown, body: any, pm?: PmScope,
+): Promise<string[]> {
+  const problems: string[] = []
+  const recs: any[] = Array.isArray(body?.records) ? body.records : []
+  const targets: Array<{ id: string; fields?: Record<string, unknown> }> = []
+  if (recordId) targets.push({ id: recordId, fields: body?.fields })
+  for (const r of recs) if (r?.id) targets.push({ id: String(r.id), fields: r.fields })
+  if (Array.isArray(query)) {
+    for (const p of query) {
+      if (Array.isArray(p) && /^records(\[.*\])?$/.test(String(p[0])) && p[1]) targets.push({ id: String(p[1]) })
+    }
+  }
+  for (const tg of targets.slice(0, 25)) {
+    if (!REC_ID.test(tg.id)) { problems.push('invalid record id'); continue }
+    const res = await fetch(`https://api.airtable.com/v0/${baseId}/${encodeURIComponent(table)}/${tg.id}`, { headers: atHeaders() })
+    if (!res.ok) continue // missing record: Airtable will answer the write itself
+    const d = writeAllowed(kind, profile, t, await res.json(), tg.fields, pm)
+    if (!d.ok) problems.push(d.reason ?? 'not allowed')
+  }
+  if (method === 'POST') {
+    const creates = recs.length ? recs.map((r) => r?.fields) : [body?.fields]
+    for (const f of creates.slice(0, 25)) {
+      const d = writeAllowed(kind, profile, t, null, f, pm)
+      if (!d.ok) problems.push(`create: ${d.reason}`)
+    }
+  }
+  return problems
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -171,17 +280,70 @@ Deno.serve(async (req) => {
 
     console.log(`[airtable-proxy] ${user.email} ${method} ${baseId}/${table}`)
 
-    const url = airtableUrl(baseId, table, recordId as string | undefined, query)
+    // ── Record-level rules ──
+    const m = String(method).toUpperCase()
+    const profile = ((await getProfile(callerClient, user.id)) ?? { id: user.id }) as FilterProfile
+    const tref = profile.role === 'admin' ? { id: '', name: table } : await resolveTable(baseId, table)
+    const kind = ruleKind(baseId, tref, profile)
+    const enforce = filterEnforced()
+    const label = `${user.email} ${m} ${baseId}/${tref.name || table} [${kind}]`
+    let pm: PmScope | undefined
+    let upstreamQuery: unknown = query
+
+    if (kind === 'calls') {
+      return json({ error: 'Not authorized' }, 403) // admin only, always enforced
+    }
+    if (kind) {
+      if (kind === 'pm') {
+        try {
+          pm = await getPmScope(profile)
+        } catch (e) {
+          console.error('[airtable-proxy] owner scope failed:', (e as Error).message)
+          if (enforce) return json({ error: 'Not authorized' }, 403)
+        }
+      }
+      if (m === 'GET') {
+        upstreamQuery = withNeededFields(query, kind, tref)
+      } else {
+        let problems: string[]
+        try {
+          problems = await checkWrite(kind, profile, tref, baseId, table, m, recordId as string | undefined, query, body, pm)
+        } catch (e) {
+          console.error('[airtable-proxy] write check failed:', (e as Error).message)
+          problems = enforce ? ['write check unavailable'] : []
+        }
+        if (problems.length) {
+          console.warn(`[airtable-proxy] record-filter ${enforce ? 'DENIED' : 'log-only: would deny'} write ${label}: ${[...new Set(problems)].join('; ')}`)
+          if (enforce) return json({ error: 'Not authorized' }, 403)
+        }
+      }
+    }
+
+    const url = airtableUrl(baseId, table, recordId as string | undefined, upstreamQuery)
     const atRes = await fetch(url, {
-      method: method as string,
-      headers: {
-        Authorization: `Bearer ${AIRTABLE_PAT}`,
-        'Content-Type': 'application/json',
-      },
+      method: m,
+      headers: atHeaders(),
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
 
-    const data = await atRes.json().catch(() => null)
+    let data = await atRes.json().catch(() => null)
+
+    if (kind && m === 'GET' && atRes.ok && data) {
+      if (Array.isArray(data.records)) {
+        const { kept, dropped, unscoped } = filterRecords(kind, profile, tref, data.records, pm)
+        if (dropped.length) {
+          console.warn(`[airtable-proxy] record-filter ${enforce ? 'filtered' : 'log-only: would filter'} ${dropped.length}/${data.records.length} records ${label}`)
+          if (enforce) data = { ...data, records: kept }
+        }
+        if (unscoped) console.log(`[airtable-proxy] record-filter: ${label} has no owner rule yet (returned unfiltered)`)
+      } else if (data.id && data.fields) {
+        const d = recordAllowed(kind, profile, tref, data, pm)
+        if (!d.ok) {
+          console.warn(`[airtable-proxy] record-filter ${enforce ? 'DENIED' : 'log-only: would deny'} read ${label}: ${d.reason}`)
+          if (enforce) return json({ error: { type: 'NOT_FOUND', message: 'Record not found' } }, 404)
+        }
+      }
+    }
     return json(data, atRes.status)
   } catch (err) {
     console.error('[airtable-proxy] Error:', err)
