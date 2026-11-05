@@ -46,6 +46,7 @@ import Backlog from './pages/Backlog'
 import PropertyListings from './pages/PropertyListings.jsx'
 import CrossvilleDashboard from './pages/CrossvilleDashboard.jsx'
 import Bitcoin from './pages/Bitcoin'
+import Calls from './pages/Calls'
 import Finances from './pages/Finances'
 import BankDashboard from './pages/BankDashboard'
 import Bookkeeping from './pages/Bookkeeping'
@@ -115,6 +116,7 @@ export default function App() {
             <Route path="triage/guide" element={<PermRoute permission="can_view_triage"><TriageGuide /></PermRoute>} />
             <Route path="backlog" element={<PermRoute permission="can_view_backlog"><Backlog /></PermRoute>} />
             <Route path="bitcoin" element={<AdminRoute><Bitcoin /></AdminRoute>} />
+            <Route path="calls" element={<AdminRoute><ErrorBoundary><Calls /></ErrorBoundary></AdminRoute>} />
             <Route path="rank-expand" element={<AdminRoute><ErrorBoundary><RankExpand /></ErrorBoundary></AdminRoute>} />
             <Route path="finances" element={<PermRoute permission="can_view_finances"><ErrorBoundary><Finances /></ErrorBoundary></PermRoute>} />
             <Route path="bank-dashboard" element={<PermRoute permission="can_view_bank_dashboard"><ErrorBoundary><BankDashboard /></ErrorBoundary></PermRoute>} />

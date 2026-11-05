@@ -122,6 +122,7 @@ Properties has a parallel visibility layer for the same reason: non-admin users 
 | `/listings` | PropertyListings | ProtectedRoute | Index of properties currently listed for sale |
 | `/listings/benwick` | CrossvilleDashboard | ProtectedRoute | Manually-updated market dashboard for the 73 Benwick Dr listing (hardcoded `dashboardData` object — update weekly) |
 | `/bitcoin` | Bitcoin | AdminRoute | BTC purchase + wallet transfer workflow with edit/delete history |
+| `/calls` | Calls | AdminRoute | Read-only list/search of phone-call recordings (summary, bullets, action items, transcript). Airtable `Call Recordings` table (`tblrdz9zXHptZvrhE`) in the Desk Paper Cleanup base, written by the local watcher in `../Call Transcriber/` (faster-whisper + Ollama), not by the portal |
 | `/finances` | Finances | PermRoute(can_view_finances) | Credit-card statement importer + spending dashboard |
 | `/bank-dashboard` | BankDashboard | PermRoute(can_view_bank_dashboard) | Consolidated Plaid bank balance view across personal + LLC accounts, grouped by owner |
 | `/admin/*` | AdminUsers/Logs/Content | AdminRoute | User mgmt, access logs, content |
