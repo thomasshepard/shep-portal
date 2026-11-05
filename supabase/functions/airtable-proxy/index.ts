@@ -172,11 +172,12 @@ async function getPmScope(profile: FilterProfile): Promise<PmScope> {
   const key = String(profile.property_owner_filter)
   const hit = pmScopes.get(key)
   if (hit && Date.now() - hit.at < 60_000) return hit.scope
-  const [props, units] = await Promise.all([
+  const [props, units, projects] = await Promise.all([
     fetchAllRecords(PM_BASE_ID, 'Property', ['Owner']),
     fetchAllRecords(PM_BASE_ID, 'Rental Units', ['Property']),
+    fetchAllRecords(PM_BASE_ID, 'Project', ['Property']),
   ])
-  const scope = computePmScope(profile, props, units)
+  const scope = computePmScope(profile, props, units, projects)
   pmScopes.set(key, { at: Date.now(), scope })
   return scope
 }
