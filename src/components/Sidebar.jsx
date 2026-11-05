@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
   Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield, UserCog, Wrench, Calculator,
-  ChevronDown, Star, MessageSquare, Cpu, Rocket, Kanban,
+  ChevronDown, Star, MessageSquare, Cpu, Rocket, Kanban, PhoneCall,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
@@ -222,6 +222,7 @@ export default function Sidebar({ open, onClose }) {
       items: [
         (isAdmin || permissions.can_view_recipes) && { to: '/recipes', icon: ChefHat, label: 'Recipes' },
         permissions.documents && { to: '/documents', icon: FileText, label: 'Documents', badge: docsActionCount || null },
+        isAdmin && { to: '/calls', icon: PhoneCall, label: 'Calls' },
         permissions.can_view_backlog && { to: '/backlog', icon: Clipboard, label: 'Backlog' },
       ].filter(Boolean),
     },
