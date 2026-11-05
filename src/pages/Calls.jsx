@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, X, PhoneCall, AlertTriangle, ChevronDown, ChevronUp, Copy, Clock, Calendar } from 'lucide-react'
+import { Search, X, PhoneCall, AlertTriangle, ChevronDown, ChevronUp, Copy, Clock, Calendar, ListChecks } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -157,13 +157,48 @@ function CallCard({ call, open, onToggle }) {
   )
 }
 
+const DAY = 86400000
+const RANGES = [
+  { v: 'all', label: 'All time' },
+  { v: '7', label: 'Last 7 days' },
+  { v: '30', label: 'Last 30 days' },
+  { v: '90', label: 'Last 90 days' },
+  { v: 'year', label: 'This year' },
+  { v: 'custom', label: 'Custom range…' },
+]
+const LENGTHS = [
+  { v: 'all', label: 'Any length' },
+  { v: 'short', label: 'Short (< 5 min)' },
+  { v: 'med', label: 'Medium (5–20 min)' },
+  { v: 'long', label: 'Long (20+ min)' },
+]
+const SORTS = [
+  { v: 'newest', label: 'Newest first' },
+  { v: 'oldest', label: 'Oldest first' },
+  { v: 'longest', label: 'Longest first' },
+  { v: 'shortest', label: 'Shortest first' },
+  { v: 'title', label: 'Title A–Z' },
+]
+const DEFAULT_FILTERS = { sort: 'newest', range: 'all', from: '', to: '', length: 'all', person: '', actions: false, attention: false }
+
+const selectCls = 'h-9 text-sm border border-gray-300 rounded-lg px-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+const time = c => (c.recordedAt ? new Date(c.recordedAt).getTime() : 0)
+const hasBullets = t => t.split('\n').some(l => l.replace(/^\s*[•\-*]\s*/, '').trim())
+const splitPeople = t => t.split(',').map(x => x.trim()).filter(Boolean)
+const monthLabel = c => (c.recordedAt ? new Date(c.recordedAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : 'Undated')
+
 export default function Calls() {
   const [calls, setCalls] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
+  const [f, setF] = useState(DEFAULT_FILTERS)
   const [openId, setOpenId] = useState(null)
   const [page, setPage] = useState(1)
+  const [now] = useState(() => Date.now())
+
+  const patch = p => { setF(prev => ({ ...prev, ...p })); setPage(1) }
 
   useEffect(() => {
     let cancelled = false
@@ -179,16 +214,51 @@ export default function Calls() {
     return () => { cancelled = true }
   }, [])
 
+  // Most-mentioned people/entities across all calls, for the "Mentions" dropdown.
+  const peopleOptions = useMemo(() => {
+    const counts = new Map()
+    calls.forEach(c => new Set(splitPeople(c.people)).forEach(n => counts.set(n, (counts.get(n) || 0) + 1)))
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 60)
+  }, [calls])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return calls
-    return calls.filter(c =>
-      [c.title, c.summary, c.keyPoints, c.actionItems, c.people, c.transcript].some(s => s.toLowerCase().includes(q)),
-    )
-  }, [calls, search])
+    const year = new Date(now).getFullYear()
+    const from = f.from ? new Date(f.from + 'T00:00:00').getTime() : null
+    const to = f.to ? new Date(f.to + 'T23:59:59').getTime() : null
+
+    const out = calls.filter(c => {
+      if (q && ![c.title, c.summary, c.keyPoints, c.actionItems, c.people, c.transcript].some(s => s.toLowerCase().includes(q))) return false
+      const t = time(c)
+      if (f.range === '7' || f.range === '30' || f.range === '90') { if (t < now - Number(f.range) * DAY) return false }
+      else if (f.range === 'year') { if (!t || new Date(t).getFullYear() !== year) return false }
+      else if (f.range === 'custom') { if ((from && t < from) || (to && t > to)) return false }
+      const m = c.minutes ?? 0
+      if (f.length === 'short' && m >= 5) return false
+      if (f.length === 'med' && (m < 5 || m >= 20)) return false
+      if (f.length === 'long' && m < 20) return false
+      if (f.person && !splitPeople(c.people).includes(f.person)) return false
+      if (f.actions && !hasBullets(c.actionItems)) return false
+      if (f.attention && c.status !== 'Error') return false
+      return true
+    })
+
+    const sorters = {
+      newest: (a, b) => time(b) - time(a),
+      oldest: (a, b) => (time(a) || Infinity) - (time(b) || Infinity),
+      longest: (a, b) => (b.minutes ?? 0) - (a.minutes ?? 0),
+      shortest: (a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity),
+      title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }),
+    }
+    return out.sort(sorters[f.sort])
+  }, [calls, search, f, now])
+
+  const activeFilters = search.trim() !== '' || JSON.stringify(f) !== JSON.stringify(DEFAULT_FILTERS)
+  const clearAll = () => { setSearch(''); setF(DEFAULT_FILTERS); setPage(1) }
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const shown = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const grouped = f.sort === 'newest' || f.sort === 'oldest'
 
   if (loading) return <LoadingSpinner />
 
@@ -202,8 +272,19 @@ export default function Calls() {
     )
   }
 
+  const chip = (on, onClick, icon, label) => (
+    <button
+      onClick={onClick}
+      className={`h-9 inline-flex items-center gap-1.5 px-3 text-sm rounded-lg border transition-colors ${
+        on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+      }`}
+    >
+      {icon}{label}
+    </button>
+  )
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Calls</h1>
         <p className="text-sm text-gray-500 mt-0.5">
@@ -226,16 +307,53 @@ export default function Calls() {
         )}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={f.sort} onChange={e => patch({ sort: e.target.value })} className={selectCls} aria-label="Sort">
+          {SORTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+        </select>
+        <select value={f.range} onChange={e => patch({ range: e.target.value })} className={selectCls} aria-label="Date range">
+          {RANGES.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+        </select>
+        {f.range === 'custom' && (
+          <>
+            <input type="date" value={f.from} onChange={e => patch({ from: e.target.value })} className={selectCls} aria-label="From date" />
+            <span className="text-sm text-gray-400">to</span>
+            <input type="date" value={f.to} onChange={e => patch({ to: e.target.value })} className={selectCls} aria-label="To date" />
+          </>
+        )}
+        <select value={f.length} onChange={e => patch({ length: e.target.value })} className={selectCls} aria-label="Length">
+          {LENGTHS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+        </select>
+        {peopleOptions.length > 0 && (
+          <select value={f.person} onChange={e => patch({ person: e.target.value })} className={`${selectCls} max-w-[14rem]`} aria-label="Mentions">
+            <option value="">Anyone mentioned</option>
+            {peopleOptions.map(([n, c]) => <option key={n} value={n}>{n} ({c})</option>)}
+          </select>
+        )}
+        {chip(f.actions, () => patch({ actions: !f.actions }), <ListChecks size={14} />, 'Has action items')}
+        {calls.some(c => c.status === 'Error') && chip(f.attention, () => patch({ attention: !f.attention }), <AlertTriangle size={14} />, 'Needs attention')}
+        {activeFilters && (
+          <button onClick={clearAll} className="h-9 px-3 text-sm text-gray-500 hover:text-gray-800 inline-flex items-center gap-1">
+            <X size={14} /> Clear all
+          </button>
+        )}
+      </div>
+
       {shown.length === 0 ? (
         <div className="text-center text-sm text-gray-500 py-12 bg-white border border-gray-200 rounded-xl">
           {calls.length === 0
             ? 'No calls yet. Save a recording in Voice Recorder and give it a name — it will show up here after the watcher processes it.'
-            : 'No calls match your search.'}
+            : 'No calls match your filters.'}
         </div>
       ) : (
         <div className="space-y-3">
-          {shown.map(c => (
-            <CallCard key={c.id} call={c} open={openId === c.id} onToggle={() => setOpenId(openId === c.id ? null : c.id)} />
+          {shown.map((c, i) => (
+            <div key={c.id} className="space-y-3">
+              {grouped && (i === 0 || monthLabel(shown[i - 1]) !== monthLabel(c)) && (
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 pt-2">{monthLabel(c)}</h2>
+              )}
+              <CallCard call={c} open={openId === c.id} onToggle={() => setOpenId(openId === c.id ? null : c.id)} />
+            </div>
           ))}
         </div>
       )}
