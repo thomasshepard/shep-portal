@@ -14,6 +14,7 @@ const ALLOWED_MODELS = new Set([
 ])
 const MAX_TOKENS_CAP = 2000
 const DAILY_REQUEST_LIMIT = 300
+const GLOBAL_DAILY_REQUEST_LIMIT = 1500
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,6 +28,23 @@ function json(body: unknown, status = 200) {
 // Service-role client — only used for the usage counter, which callers have no
 // business reading or writing directly (RLS on ai_proxy_usage locks it to service_role).
 const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+
+// Accounts with no role and no permission flag at all have no page that calls this
+// function, so they have no business spending the AI budget.
+async function hasPortalAccess(userId: string): Promise<boolean> {
+  const { data: profile } = await adminClient.from('profiles').select('*').eq('id', userId).maybeSingle()
+  if (!profile) return false
+  if (profile.role === 'admin' || profile.role === 'va') return true
+  return Object.entries(profile).some(([k, v]) => k.startsWith('can_') && v === true)
+}
+
+// Hard ceiling across all accounts, so per-account limits can't be multiplied.
+async function withinGlobalLimit(): Promise<boolean> {
+  const today = new Date().toISOString().slice(0, 10)
+  const { data } = await adminClient.from('ai_proxy_usage').select('request_count').eq('usage_date', today)
+  const total = (data ?? []).reduce((sum: number, r: { request_count: number }) => sum + (r.request_count || 0), 0)
+  return total < GLOBAL_DAILY_REQUEST_LIMIT
+}
 
 async function withinDailyLimit(userId: string): Promise<boolean> {
   const today = new Date().toISOString().slice(0, 10)
@@ -110,6 +128,9 @@ Deno.serve(async (req) => {
     if (action !== 'claude' && action !== 'rentcast') {
       return json({ error: 'action must be "claude" or "rentcast"' }, 400)
     }
+
+    if (!(await hasPortalAccess(user.id))) return json({ error: 'Not authorized' }, 403)
+    if (!(await withinGlobalLimit())) return json({ error: 'Daily AI usage limit reached. Try again tomorrow.' }, 429)
 
     const allowed = await withinDailyLimit(user.id)
     if (!allowed) {
