@@ -59,6 +59,7 @@ import LocalAI from './pages/LocalAI'
 import RankExpand from './pages/RankExpand'
 import Workstreams from './pages/Workstreams'
 import MarketPulse from './pages/MarketPulse'
+import MarketExplorer from './pages/MarketExplorer'
 import WorkstreamShare from './pages/WorkstreamShare'
 
 export default function App() {
@@ -96,6 +97,7 @@ export default function App() {
             <Route path="deals/search-criteria" element={<PermRoute permission="deals"><DealsSearchCriteria /></PermRoute>} />
             <Route path="listings" element={<PermRoute permission="can_view_listings"><PropertyListings /></PermRoute>} />
             <Route path="market" element={<PermRoute permission="can_view_listings"><ErrorBoundary><MarketPulse /></ErrorBoundary></PermRoute>} />
+            <Route path="market/explorer" element={<PermRoute permission="can_view_listings"><ErrorBoundary><MarketExplorer /></ErrorBoundary></PermRoute>} />
             <Route path="listings/benwick" element={<PermRoute permission="can_view_listings"><CrossvilleDashboard /></PermRoute>} />
             <Route path="happy-cuts" element={<PermRoute permission="can_view_happy_cuts"><HappyCuts /></PermRoute>} />
             <Route path="happy-cuts/client/:id" element={<PermRoute permission="can_view_happy_cuts"><HappyCutsClientDetail /></PermRoute>} />

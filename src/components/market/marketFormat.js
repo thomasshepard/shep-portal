@@ -26,3 +26,12 @@ export function fmtSignedDays(v) {
   if (!isNum(v)) return ''
   return `${v > 0 ? '+' : ''}${Math.round(v)} days`
 }
+
+/** x value -> number on a continuous axis. 'month' ("2019-01") becomes 2019 + 0/12; others are plain numbers. */
+export function toNum(x, xType) {
+  if (xType === 'month') {
+    const [y, m] = String(x).split('-').map(Number)
+    return y + (m - 1) / 12
+  }
+  return Number(x)
+}
