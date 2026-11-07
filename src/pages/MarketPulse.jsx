@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { TrendingUp } from 'lucide-react'
 import market from '../data/market.json'
 import LineChart from '../components/market/LineChart'
@@ -101,6 +102,11 @@ export default function MarketPulse() {
         </h1>
         <p className="text-sm text-gray-500 mt-0.5">Data as of {fmtMonth(latestMonth, true)}</p>
         <p className="text-base text-gray-800 mt-3 max-w-3xl">{takeaway}</p>
+        <p className="mt-3">
+          <Link to="/market/explorer" className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-gray-50">
+            Open the Data Explorer →
+          </Link>
+        </p>
       </header>
 
       <Card title="Seller pressure" note="How hard it is to sell right now. More price cuts, more listings and longer waits mean sellers have less leverage.">

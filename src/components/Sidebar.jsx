@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Building2, Landmark, Clipboard,
   Users, ScrollText, X, LogOut, Egg, FileText, Tag, Leaf, ListTodo, ChefHat, Activity, Bitcoin, Wallet, PiggyBank, Bot, Shield, UserCog, Wrench, Calculator,
-  ChevronDown, Star, MessageSquare, Cpu, Rocket, Kanban, PhoneCall, TrendingUp,
+  ChevronDown, Star, MessageSquare, Cpu, Rocket, Kanban, PhoneCall, TrendingUp, ChartLine,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fetchAllRecords, DOCS_BASE_ID } from '../lib/airtable'
@@ -196,6 +196,7 @@ export default function Sidebar({ open, onClose }) {
         permissions.deals && { to: '/deals', icon: Tag, label: 'Facebook Deals' },
         (isAdmin || permissions.can_view_listings) && { to: '/listings', icon: Building2, label: 'Listings' },
         (isAdmin || permissions.can_view_listings) && { to: '/market', icon: TrendingUp, label: 'Market Pulse' },
+        (isAdmin || permissions.can_view_listings) && { to: '/market/explorer', icon: ChartLine, label: 'Market Explorer' },
       ].filter(Boolean),
     },
     {
