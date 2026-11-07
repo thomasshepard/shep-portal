@@ -11,13 +11,13 @@ export const MODES = [
   { key: 'local', label: 'Local' },
 ]
 
-export const AREAS = ['Putnam County', 'Cumberland County', 'Cookeville metro', 'Tennessee']
+export const AREAS = ['Putnam County', 'Cumberland County', 'Cookeville metro', 'Nashville metro', 'Davidson County', 'Tennessee']
 export const MAX_SERIES = 4
 
 // The JSON groups and good/bad directions only the annual measures; monthly and local
 // measures get a simple grouping here, and a good direction only where one is unambiguous.
 const MONTHLY_GROUP = {
-  mortgage_rate_30yr: 'Rates', treasury_10yr: 'Rates', fed_funds: 'Rates', curve_10y_minus_2y: 'Rates',
+  mortgage_rate_30yr: 'Rates', treasury_10yr: 'Rates', fed_funds: 'Rates', fed_funds_change_12m: 'Rates', curve_10y_minus_2y: 'Rates',
   existing_home_sales: 'Sales and supply', new_home_sales_k: 'Sales and supply', new_home_months_supply: 'Sales and supply',
   active_listings: 'Listings', new_listings: 'Listings',
   rent_cpi: 'Prices', case_shiller: 'Prices',
@@ -136,6 +136,36 @@ export function recessionBands() {
     out.push({ kind: 'recession', from: rec, to: rec + r.recession_months / 12 })
   }
   return out
+}
+
+const HIKE_POINTS = 1 // a "hiking" month: fed funds up this many points or more vs 12 months earlier
+const HIKE_EPS = 1e-9
+
+/** Merge sorted numeric positions into runs; step is the size of one position (1/12 for months, 1 for years). */
+function runs(positions, step) {
+  const out = []
+  for (const p of positions) {
+    const last = out[out.length - 1]
+    if (last && p - last.to < step * 0.5) last.to = p + step
+    else out.push({ from: p, to: p + step })
+  }
+  return out
+}
+
+/**
+ * Shaded bands for fed-hiking periods, in LineChart x units.
+ *  month  mode (monthly, local): every month where fed funds is up 1.0 point or more vs 12 months earlier
+ *  annual mode: every year whose average fed funds rate is up 1.0 point or more vs the prior year's average
+ */
+export function hikeBands(mode) {
+  if (mode === 'annual') {
+    const yrs = DATA.annual.filter(r => isNum(r.fed_funds_change) && r.fed_funds_change * 100 >= HIKE_POINTS - HIKE_EPS).map(r => r.year)
+    return runs(yrs.map(y => y - 0.5), 1).map(b => ({ ...b, kind: 'hike' }))
+  }
+  const ms = DATA.monthly
+    .filter(r => isNum(r.fed_funds_change_12m) && r.fed_funds_change_12m >= HIKE_POINTS - HIKE_EPS)
+    .map(r => toNum(r.month, 'month'))
+  return runs(ms, 1 / 12).map(b => ({ ...b, kind: 'hike' }))
 }
 
 /** CSV text for the current view: one row per period, one column per series (raw values). */
