@@ -22,7 +22,7 @@ export interface FilterProfile {
 }
 export interface AtRecord { id?: string; fields?: Record<string, unknown> }
 export interface TableRef { id: string; name: string }
-export interface PmScope { props: Set<string>; units: Set<string> }
+export interface PmScope { props: Set<string>; units: Set<string>; projects: Set<string> }
 export interface Decision { ok: boolean; reason?: string; unscoped?: boolean }
 export type RuleKind = 'tasks' | 'docs' | 'calls' | 'pm'
 
@@ -57,6 +57,12 @@ const PM_PROP_LINKED: Record<string, [string, string]> = {
   'Insurance and Taxes': ['Property', 'fldgh2vNF6c2LwIVV'],
   'Alerts': ['Property Name', 'fldi7c9FYOGIJzgb3'],
   'Bills Payment': ['Property / Project', 'fldF9ZNYiFrfu1hZ1'],
+}
+// PM tables that link to Project records (bids and job scopes hang off a project).
+const PM_PROJECT_LINKED: Record<string, [string, string]> = {
+  'Jobs': ['Project', 'fldZ9NOQSvYKXF93V'],
+  'Quote': ['Project', 'fldjSDPboMpKEMmzl'],
+  'Business Case': ['Project', 'fldtogwvDasJrfN8T'],
 }
 // Credentials live in these; owner-scoped accounts get nothing.
 const PM_DENIED = new Set(['Utility Providers', 'Tenant Info Update'])
@@ -104,6 +110,7 @@ export function neededFields(kind: RuleKind, t: TableRef): Array<[string, string
       if (t.name === 'Rental Units') return [PM_UNIT_PROPERTY]
       if (PM_UNIT_LINKED[t.name]) return [PM_UNIT_LINKED[t.name]]
       if (PM_PROP_LINKED[t.name]) return [PM_PROP_LINKED[t.name]]
+      if (PM_PROJECT_LINKED[t.name]) return [PM_PROJECT_LINKED[t.name]]
       return []
   }
 }
@@ -142,10 +149,10 @@ export function recordAllowed(
         return asArr(pick(f, PM_UNIT_PROPERTY)).some((id) => pm.props.has(String(id)))
           ? { ok: true } : { ok: false, reason: 'unit belongs to another owner' }
       }
-      const link = PM_UNIT_LINKED[t.name] ?? PM_PROP_LINKED[t.name]
+      const link = PM_UNIT_LINKED[t.name] ?? PM_PROP_LINKED[t.name] ?? PM_PROJECT_LINKED[t.name]
       if (link) {
         const ids = asArr(pick(f, link)).map(String)
-        return ids.some((id) => pm.units.has(id) || pm.props.has(id))
+        return ids.some((id) => pm.units.has(id) || pm.props.has(id) || pm.projects.has(id))
           ? { ok: true } : { ok: false, reason: `${t.name} record not linked to an allowed property` }
       }
       return { ok: true, unscoped: true }
@@ -168,7 +175,9 @@ export function filterRecords(
 }
 
 /** Allowed property + unit ids for an owner-scoped account, from full Property / Rental Units scans. */
-export function computePmScope(profile: FilterProfile, properties: AtRecord[], units: AtRecord[]): PmScope {
+export function computePmScope(
+  profile: FilterProfile, properties: AtRecord[], units: AtRecord[], projects: AtRecord[] = [],
+): PmScope {
   const props = new Set<string>()
   for (const p of properties) {
     if (p.id && str(pick(p.fields, PM_OWNER)) === profile.property_owner_filter) props.add(p.id)
@@ -177,7 +186,11 @@ export function computePmScope(profile: FilterProfile, properties: AtRecord[], u
   for (const u of units) {
     if (u.id && asArr(pick(u.fields, PM_UNIT_PROPERTY)).some((id) => props.has(String(id)))) unitIds.add(u.id)
   }
-  return { props, units: unitIds }
+  const projectIds = new Set<string>()
+  for (const p of projects) {
+    if (p.id && asArr(pick(p.fields, PM_UNIT_LINKED['Project'])).some((id) => unitIds.has(String(id)))) projectIds.add(p.id)
+  }
+  return { props, units: unitIds, projects: projectIds }
 }
 
 /** Checks a write: the stored record (if any) and the record as it would look afterwards. */
