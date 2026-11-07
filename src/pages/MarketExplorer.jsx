@@ -6,9 +6,11 @@ import RangePicker from '../components/market/RangePicker'
 import { DataTable, SummaryTable } from '../components/market/SeriesTable'
 import RecessionTable from '../components/market/RecessionTable'
 import ComparePeriods from '../components/market/ComparePeriods'
+import FeaturedViews from '../components/market/FeaturedViews'
+import { FEATURED } from '../components/market/presets'
 import {
   AREAS, DATA, DEFAULTS, MAX_SERIES, MODES, MONTHS, PARTIAL_YEAR, YEARS,
-  buildCsv, buildSeries, downloadText, xLabelFor, fullRange, indexPoints, measureByKey, measuresFor, monthShift, recessionBands,
+  buildCsv, buildSeries, downloadText, xLabelFor, fullRange, hikeBands, indexPoints, measureByKey, measuresFor, monthShift, recessionBands,
 } from '../components/market/explorerData'
 import { chipCls, compactNum, formatterFor, indexFormatter } from '../components/market/explorerFormat'
 import { fmtMonth, isNum } from '../components/market/marketFormat'
@@ -18,9 +20,9 @@ const SERIES_COLORS = [
   'rgb(var(--c-blue-600))', 'rgb(var(--c-amber-500))', 'rgb(var(--c-emerald-600))', 'rgb(var(--c-violet-600))',
 ]
 
-function Card({ title, note, action, children }) {
+function Card({ id, title, note, action, children }) {
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4 min-w-0">
+    <section id={id} className="rounded-xl border border-gray-200 bg-white p-4 min-w-0 scroll-mt-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <h2 className="text-base font-semibold text-gray-900">{title}</h2>
         {action}
@@ -68,7 +70,7 @@ export default function MarketExplorer() {
   const valid = new Set(metas.map(m => m.key))
   const pickedKeys = [...new Set((sp.get('m') || '').split(',').filter(k => valid.has(k)))].slice(0, mode === 'local' ? 1 : MAX_SERIES)
   const mKeys = pickedKeys.length ? pickedKeys : DEFAULTS[mode].m
-  const pickedAreas = [...new Set((sp.get('a') || '').split(',').filter(a => AREAS.includes(a)))]
+  const pickedAreas = [...new Set((sp.get('a') || '').split(',').filter(a => AREAS.includes(a)))].slice(0, MAX_SERIES)
   const areas = pickedAreas.length ? pickedAreas : DEFAULTS.local.a
 
   const full = fullRange(mode)
@@ -121,7 +123,8 @@ export default function MarketExplorer() {
   }
 
   const partialFrom = mode === 'annual' && PARTIAL_YEAR != null && from <= PARTIAL_YEAR && to >= PARTIAL_YEAR ? PARTIAL_YEAR : undefined
-  const bands = rec ? recessionBands() : []
+  const hikes = sp.get('hk') === '1'
+  const bands = [...(rec ? recessionBands() : []), ...(hikes ? hikeBands(mode) : [])]
   const xLabel = xLabelFor(mode)
 
   // ── Presets ─────────────────────────────────────────────────────────────────
@@ -145,6 +148,18 @@ export default function MarketExplorer() {
     else update({ sk: key, sd: key === 'x' ? 'desc' : 'asc' })
   }
 
+  const activeId = FEATURED.find(c => {
+    const keys = [...sp.keys()].filter(k => k !== 'sk' && k !== 'sd')
+    const entries = Object.entries(c.params)
+    return keys.length === entries.length && entries.every(([k, v]) => sp.get(k) === String(v))
+  })?.id
+  const pickFeatured = card => {
+    const next = new URLSearchParams()
+    for (const [k, v] of Object.entries(card.params)) next.set(k, String(v))
+    setSp(next, { replace: true })
+    setTimeout(() => document.getElementById('explorer-chart')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  }
+
   const compareMetas = mKeys.map(k => measureByKey('annual', k)).filter(Boolean)
   const ariaLabel = `Line chart of ${series.map(s => s.label).join(', ')}, ${monthly ? fmtMonth(from) : from} to ${monthly ? fmtMonth(to) : to}`
   const localMeasure = mode === 'local' ? measureByKey('local', mKeys[0]) : null
@@ -161,6 +176,8 @@ export default function MarketExplorer() {
           Pick up to {MAX_SERIES} measures and a date range, then chart, compare and export them. Data compiled {new Date(`${DATA.generated}T12:00:00`).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}.
         </p>
       </header>
+
+      <FeaturedViews onPick={pickFeatured} activeId={activeId} />
 
       {/* Mode tabs */}
       <div role="tablist" aria-label="Data set" className="flex gap-1 rounded-xl bg-gray-100 p-1">
@@ -184,14 +201,15 @@ export default function MarketExplorer() {
               <div className="space-y-3">
                 <MeasurePicker single measures={metas} selected={mKeys} onChange={k => update({ m: k.join(',') })} label="Measure" />
                 <fieldset>
-                  <legend className="text-xs font-semibold text-gray-500">Areas (pick 1 to {AREAS.length})</legend>
+                  <legend className="text-xs font-semibold text-gray-500">Areas (pick 1 to {MAX_SERIES})</legend>
                   <div className="flex flex-wrap gap-2 mt-1.5">
                     {AREAS.map(a => {
                       const on = areas.includes(a)
                       const i = areas.indexOf(a)
                       return (
                         <button
-                          key={a} type="button" aria-pressed={on} className={chipCls(on)}
+                          key={a} type="button" aria-pressed={on} disabled={!on && areas.length >= MAX_SERIES}
+                          className={`${chipCls(on)} disabled:opacity-40 disabled:cursor-not-allowed`}
                           style={on ? { background: SERIES_COLORS[i], borderColor: SERIES_COLORS[i] } : undefined}
                           onClick={() => {
                             const next = on ? areas.filter(x => x !== a) : [...areas, a]
@@ -220,6 +238,7 @@ export default function MarketExplorer() {
       </Card>
 
       <Card
+        id="explorer-chart"
         title={mode === 'local' ? `${localMeasure?.label} by area` : 'Chart'}
         note={mode === 'local' ? 'Realtor.com listings (asking prices, not closed sales).' : undefined}
       >
@@ -232,6 +251,14 @@ export default function MarketExplorer() {
             title={indexed ? 'Not needed when indexed: every series shares one scale' : 'Put the first measure on the left axis and the rest on the right'}
           >
             Two axes
+          </Toggle>
+          <Toggle
+            checked={hikes} onChange={v => update({ hk: v ? 1 : null })}
+            title={mode === 'annual'
+              ? 'Shade years whose average fed funds rate is up 1.0 point or more vs the prior year'
+              : 'Shade months where fed funds is up 1.0 point or more vs 12 months earlier'}
+          >
+            Show rate hikes
           </Toggle>
           {mode !== 'local' && (
             <Toggle checked={rec} onChange={v => update({ rec: v ? 1 : null })} title="Shade US recessions, with a lighter band for the yield-curve inversion before each">

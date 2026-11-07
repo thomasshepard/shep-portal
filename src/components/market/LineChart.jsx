@@ -45,7 +45,7 @@ function shortMonth(n) {
  *  rightFormat: right-axis formatter; the right axis shows only if a series sets axis: 'right'
  *  refLines:    [{ y, label }]               horizontal dashed reference lines
  *  markers:     [{ x, label }]               vertical reference lines
- *  bands:       [{ from, to, kind }]         shaded x ranges in toNum() units; kind 'recession' | 'inversion'
+ *  bands:       [{ from, to, kind }]         shaded x ranges in toNum() units; kind 'recession' | 'inversion' | 'hike'
  *  partialFrom: x value from which the last segment is drawn dashed (partial period)
  */
 export default function LineChart({
@@ -145,6 +145,7 @@ export default function LineChart({
   const legendBands = [
     visibleBands.some(b => b.kind === 'inversion') && { label: 'Yield curve inverted', opacity: 0.1 },
     visibleBands.some(b => b.kind === 'recession') && { label: 'Recession', opacity: 0.28 },
+    visibleBands.some(b => b.kind === 'hike') && { label: 'Fed hiking: up 1+ point in a year', opacity: 0.16, color: 'rgb(var(--c-red-500))' },
   ].filter(Boolean)
   const showLegend = !single || refLines.some(r => r.label) || legendBands.length > 0
 
@@ -193,7 +194,7 @@ export default function LineChart({
           ))}
           {legendBands.map(b => (
             <li key={b.label} className="flex items-center gap-1.5">
-              <span className="inline-block w-4 h-3 rounded-sm" style={{ background: 'rgb(var(--c-gray-500))', opacity: b.opacity * 1.6 }} />
+              <span className="inline-block w-4 h-3 rounded-sm" style={{ background: b.color || 'rgb(var(--c-gray-500))', opacity: Math.min(1, b.opacity * 1.6) }} />
               {b.label}
             </li>
           ))}
@@ -221,7 +222,8 @@ export default function LineChart({
             {visibleBands.map(b => (
               <ReferenceArea
                 key={`${b.kind}${b.from}`} yAxisId="left" x1={b.x1} x2={b.x2}
-                fill="rgb(var(--c-gray-500))" fillOpacity={b.kind === 'inversion' ? 0.1 : 0.28} stroke="none"
+                fill={b.kind === 'hike' ? 'rgb(var(--c-red-500))' : 'rgb(var(--c-gray-500))'}
+                fillOpacity={b.kind === 'inversion' ? 0.1 : b.kind === 'hike' ? 0.16 : 0.28} stroke="none"
               />
             ))}
             {refLines.map(r => (
