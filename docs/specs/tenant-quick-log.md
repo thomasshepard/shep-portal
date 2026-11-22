@@ -28,25 +28,28 @@ Base: Property Management (`appeuX9BHNgVXxdYZ`, the same base as `VITE_AIRTABLE_
 
 New table: **Tenant Log**. One row per thing that happened. Flat on purpose: no rollups or formulas.
 
-| Field name (exact) | Type | Notes |
-|---|---|---|
-| Summary | Single line text (primary field) | Short title, like "Kitchen sink leaking" |
-| Property | Link to Property | One property per entry. Required by the app |
-| Tenant | Link to Tenants | Optional. Leave empty if unknown |
-| Type | Single select | Call, Repair, Complaint, Payment question, Other |
-| Details | Long text | The full note, close to the words Thomas used |
-| Urgency | Single select | Low, Normal, Urgent |
-| Status | Single select | Open, In progress, Resolved |
-| Date | Date | When it happened (not when it was logged) |
-| Logged By | Single line text | "Thomas", "Janine", or "Claude (voice note)" |
-| Source | Single select | Portal, AI agent |
-| Resolved Date | Date | Set when Status becomes Resolved |
-| Resolution | Long text | What fixed it. Optional |
-| Created | Created time | Automatic |
+Table ID: `tblnBwKycNSXhc2Wt`
+
+| Field name (exact) | Field ID | Type | Notes |
+|---|---|---|---|
+| Summary | `fldtk6p828x42UDCW` | Single line text (primary field) | Short title, like "Kitchen sink leaking" |
+| Property | `fldtRyz8V0SgshF43` | Link to Property | One property per entry. Required by the app |
+| Tenant | `fldfF2ZJvlt5dtc8t` | Link to Tenants | Optional. Leave empty if unknown |
+| Type | `fld99fd0cRbDCP5QX` | Single select | Call, Repair, Complaint, Payment question, Other |
+| Details | `fldNRpaRn1EU1B740` | Long text | The full note, close to the words Thomas used |
+| Urgency | `fldcuF3OVzYSAf4sZ` | Single select | Low, Normal, Urgent |
+| Status | `fldDCj7XRiq9HOn9N` | Single select | Open, In progress, Resolved |
+| Date | `fldbqdocQ36JNPULk` | Date | When it happened (not when it was logged) |
+| Logged By | `fldQ0GmbHqeD2pCaT` | Single line text | "Thomas", "Janine", or "Claude (voice note)" |
+| Source | `fld4tA31mGUxjeNod` | Single select | Portal, AI agent |
+| Resolved Date | `fldnrcmwV0QuDN1CF` | Date | Set when Status becomes Resolved |
+| Resolution | `fldHCyzUyj7YTjtUl` | Long text | What fixed it. Optional |
+
+There is no Created field (Airtable's connector couldn't create one). Wherever this spec says "Created", use each record's built-in `createdTime` instead (it is on the record object, next to `id` and `fields`, not inside `fields`).
 
 Adding the two link fields also adds a "Tenant Log" link field on the Property and Tenants tables. That is expected.
 
-After creating the table, Thomas pastes the table ID and every field ID into the constants in step 1 below (or tells Claude to read them and fill them in). Until those IDs exist, nothing in steps 1 to 4 can be tested.
+Table ID and all field IDs above are final (step 0 done). Use them in the constants in step 1.
 
 Field IDs: writes use field IDs (`fldXXX`) with `typecast: true`. Reads come back keyed by field NAME, so the code keeps a second map of names for reading. This is the portal's existing rule.
 
@@ -90,7 +93,7 @@ Who sees it: admin and VA only (`isAdmin || isVA` from `useAuth`). That covers T
 
 - New card on `PropertyDetail.jsx` titled "Tenant Log", placed right after the "Units & Tenants" card. Hide it where the existing `hideTenantsUI` hides tenant cards (Primary Residence, Fix & Flip).
 - Header has the "Log it" button.
-- List newest first (Date, then Created). Each row: date, type, urgency badge (red for Urgent), status chip, summary, tenant name if any, who logged it. Tap a row to expand Details and Resolution.
+- List newest first (Date, then the record's `createdTime`). Each row: date, type, urgency badge (red for Urgent), status chip, summary, tenant name if any, who logged it. Tap a row to expand Details and Resolution.
 - Status control on each row: Open, In progress, Resolved. Choosing Resolved asks for an optional one-line Resolution and sets Resolved Date to today.
 - Open and In progress rows show first. Resolved rows sit behind "Show resolved (N)".
 
@@ -107,7 +110,7 @@ Style: match the existing Tailwind cards and chips in `PropertyDetail.jsx`. Foll
 
 Work in order. Commit after each step with a clear message. If a done-test fails, fix it before moving on. If stuck, stop and write down what's blocking in the step's notes; don't work around the limits in section 2.
 
-**Step 0. Thomas: create the table.** Create Tenant Log exactly as in section 3. Done when: the table exists and its table ID and field IDs are written into this doc or handed to the agent.
+**Step 0. Thomas: create the table.** DONE. The table exists and its table ID and field IDs are in section 3 (no Created field; use `createdTime`).
 
 **Step 1. Data helper.** Create `src/lib/tenantLog.js` with: the table ID, a `TL_FIELDS` map of field IDs for writes, a `TL_READ` map of field names for reads, the option lists (`TL_TYPES`, `TL_URGENCY`, `TL_STATUS`), and these functions built on `fetchAllRecords`, `createRecord`, `updateRecord` from `src/lib/airtable.js` with `PM_BASE_ID`: `fetchLogForProperty(propertyId)`, `fetchOpenIssues()`, `createLogEntry(values)`, `setLogStatus(recordId, status, resolution)`. Links are sent as arrays like `["recXXX"]`. Property filtering is done in the browser on the returned link arrays (the table stays small). Define local `safeStr`, `safeNum`, `arr` helpers as the portal does. Done when: `npm run build` and `npm run lint` pass.
 
