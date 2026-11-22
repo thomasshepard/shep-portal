@@ -11,6 +11,7 @@ import AddTenantWorkflow from '../components/AddTenantWorkflow'
 import EditTenantModal from '../components/EditTenantModal'
 import AlertsPanel from '../components/AlertsPanel'
 import RentalAnalyzer from '../components/RentalAnalyzer'
+import TenantLogPanel from '../components/TenantLogPanel'
 import { useAlerts } from '../hooks/useAlerts'
 import toast from 'react-hot-toast'
 
@@ -648,6 +649,8 @@ export default function PropertyDetail() {
           })}
         </div>
       </div>}
+
+      {!hideTenantsUI && <TenantLogPanel propertyId={id} propertyLabel={safeRender(f.Address, 'Property')} tenants={tenants} />}
 
       {/* Invoices & Payments — hidden for Primary Residence and Fix & Flip */}
       {!hideTenantsUI && <div className="bg-white rounded-xl border border-gray-200 p-5">

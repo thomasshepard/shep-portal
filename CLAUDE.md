@@ -298,6 +298,14 @@ Frontend: `src/components/ProjectsPanel.jsx` (list + create, plus the Projects/S
 - "Needs attention" panel (missing `Purchase Price`/`Purchase Date`, stale market value, money-pit assets, fleet-wide Overdue/Due Soon maintenance) is derived client-side, mirrors the Insurance page's `issues` pattern. Deliberately kept inside the Fleet module's own panel rather than the global Dashboard's Action Items — the Dashboard only gets one summary line on its existing Fleet widget, by design.
 - **Operating the module without the UI**: see **[.claude/skills/fleet-ops/SKILL.md](.claude/skills/fleet-ops/SKILL.md)** — full schema + MCP recipes.
 
+### Tenant Log
+
+Running log of tenant interactions, repairs, complaints, and payment questions per property, designed for quick agent voice-note capture and portal triage.
+- **Access**: Admin and VA only (`isAdmin || isVA` in `useAuth`).
+- **Airtable**: Property Management base (`appeuX9BHNgVXxdYZ`), table `Tenant Log` (`tblnBwKycNSXhc2Wt`). Flat schema, no Created field (uses record `createdTime`). Writes use field IDs (`fldXXX`) with `typecast: true`; reads return field names.
+- **Files**: `src/lib/tenantLog.js` (helpers/constants), `src/components/TenantLogForm.jsx` (modal log form), `src/components/TenantLogPanel.jsx` (timeline card in `PropertyDetail.jsx`), `src/components/TenantIssuesQueue.jsx` ('issues' tab in `Properties.jsx`).
+- **Agent skill**: See **[.claude/skills/tenant-log/SKILL.md](.claude/skills/tenant-log/SKILL.md)** for field IDs, option lists, and dictation/resolution rules.
+
 ## Environment Variables
 
 All `VITE_*` vars must also exist as GitHub repo secrets and be wired into `deploy.yml`.
