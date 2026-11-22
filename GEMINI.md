@@ -1,10 +1,10 @@
 # GEMINI.md
 
-Project context and coding rules (architecture, Airtable rules, env vars):
+Read this file, then read `./CLAUDE.md` in full before doing anything. It has the project architecture, Airtable rules and env vars. `memory.md` does not exist in this repo yet; ignore it.
 
-@./CLAUDE.md
+This file is read by Gemini CLI and by Antigravity CLI (`agy`).
 
-## Rules for Gemini
+## Rules for Gemini / agy
 
 - Specs to build live in `docs/specs/`. Build them exactly as written, one step at a time.
 - Always work on a feature branch. Never push to `main` (pushing to `main` deploys the live site). Never merge.
