@@ -231,12 +231,12 @@ export default function Properties() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-6 border-b border-gray-200 -mt-2">
+      <div className="flex gap-1 border-b border-gray-200 -mt-2 overflow-x-auto">
         {['overview', 'maintenance', 'projects', 'playbook', ...((isAdmin || isVA) ? ['issues'] : [])].map(t => (
           <button
             key={t}
             onClick={() => setView(t)}
-            className={`pb-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
+            className={`shrink-0 whitespace-nowrap px-1.5 sm:px-3 py-3 text-[13px] sm:text-sm font-medium capitalize border-b-2 transition-colors ${
               view === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
             }`}
           >

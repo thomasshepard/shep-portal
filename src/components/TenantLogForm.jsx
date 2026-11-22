@@ -11,7 +11,7 @@ import {
   arr,
 } from '../lib/tenantLog.js'
 
-const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const inp = 'w-full min-h-[44px] sm:min-h-0 border border-gray-300 rounded-lg px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 
 function recordIdFilter(ids) {
   if (!ids || ids.length === 0) return 'FALSE()'
@@ -259,14 +259,14 @@ export default function TenantLogForm({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90dvh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
           <h2 className="font-semibold text-gray-900">Log Tenant Interaction</h2>
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-700"
+            className="flex items-center justify-center w-11 h-11 -mr-3 text-gray-400 hover:text-gray-700"
             aria-label="Close"
           >
             <X size={20} />
@@ -410,14 +410,14 @@ export default function TenantLogForm({
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+              className="flex-1 sm:flex-none min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              className="flex-1 sm:flex-none min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Save Entry'}
             </button>
