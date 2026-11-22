@@ -194,12 +194,25 @@ export default function TenantIssuesQueue({ properties = [] }) {
     return (
       <div key={record.id} className="border border-gray-100 rounded-lg overflow-hidden bg-white">
         <div
-          className="flex items-start justify-between gap-3 p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+          className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3 p-3 cursor-pointer hover:bg-gray-50 transition-colors"
           onClick={() => toggleExpand(record.id)}
         >
           <div className="flex-1 min-w-0">
+            {propId ? (
+              <Link
+                to={`/properties/${propId}`}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center min-h-[44px] sm:min-h-0 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline break-words"
+              >
+                {address}
+              </Link>
+            ) : (
+              <span className="inline-flex items-center min-h-[44px] sm:min-h-0 text-sm font-medium text-gray-700 break-words">
+                {address}
+              </span>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-gray-800 text-sm">
+              <span className="font-medium text-gray-800 text-sm break-words">
                 {summary || 'Untitled entry'}
               </span>
               {urgency === 'Urgent' && (
@@ -211,29 +224,39 @@ export default function TenantIssuesQueue({ properties = [] }) {
                 {status}
               </span>
             </div>
-            <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
-              {propId ? (
-                <Link
-                  to={`/properties/${propId}`}
-                  onClick={(e) => e.stopPropagation()}
-                  className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
-                >
-                  {address}
-                </Link>
-              ) : (
-                <span className="font-medium text-gray-700">{address}</span>
-              )}
+            <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 mt-1">
               {date && <span>{fmtDate(date)}</span>}
               {type && <span>{type}</span>}
               {loggedBy && <span>Logged by {loggedBy}</span>}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 sm:flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="grid grid-cols-3 gap-1 flex-1 sm:hidden">
+              {['Open', 'In progress', 'Resolved'].map((s) => {
+                const isActive = (isResolving ? 'Resolved' : status) === s
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    disabled={statusUpdating === record.id}
+                    aria-pressed={isActive}
+                    onClick={() => handleStatusSelect(record, s)}
+                    className={`min-h-[44px] rounded-lg border text-xs font-medium px-1 transition-colors ${
+                      isActive
+                        ? 'bg-blue-600 border-blue-600 text-white'
+                        : 'bg-white border-gray-300 text-gray-700 active:bg-gray-100'
+                    }`}
+                  >
+                    {s}
+                  </button>
+                )
+              })}
+            </div>
             <select
               value={isResolving ? 'Resolved' : status}
               onChange={(e) => handleStatusSelect(record, e.target.value)}
               disabled={statusUpdating === record.id}
-              className="text-xs font-medium border border-gray-300 rounded-lg px-2 py-1 bg-white text-gray-700 hover:border-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="hidden sm:block text-xs font-medium border border-gray-300 rounded-lg px-2 py-1 bg-white text-gray-700 hover:border-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
               title="Change status"
             >
               <option value="Open">Open</option>
@@ -246,10 +269,10 @@ export default function TenantIssuesQueue({ properties = [] }) {
                 e.stopPropagation()
                 toggleExpand(record.id)
               }}
-              className="text-gray-400 hover:text-gray-700 p-1"
+              className="flex items-center justify-center w-11 h-11 sm:w-8 sm:h-8 text-gray-400 hover:text-gray-700"
               aria-label={expanded ? 'Collapse' : 'Expand'}
             >
-              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
             </button>
           </div>
         </div>
@@ -276,16 +299,16 @@ export default function TenantIssuesQueue({ properties = [] }) {
                 }
               }}
               placeholder="What fixed it?"
-              className="flex-1 min-w-0 border border-blue-300 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="flex-1 min-w-0 min-h-[44px] sm:min-h-0 border border-blue-300 rounded-lg px-2.5 py-1 text-base sm:text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               autoFocus
               disabled={statusUpdating === record.id}
             />
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 sm:flex-shrink-0">
               <button
                 type="button"
                 onClick={() => handleConfirmResolution(record.id)}
                 disabled={statusUpdating === record.id}
-                className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="flex-1 sm:flex-none min-h-[44px] sm:min-h-0 px-3 py-1 text-sm sm:text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
                 {statusUpdating === record.id ? 'Saving…' : 'Confirm'}
               </button>
@@ -293,7 +316,7 @@ export default function TenantIssuesQueue({ properties = [] }) {
                 type="button"
                 onClick={() => setResolvingId(null)}
                 disabled={statusUpdating === record.id}
-                className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800"
+                className="flex-1 sm:flex-none min-h-[44px] sm:min-h-0 px-3 py-1 text-sm sm:text-xs text-gray-600 hover:text-gray-800"
               >
                 Cancel
               </button>
@@ -329,12 +352,20 @@ export default function TenantIssuesQueue({ properties = [] }) {
   return (
     <div className="space-y-4">
       {/* Filter bar & Actions */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <button
+          type="button"
+          onClick={() => setShowForm(true)}
+          className="flex items-center justify-center gap-1.5 w-full sm:w-auto min-h-[44px] sm:min-h-0 sm:order-2 text-sm font-medium text-white bg-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-700 transition-colors"
+        >
+          <Plus size={14} /> Log it
+        </button>
+
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:gap-3 sm:flex-wrap sm:order-1">
           <select
             value={propertyFilter}
             onChange={(e) => setPropertyFilter(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full sm:w-auto min-h-[44px] sm:min-h-0 text-base sm:text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All properties</option>
             {arr(properties).map((p) => (
@@ -347,7 +378,7 @@ export default function TenantIssuesQueue({ properties = [] }) {
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full sm:w-auto min-h-[44px] sm:min-h-0 text-base sm:text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="all">All types</option>
             {TL_TYPES.map((t) => (
@@ -357,14 +388,6 @@ export default function TenantIssuesQueue({ properties = [] }) {
             ))}
           </select>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={14} /> Log it
-        </button>
       </div>
 
       {loading ? (
