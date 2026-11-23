@@ -37,6 +37,8 @@ export default function VideoSheet({
   const [ctr, setCtr] = useState(v.ctr == null ? '' : String(v.ctr))
   const [watched, setWatched] = useState(false)
   const [titleChecked, setTitleChecked] = useState(false)
+  const [title, setTitle] = useState(v.title || v.subject)
+  const [description, setDescription] = useState(v.uploadDescription)
   const claimsRef = useRef(null)
   const photosRef = useRef(null)
 
@@ -53,6 +55,12 @@ export default function VideoSheet({
       [F.videos.approvedAt]: new Date().toISOString(),
     }
     if (goLive) fields[F.videos.goLiveAt] = new Date(goLive).toISOString()
+    
+    const titleChanged = title.trim() !== (v.title || v.subject)
+    const descChanged = description !== v.uploadDescription
+    if (titleChanged) fields[F.videos.finalTitle] = title.trim()
+    if (descChanged) fields[F.videos.uploadDescription] = description
+
     const ok = await onWriteVideo(fields, 'Approved. The PC prepares the upload files next.')
     if (ok) onClose()
   }
@@ -177,14 +185,67 @@ export default function VideoSheet({
               {v.stage === 'Ready to Approve' && !v.approved && (
                 <div className="rounded-xl border-2 border-blue-600 p-4 space-y-3">
                   <h3 className="text-base font-bold text-gray-900">Approve to publish</h3>
-                  {v.thumbnail && (
-                    <img src={v.thumbnail} alt="" className="w-full rounded-lg bg-gray-100" />
-                  )}
-                  {v.videoFile && (
-                    <a href={v.videoFile} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1">
-                      Watch the render <ExternalLink size={12} />
+                  
+                  {v.renderLink ? (
+                    <a href={v.renderLink} target="_blank" rel="noreferrer" className="w-full min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold border-2 border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors">
+                      Watch the render <ExternalLink size={16} />
                     </a>
+                  ) : (
+                    <p className="text-xs text-gray-500">The render link is not ready yet.</p>
                   )}
+
+                  <div className="space-y-1">
+                    <span className="text-xs font-semibold text-gray-500">Thumbnail</span>
+                    {v.thumbnail ? (
+                      <img src={v.thumbnail} alt="" className="w-full rounded-lg bg-gray-100" />
+                    ) : (
+                      <div className="w-full aspect-video rounded-lg bg-gray-100 flex items-center justify-center text-sm text-gray-500">
+                        No thumbnail yet
+                      </div>
+                    )}
+                  </div>
+
+                  <label className="block space-y-1">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs font-semibold text-gray-500">Title</span>
+                      <span className="text-[10px] text-gray-400">{title.length}/100</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={title}
+                      onChange={e => setTitle(e.target.value)}
+                      maxLength={100}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base"
+                    />
+                  </label>
+
+                  <label className="block space-y-1">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs font-semibold text-gray-500">Description</span>
+                      <span className="text-[10px] text-gray-400">{description.length}/5000</span>
+                    </div>
+                    <textarea
+                      value={description}
+                      onChange={e => setDescription(e.target.value)}
+                      maxLength={5000}
+                      rows={8}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base resize-y"
+                    />
+                  </label>
+
+                  {v.uploadTags && (
+                    <div className="space-y-1">
+                      <span className="text-xs font-semibold text-gray-500">Tags</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {v.uploadTags.split(',').map(t => t.trim()).filter(Boolean).slice(0, 30).map((tag, i) => (
+                          <span key={i} className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <ul className="space-y-1.5 text-sm">
                     <li className="flex items-center gap-2">
                       {openClaims.length === 0 ? <CheckCircle2 size={16} className="text-green-600" /> : <AlertTriangle size={16} className="text-red-600" />}
@@ -219,18 +280,39 @@ export default function VideoSheet({
                   <p className="text-xs text-gray-500">
                     The PC does not upload to YouTube. It puts the video, a thumbnail, and the title, description and tags in this video's upload folder, and you upload them by hand in YouTube Studio. (The API project is not audited yet, so API uploads would stay private.)
                   </p>
-                  <div className="flex gap-2">
+                  
+                  {(() => {
+                    const titleChanged = title.trim() !== (v.title || v.subject)
+                    const descChanged = description !== v.uploadDescription
+                    const hasEdits = titleChanged || descChanged
+                    return (
+                      <button
+                        onClick={() => {
+                          const fields = {}
+                          if (titleChanged) fields[F.videos.finalTitle] = title.trim()
+                          if (descChanged) fields[F.videos.uploadDescription] = description
+                          onWriteVideo(fields, 'Saved')
+                        }}
+                        disabled={busy || !hasEdits}
+                        className="w-full min-h-[44px] px-3 py-2.5 rounded-lg text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      >
+                        Save edits
+                      </button>
+                    )
+                  })()}
+
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <button
                       onClick={() => onWriteVideo({ [F.videos.stage]: 'VA Review' }, 'Sent back for another look')}
                       disabled={busy}
-                      className="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      className="flex-1 min-h-[44px] px-3 py-2.5 rounded-lg text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                     >
                       Send it back
                     </button>
                     <button
                       onClick={approve}
-                      disabled={busy || !watched || !titleChecked || openClaims.length > 0 || openPhotos.length > 0}
-                      className="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                      disabled={busy || !watched || !titleChecked || openClaims.length > 0 || openPhotos.length > 0 || !title.trim()}
+                      className="flex-1 min-h-[44px] px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
                     >
                       Approve to publish
                     </button>

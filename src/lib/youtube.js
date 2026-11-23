@@ -53,6 +53,9 @@ export const F = {
     avd: 'fldxY0jVPZpNcP2YC',              // Avg View Duration
     thumbnail: 'fldCRjc2EBPpbKn8O',        // Thumbnail
     videoFile: 'fldL8thcExbnijuhw',        // Video File Link
+    renderDriveLink: 'fld2z1Yw6IatGqONU',  // Render Drive Link
+    uploadDescription: 'fldb56Uhb183z7CPp',// Upload Description
+    uploadTags: 'fld2cm4OVpC6Jw3N4',       // Upload Tags
     runFolder: 'fldJkNTDE3rCKIlTF',        // Run Folder
     runnerStatus: 'fldczhfQhXfm6EYoj',     // Runner Status
     runnerStep: 'fld9EQucU7LuKlNfl',       // Runner Step
@@ -241,9 +244,12 @@ export function toVideo(rec, seriesById = {}) {
     approvedAt: safeStr(f['Approved At'], ''),
     views7: f['Views (7 day)'] == null ? null : safeNum(f['Views (7 day)']),
     ctr: f['CTR %'] == null ? null : safeNum(f['CTR %']),
-    avd: f['Avg View Duration'] == null ? null : safeNum(f['Avg View Duration']),
     thumbnail: arr(f['Thumbnail'])[0]?.url || '',
     videoFile: safeStr(f['Video File Link'], ''),
+    avd: f['Avg View Duration'] == null ? null : safeNum(f['Avg View Duration']),
+    renderLink: safeStr(f['Render Drive Link'], ''),
+    uploadDescription: safeStr(f['Upload Description'], ''),
+    uploadTags: safeStr(f['Upload Tags'], ''),
     runFolder: safeStr(f['Run Folder'], ''),
     runnerStatus: safeStr(f['Runner Status'], 'Idle'),
     runnerStep: safeStr(f['Runner Step'], ''),
