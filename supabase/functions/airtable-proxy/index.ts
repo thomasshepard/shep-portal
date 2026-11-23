@@ -48,6 +48,7 @@ const BASE_RULES: Record<string, BaseRule> = {
   appPKrIVr569rWySg: { name: 'Recipes',                any: ['can_view_recipes'] },
   appp0qWrN24f8wqho: { name: 'Backlog',                any: ['can_view_backlog', 'can_view_triage'] },
   appp0rx0SV1WuIUrh: { name: 'Rank Expand',            any: [] },
+  appFuesAtBoOkMMB1: { name: 'YouTube Pipeline',       any: ['can_view_youtube'] },
 }
 
 function capabilities(p: any): Set<string> {
@@ -60,7 +61,7 @@ function capabilities(p: any): Set<string> {
   if (va || p?.can_view_deals) caps.add('deals')
   if (va || p?.can_view_triage) caps.add('can_view_triage')
   for (const k of ['can_view_tasks', 'can_view_recipes', 'can_view_backlog', 'can_view_happy_cuts', 'can_view_finances',
-    'can_view_insurance', 'can_view_fleet', 'can_view_workstreams', 'can_view_bookkeeping']) {
+    'can_view_insurance', 'can_view_fleet', 'can_view_workstreams', 'can_view_bookkeeping', 'can_view_youtube']) {
     if (p?.[k]) caps.add(k)
   }
   return caps
