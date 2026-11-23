@@ -58,6 +58,7 @@ import FleetMaintenance from './pages/FleetMaintenance'
 import LocalAI from './pages/LocalAI'
 import RankExpand from './pages/RankExpand'
 import Workstreams from './pages/Workstreams'
+import YouTube from './pages/YouTube'
 import MarketPulse from './pages/MarketPulse'
 import MarketExplorer from './pages/MarketExplorer'
 import WorkstreamShare from './pages/WorkstreamShare'
@@ -106,6 +107,7 @@ export default function App() {
             <Route path="fleet/maintenance" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><FleetMaintenance /></ErrorBoundary></PermRoute>} />
             <Route path="fleet/:id" element={<PermRoute permission="can_view_fleet"><ErrorBoundary><FleetDetail /></ErrorBoundary></PermRoute>} />
             <Route path="workstreams" element={<PermRoute permission="can_view_workstreams"><ErrorBoundary><Workstreams /></ErrorBoundary></PermRoute>} />
+            <Route path="youtube" element={<PermRoute permission="can_view_youtube"><ErrorBoundary><YouTube /></ErrorBoundary></PermRoute>} />
             <Route path="notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="notifications/settings" element={<ProtectedRoute><NotificationSettings /></ProtectedRoute>} />
             <Route path="notifications/digest-guide" element={<ProtectedRoute><DigestGuide /></ProtectedRoute>} />

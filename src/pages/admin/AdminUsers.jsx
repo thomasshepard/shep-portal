@@ -32,6 +32,7 @@ const PERM_GROUPS = [
       { key: 'can_view_bookkeeping', label: 'Bookkeeping' },
       { key: 'can_view_fleet', label: 'Fleet' },
       { key: 'can_view_workstreams', label: 'Workstreams' },
+      { key: 'can_view_youtube', label: 'YouTube' },
     ],
   },
   {
@@ -84,6 +85,7 @@ const emptyForm = {
   can_view_workstreams: false,
   can_view_bookkeeping: false,
   can_view_messages: false,
+  can_view_youtube: false,
   allowed_tags: '',
 }
 
@@ -197,6 +199,7 @@ export default function AdminUsers() {
           can_view_workstreams: form.can_view_workstreams,
           can_view_bookkeeping: form.can_view_bookkeeping,
           can_view_messages: form.can_view_messages,
+          can_view_youtube: form.can_view_youtube,
           allowed_tags: form.allowed_tags ? form.allowed_tags.split(',').map(t => t.trim()).filter(Boolean) : null,
         })
         .eq('id', newUserId)
@@ -665,6 +668,15 @@ export default function AdminUsers() {
                         className="rounded"
                       />
                       <span className="text-sm text-gray-700">Fleet &amp; Equipment</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.can_view_youtube}
+                        onChange={e => setField('can_view_youtube', e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700">YouTube pipeline</span>
                     </label>
                     <label className="flex items-center gap-2.5 cursor-pointer">
                       <input
