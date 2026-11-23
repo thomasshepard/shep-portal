@@ -11,6 +11,7 @@ function waitingOn(v) {
   if (v.photosToCheck > 0) return { who: 'you', text: `${v.photosToCheck} photo${v.photosToCheck === 1 ? '' : 's'} to approve or drop.` }
   if (v.stage === 'Ready to Approve' && !v.approved) return { who: 'you', text: 'Watch it through, then approve it to publish.' }
   if (v.stage === 'Idea') return { who: 'you', text: 'Start research when you are happy with the subject.' }
+  if (v.stage === 'Scheduled' && !v.youtubeUrl) return { who: 'you', text: "The upload files are ready in this video's upload folder. Upload them in YouTube Studio, then make it public when you are ready." }
   if (v.stage === 'Scheduled' && v.privacy !== 'public') return { who: 'you', text: 'Uploaded as private. Make it public in YouTube Studio when you are ready.' }
   if (v.stage === 'Published' && v.ctr == null) return { who: 'you', text: 'Add the CTR from Studio. Views and average view come in on their own.' }
   if (v.runnerStatus === 'Running') return { who: 'pc', text: `The PC is on ${v.runnerStep || 'a step'}.` }
@@ -52,7 +53,7 @@ export default function VideoSheet({
       [F.videos.approvedAt]: new Date().toISOString(),
     }
     if (goLive) fields[F.videos.goLiveAt] = new Date(goLive).toISOString()
-    const ok = await onWriteVideo(fields, 'Approved. The PC uploads it next.')
+    const ok = await onWriteVideo(fields, 'Approved. The PC prepares the upload files next.')
     if (ok) onClose()
   }
 
@@ -216,7 +217,7 @@ export default function VideoSheet({
                     />
                   </label>
                   <p className="text-xs text-gray-500">
-                    It uploads as private either way. YouTube keeps new API uploads private until the channel passes its audit, so you flip it to public in Studio.
+                    The PC does not upload to YouTube. It puts the video, a thumbnail, and the title, description and tags in this video's upload folder, and you upload them by hand in YouTube Studio. (The API project is not audited yet, so API uploads would stay private.)
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -235,7 +236,7 @@ export default function VideoSheet({
                     </button>
                   </div>
                   <p className="text-xs text-gray-500 text-center">
-                    The PC uploads it to YouTube as private. Make it public in YouTube Studio when you are ready.
+                    The PC prepares the files in this video's upload folder for a manual upload in YouTube Studio. It does not upload to YouTube.
                   </p>
                 </div>
               )}
@@ -245,7 +246,7 @@ export default function VideoSheet({
           {v.approved && (
             <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-900">
               <span className="font-bold">Approved{v.approvedAt ? ` ${new Date(v.approvedAt).toLocaleDateString()}` : ''}.</span>{' '}
-              {v.youtubeUrl ? 'It is up on YouTube.' : 'The PC uploads it on its next pass.'}
+              {v.youtubeUrl ? 'It is up on YouTube.' : v.stage === 'Scheduled' ? "The upload files are ready in this video's upload folder." : 'The PC prepares the upload files on its next pass.'}
             </div>
           )}
 
