@@ -109,6 +109,38 @@ export default function YouTube() {
     return true
   }, [load])
 
+  const onDecideMany = useCallback(async (ids, fields) => {
+    if (ids.size === 0) return true
+    setBusy(true)
+    const idArray = Array.from(ids)
+    let failed = 0
+    
+    const queue = [...idArray]
+    const workers = Array(4).fill(0).map(async () => {
+      while (queue.length > 0) {
+        const id = queue.shift()
+        const { error: err } = await updateRecord(T.sources, id, fields, YT_BASE_ID)
+        if (err) {
+          failed++
+        } else {
+          ids.delete(id)
+        }
+      }
+    })
+    await Promise.all(workers)
+    
+    if (failed === 0) {
+      const action = fields[F.sources.approved] ? 'Approved' : 'Rejected'
+      toast.success(`${action} ${idArray.length} photos`)
+    } else {
+      toast.error(`${failed} failed`)
+    }
+    
+    await load()
+    setBusy(false)
+    return failed === 0
+  }, [load])
+
   const toggleRunner = async () => {
     if (!runner) { toast.error('No runner row in Airtable yet'); return }
     await write(T.runner, runner.id, { [F.runner.paused]: !runner.paused },
@@ -232,6 +264,7 @@ export default function YouTube() {
           videos={shown}
           photos={photos}
           onDecide={(id, fields) => write(T.sources, id, fields)}
+          onDecideMany={onDecideMany}
           busy={busy}
         />
       )}
