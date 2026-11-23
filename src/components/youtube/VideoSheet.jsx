@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   X, AlertTriangle, CheckCircle2, Circle, Loader2, ExternalLink, RotateCcw, Rocket, Mic, Upload, Check,
 } from 'lucide-react'
@@ -30,12 +30,14 @@ function Row({ label, value }) {
 
 export default function VideoSheet({
   video: v, series, claims, photos, costs, helperView, busy, onClose,
-  onWriteVideo, onDecideClaim, onDecidePhoto,
+  onWriteVideo, onDecideClaim, onDecidePhoto, onOpenPhotos
 }) {
   const [goLive, setGoLive] = useState(v.goLiveAt ? v.goLiveAt.slice(0, 16) : '')
   const [ctr, setCtr] = useState(v.ctr == null ? '' : String(v.ctr))
   const [watched, setWatched] = useState(false)
   const [titleChecked, setTitleChecked] = useState(false)
+  const claimsRef = useRef(null)
+  const photosRef = useRef(null)
 
   const wait = waitingOn(v)
   const who = helperView ? 'the VA' : 'you'
@@ -112,70 +114,134 @@ export default function VideoSheet({
             </div>
           )}
 
-          {/* Approve to publish */}
-          {v.stage === 'Ready to Approve' && !v.approved && (
-            <div className="rounded-xl border-2 border-blue-600 p-4 space-y-3">
-              <h3 className="text-base font-bold text-gray-900">Approve to publish</h3>
-              {v.thumbnail && (
-                <img src={v.thumbnail} alt="" className="w-full rounded-lg bg-gray-100" />
+          {/* Next step card */}
+          {v.runnerStatus !== 'Failed' && v.runnerStatus !== 'Running' && (
+            <>
+              {v.stage === 'Idea' && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+                  <button
+                    onClick={() => onWriteVideo({ [F.videos.stage]: 'Researching', [F.videos.runnerStatus]: 'Queued' }, 'Queued for research')}
+                    disabled={busy}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Rocket size={16} /> Start research
+                  </button>
+                  <p className="text-xs text-blue-800 text-center">
+                    The PC writes two research briefs and picks the better one. That takes about 5 to 10 minutes and costs roughly $2.
+                  </p>
+                </div>
               )}
-              {v.videoFile && (
-                <a href={v.videoFile} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1">
-                  Watch the render <ExternalLink size={12} />
-                </a>
+              {v.stage === 'VA Review' && openClaims.length > 0 && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+                  <button
+                    onClick={() => claimsRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                    disabled={busy}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    Decide {openClaims.length} claim{openClaims.length === 1 ? '' : 's'}
+                  </button>
+                  <p className="text-xs text-blue-800 text-center">
+                    Pick Keep, Use fix or Cut on each flagged claim. After that the PC pulls photographs.
+                  </p>
+                </div>
               )}
-              <ul className="space-y-1.5 text-sm">
-                <li className="flex items-center gap-2">
-                  {openClaims.length === 0 ? <CheckCircle2 size={16} className="text-green-600" /> : <AlertTriangle size={16} className="text-red-600" />}
-                  {openClaims.length === 0 ? 'Every flagged claim decided' : `${openClaims.length} claim still waiting`}
-                </li>
-                <li className="flex items-center gap-2">
-                  {openPhotos.length === 0 ? <CheckCircle2 size={16} className="text-green-600" /> : <AlertTriangle size={16} className="text-red-600" />}
-                  {openPhotos.length === 0 ? 'Every photo checked and cleared for rights' : `${openPhotos.length} photo still waiting`}
-                </li>
-                <li>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={watched} onChange={e => setWatched(e.target.checked)} className="rounded" />
-                    I watched the first minute and the end
+              {v.stage === 'VA Review' && openClaims.length === 0 && openPhotos.length > 0 && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+                  <button
+                    onClick={() => onOpenPhotos ? onOpenPhotos() : photosRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                    disabled={busy}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    Review {openPhotos.length} photo{openPhotos.length === 1 ? '' : 's'}
+                  </button>
+                  <p className="text-xs text-blue-800 text-center">
+                    Approve the photographs you want in the video and drop the rest. After that you send it to voice.
+                  </p>
+                </div>
+              )}
+              {v.stage === 'VA Review' && openClaims.length === 0 && openPhotos.length === 0 && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+                  <button
+                    onClick={() => onWriteVideo({ [F.videos.stage]: 'Voiced', [F.videos.runnerStatus]: 'Queued' }, 'Sent to voice')}
+                    disabled={busy}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Mic size={16} /> Send to voice
+                  </button>
+                  <p className="text-xs text-blue-800 text-center">
+                    The PC records the narration, then renders the video. It will ask you for the final approval when the render is ready.
+                  </p>
+                </div>
+              )}
+              {v.stage === 'Ready to Approve' && !v.approved && (
+                <div className="rounded-xl border-2 border-blue-600 p-4 space-y-3">
+                  <h3 className="text-base font-bold text-gray-900">Approve to publish</h3>
+                  {v.thumbnail && (
+                    <img src={v.thumbnail} alt="" className="w-full rounded-lg bg-gray-100" />
+                  )}
+                  {v.videoFile && (
+                    <a href={v.videoFile} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline inline-flex items-center gap-1">
+                      Watch the render <ExternalLink size={12} />
+                    </a>
+                  )}
+                  <ul className="space-y-1.5 text-sm">
+                    <li className="flex items-center gap-2">
+                      {openClaims.length === 0 ? <CheckCircle2 size={16} className="text-green-600" /> : <AlertTriangle size={16} className="text-red-600" />}
+                      {openClaims.length === 0 ? 'Every flagged claim decided' : `${openClaims.length} claim still waiting`}
+                    </li>
+                    <li className="flex items-center gap-2">
+                      {openPhotos.length === 0 ? <CheckCircle2 size={16} className="text-green-600" /> : <AlertTriangle size={16} className="text-red-600" />}
+                      {openPhotos.length === 0 ? 'Every photo checked and cleared for rights' : `${openPhotos.length} photo still waiting`}
+                    </li>
+                    <li>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={watched} onChange={e => setWatched(e.target.checked)} className="rounded" />
+                        I watched the first minute and the end
+                      </label>
+                    </li>
+                    <li>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={titleChecked} onChange={e => setTitleChecked(e.target.checked)} className="rounded" />
+                        Title and thumbnail are the ones I want
+                      </label>
+                    </li>
+                  </ul>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-semibold text-gray-500">Go public at (leave blank to decide later)</span>
+                    <input
+                      type="datetime-local"
+                      value={goLive}
+                      onChange={e => setGoLive(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+                    />
                   </label>
-                </li>
-                <li>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={titleChecked} onChange={e => setTitleChecked(e.target.checked)} className="rounded" />
-                    Title and thumbnail are the ones I want
-                  </label>
-                </li>
-              </ul>
-              <label className="block space-y-1">
-                <span className="text-xs font-semibold text-gray-500">Go public at (leave blank to decide later)</span>
-                <input
-                  type="datetime-local"
-                  value={goLive}
-                  onChange={e => setGoLive(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-                />
-              </label>
-              <p className="text-xs text-gray-500">
-                It uploads as private either way. YouTube keeps new API uploads private until the channel passes its audit, so you flip it to public in Studio.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onWriteVideo({ [F.videos.stage]: 'VA Review' }, 'Sent back for another look')}
-                  disabled={busy}
-                  className="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                >
-                  Send it back
-                </button>
-                <button
-                  onClick={approve}
-                  disabled={busy || !watched || !titleChecked || openClaims.length > 0 || openPhotos.length > 0}
-                  className="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
-                >
-                  Approve
-                </button>
-              </div>
-            </div>
+                  <p className="text-xs text-gray-500">
+                    It uploads as private either way. YouTube keeps new API uploads private until the channel passes its audit, so you flip it to public in Studio.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => onWriteVideo({ [F.videos.stage]: 'VA Review' }, 'Sent back for another look')}
+                      disabled={busy}
+                      className="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                    >
+                      Send it back
+                    </button>
+                    <button
+                      onClick={approve}
+                      disabled={busy || !watched || !titleChecked || openClaims.length > 0 || openPhotos.length > 0}
+                      className="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                    >
+                      Approve to publish
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 text-center">
+                    The PC uploads it to YouTube as private. Make it public in YouTube Studio when you are ready.
+                  </p>
+                </div>
+              )}
+            </>
           )}
+
           {v.approved && (
             <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-900">
               <span className="font-bold">Approved{v.approvedAt ? ` ${new Date(v.approvedAt).toLocaleDateString()}` : ''}.</span>{' '}
@@ -185,7 +251,7 @@ export default function VideoSheet({
 
           {/* Claims to decide, right here */}
           {openClaims.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-2" ref={claimsRef}>
               <h3 className="text-sm font-bold text-gray-900">Claims to decide</h3>
               {openClaims.map(c => (
                 <div key={c.id} className="rounded-xl border border-gray-200 p-3 space-y-2">
@@ -217,7 +283,7 @@ export default function VideoSheet({
 
           {/* Photos to check, right here */}
           {openPhotos.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-2" ref={photosRef}>
               <h3 className="text-sm font-bold text-gray-900">Photos to check</h3>
               {openPhotos.map(p => (
                 <div key={p.id} className="rounded-xl border border-gray-200 p-3 flex items-start gap-3">
@@ -248,26 +314,8 @@ export default function VideoSheet({
           )}
 
           {/* Stage actions */}
-          <div className="flex gap-2 flex-wrap">
-            {v.stage === 'Idea' && (
-              <button
-                onClick={() => onWriteVideo({ [F.videos.stage]: 'Researching', [F.videos.runnerStatus]: 'Queued' }, 'Queued for research')}
-                disabled={busy}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                <Rocket size={14} /> Start research
-              </button>
-            )}
-            {v.stage === 'VA Review' && openClaims.length === 0 && openPhotos.length === 0 && (
-              <button
-                onClick={() => onWriteVideo({ [F.videos.stage]: 'Voiced', [F.videos.runnerStatus]: 'Queued' }, 'Sent to voice')}
-                disabled={busy}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                <Mic size={14} /> Send to voice
-              </button>
-            )}
-            {v.stage === 'Scheduled' && v.youtubeUrl && (
+          {v.stage === 'Scheduled' && v.youtubeUrl && (
+            <div className="flex gap-2 flex-wrap">
               <a
                 href={v.youtubeUrl}
                 target="_blank"
@@ -276,8 +324,8 @@ export default function VideoSheet({
               >
                 <Upload size={14} /> Open it in Studio
               </a>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* CTR, the one number YouTube's API does not hand over */}
           {v.stage === 'Published' && (
@@ -351,7 +399,7 @@ export default function VideoSheet({
 
           {/* Cost */}
           <div className="rounded-xl border border-gray-200 p-4 space-y-1">
-            <h3 className="text-sm font-bold text-gray-900 mb-1">What it cost</h3>
+              <h3 className="text-sm font-bold text-gray-900 mb-1">What it cost</h3>
             {costs.length === 0 ? (
               <p className="text-sm text-gray-500">Nothing logged yet.</p>
             ) : (
@@ -393,17 +441,29 @@ export default function VideoSheet({
           </div>
 
           {/* Move it by hand, as a way out of any corner */}
-          <label className="block space-y-1">
-            <span className="text-xs font-semibold text-gray-500">Move it by hand</span>
-            <select
-              value={v.stage}
-              onChange={e => onWriteVideo({ [F.videos.stage]: e.target.value }, `Moved to ${stageLabel(e.target.value)}`)}
-              disabled={busy}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
-            >
-              {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-          </label>
+          <div className="space-y-1">
+            <label className="block space-y-1">
+              <span className="text-xs font-semibold text-gray-500">Move it by hand</span>
+              <select
+                value={v.stage}
+                onChange={e => onWriteVideo({ [F.videos.stage]: e.target.value }, `Moved to ${stageLabel(e.target.value)}`)}
+                disabled={busy}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm"
+              >
+                {STAGES.map(s => {
+                  const isLocked = (s.key === 'Scheduled' || s.key === 'Published') && !v.youtubeUrl && v.stage !== s.key;
+                  return (
+                    <option key={s.key} value={s.key} disabled={isLocked}>{s.label}</option>
+                  )
+                })}
+              </select>
+            </label>
+            {STAGES.some(s => (s.key === 'Scheduled' || s.key === 'Published') && !v.youtubeUrl && v.stage !== s.key) && (
+              <p className="text-xs text-gray-500">
+                Scheduled and Published unlock once the PC has uploaded the video.
+              </p>
+            )}
+          </div>
           {series.length > 1 && (
             <label className="block space-y-1">
               <span className="text-xs font-semibold text-gray-500">Series</span>

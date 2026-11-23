@@ -425,3 +425,14 @@ export function monthSpend(costs) {
     return sum + c.cost
   }, 0)
 }
+
+export function previewUrlFor(photo) {
+  if (photo.image) return photo.image
+  if (photo.url) {
+    const match = photo.url.match(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:(.+)$/)
+    if (match) {
+      return `https://commons.wikimedia.org/wiki/Special:FilePath/${match[1]}?width=480`
+    }
+  }
+  return ''
+}
