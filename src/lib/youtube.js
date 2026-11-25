@@ -184,6 +184,8 @@ export const STEPS = [
 export const SEVERITIES = ['High', 'Medium', 'Low']
 export const DECISIONS = ['Keep', 'Use fix', 'Cut']
 export const VA_RATE = 3.5
+export const ON_HOLD = 'On hold'
+export const isOnHold = (v) => v?.runnerStatus === ON_HOLD
 
 // ── safe accessors (per-page style, as the rest of the portal does it) ──────
 export const safeStr = (v, fallback = '') => {
@@ -378,6 +380,7 @@ export function runnerState(runner) {
 export function buildTasks(videos) {
   const tasks = []
   for (const v of videos) {
+    if (isOnHold(v)) continue
     if (v.stage === 'Ready to Approve' && !v.approved) {
       tasks.push({ kind: 'approve', video: v, label: 'Approve to publish', weight: 1 })
     }
