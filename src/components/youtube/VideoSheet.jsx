@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react'
 import {
-  X, AlertTriangle, CheckCircle2, Circle, Loader2, ExternalLink, RotateCcw, Rocket, Mic, Upload, Check,
+  X, AlertTriangle, CheckCircle2, Circle, Loader2, ExternalLink, RotateCcw, Rocket, Mic, Upload, Check, PauseCircle,
 } from 'lucide-react'
-import { F, STEPS, STAGES, stageLabel, stageIndex, DECISIONS, fmtMoney, VA_RATE } from '../../lib/youtube'
+import { F, STEPS, STAGES, stageLabel, stageIndex, DECISIONS, fmtMoney, VA_RATE, isOnHold } from '../../lib/youtube'
 
 /** What this video is waiting on, in one line. */
 function waitingOn(v) {
+  if (isOnHold(v)) return { who: 'none', text: 'On hold. The PC leaves this one alone until you take it off hold.' }
   if (v.runnerStatus === 'Failed') return { who: 'you', text: `The PC stopped at ${v.runnerStep || 'a step'}. Retry it or fix the cause first.` }
   if (v.openClaims > 0) return { who: 'you', text: `${v.openClaims} flagged claim${v.openClaims === 1 ? '' : 's'} to decide.` }
   if (v.photosToCheck > 0) return { who: 'you', text: `${v.photosToCheck} photo${v.photosToCheck === 1 ? '' : 's'} to approve or drop.` }
@@ -97,6 +98,22 @@ export default function VideoSheet({
           </div>
 
           {/* The run */}
+          {isOnHold(v) && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 space-y-2">
+              <p className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                <PauseCircle size={15} /> On hold
+              </p>
+              {v.lastError && <p className="text-xs text-gray-600 break-words">{v.lastError}</p>}
+              <button
+                onClick={() => onWriteVideo({ [F.videos.runnerStatus]: 'Idle', [F.videos.retry]: false }, 'Taken off hold')}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-gray-700 text-white hover:bg-gray-800 disabled:opacity-50 transition-colors"
+              >
+                Take off hold
+              </button>
+              <p className="text-xs text-gray-500">The PC picks it up on its next pass.</p>
+            </div>
+          )}
           {v.runnerStatus === 'Failed' && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 space-y-2">
               <p className="text-sm font-bold text-red-900 flex items-center gap-2">
@@ -124,7 +141,7 @@ export default function VideoSheet({
           )}
 
           {/* Next step card */}
-          {v.runnerStatus !== 'Failed' && v.runnerStatus !== 'Running' && (
+          {v.runnerStatus !== 'Failed' && v.runnerStatus !== 'Running' && !isOnHold(v) && (
             <>
               {v.stage === 'Idea' && (
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">

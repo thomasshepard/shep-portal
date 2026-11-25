@@ -1,9 +1,10 @@
-import { STAGES, stageLabel } from '../../lib/youtube'
+import { STAGES, stageLabel, ON_HOLD, isOnHold } from '../../lib/youtube'
 
 const DOT = {
   Running: 'bg-blue-500',
   Queued: 'bg-purple-400',
   Failed: 'bg-red-500',
+  [ON_HOLD]: 'bg-gray-400',
   Done: 'bg-green-500',
   Idle: 'bg-gray-300',
 }
@@ -42,6 +43,11 @@ export default function BoardView({ videos, onOpen }) {
                         </span>
                       )}
                     </span>
+                    {isOnHold(v) && (
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 flex-shrink-0">
+                        On hold
+                      </span>
+                    )}
                     {v.aiCost > 0 && (
                       <span className="text-xs text-gray-400 tabular-nums flex-shrink-0">${v.aiCost.toFixed(2)}</span>
                     )}

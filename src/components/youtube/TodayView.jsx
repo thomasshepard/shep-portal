@@ -1,5 +1,5 @@
 import { Play, Pause, AlertTriangle, CheckCircle2, Clock, Image as ImageIcon, Upload, BarChart3, Search, Rocket } from 'lucide-react'
-import { paceThisWeek, stageLabel } from '../../lib/youtube'
+import { paceThisWeek, stageLabel, isOnHold } from '../../lib/youtube'
 
 const ICONS = {
   approve: CheckCircle2,
@@ -28,6 +28,7 @@ export default function TodayView({
 }) {
   const pace = paceThisWeek(videos, series)
   const failed = videos.filter(v => v.runnerStatus === 'Failed').length
+  const onHold = videos.filter(isOnHold).length
   const stuck = videos.filter(v => v.daysInStage >= 7 && v.stage !== 'Published').length
   const who = helperView ? 'VA' : 'you'
 
@@ -62,14 +63,19 @@ export default function TodayView({
           {runner?.currentJob ? runner.currentJob : 'Nothing running right now.'}
         </p>
         <p className="text-xs text-gray-400">
-          {runner?.lastSeen ? `Last checked in ${new Date(runner.lastSeen).toLocaleString()}` : 'It has never checked in. Start the runner on the PC.'}
+          {runner?.lastSeen ? `Last check-in ${new Date(runner.lastSeen).toLocaleString()}` : 'It has never checked in. Start the runner on the PC.'}
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <Tile label="Out this week" value={`${pace.out}/${pace.goal || '—'}`} sub="published" />
-        <Tile label="Stopped" value={failed} sub="need a retry" tone={failed ? 'bad' : undefined} />
-        <Tile label="Stuck 7+" value={stuck} sub="days in a stage" tone={stuck ? 'warn' : undefined} />
+      <div className="space-y-1.5">
+        <div className="grid grid-cols-3 gap-2">
+          <Tile label="Out this week" value={`${pace.out}/${pace.goal || '—'}`} sub="published" />
+          <Tile label="Stopped" value={failed} sub="need a retry" tone={failed ? 'bad' : undefined} />
+          <Tile label="Stuck 7+" value={stuck} sub="days in a stage" tone={stuck ? 'warn' : undefined} />
+        </div>
+        {onHold > 0 && (
+          <p className="text-xs text-gray-500 px-1">{onHold} on hold</p>
+        )}
       </div>
 
       {/* What wants a person */}
@@ -131,6 +137,7 @@ export default function TodayView({
                     {stageLabel(v.stage)}
                     {v.runnerStatus === 'Running' && v.runnerStep ? ` · ${v.runnerStep} ${v.runnerProgress ? `${Math.round(v.runnerProgress * 100)}%` : ''}` : ''}
                     {v.runnerStatus === 'Failed' ? ' · stopped' : ''}
+                    {isOnHold(v) ? <span className="text-gray-400"> · on hold</span> : ''}
                   </span>
                 </span>
                 {v.daysInStage >= 7 && <span className="text-[10px] font-bold text-amber-600 flex-shrink-0">{v.daysInStage}d</span>}
