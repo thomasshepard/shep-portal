@@ -11,6 +11,7 @@ function waitingOn(v) {
   if (v.runnerStatus === 'Failed') return { who: 'you', text: `The PC stopped at ${v.runnerStep || 'a step'}. Retry it or fix the cause first.` }
   if (isResearchReady(v)) return { who: 'you', text: v.hookChoice ? 'Research ready and a hook is picked. Tap Go below when you want the script written.' : 'Research ready and parked. Pick a hook below; nothing runs until you tap Go.' }
   if (v.stage === 'Hooks' && v.runnerStatus === HOOK_REVIEW && v.hookOptions && !v.hookChoice) return { who: 'you', text: 'Pick the opening hook below, ask for changes, or write your own.' }
+  if (v.stage === 'Hooks' && v.runnerStatus === HOOK_REVIEW && v.hookChoice) return { who: 'pc', text: v.hookChoice.action === 'changes' ? 'The PC writes a new set of hooks from your note on its next pass.' : 'The PC writes the script from your hook on its next pass.' }
   if (v.openClaims > 0) return { who: 'you', text: `${v.openClaims} flagged claim${v.openClaims === 1 ? '' : 's'} to decide.` }
   if (v.photosToCheck > 0) return { who: 'you', text: `${v.photosToCheck} photo${v.photosToCheck === 1 ? '' : 's'} to approve or drop.` }
   if (v.stage === 'Ready to Approve' && !v.approved) return { who: 'you', text: 'Watch it through, then approve it to publish.' }
