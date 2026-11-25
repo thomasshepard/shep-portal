@@ -24,8 +24,6 @@ Deno.serve(async (req) => {
   const rawBody = await req.text()
   const signature = req.headers.get('stripe-signature')
 
-  const stripe = getStripeClientForAccount(account as 'east_meadow' | 'shepard_holdings')
-
   const deps = {
     getRecord: async (id: string) => {
       if (!/^rec[A-Za-z0-9]{14}$/.test(id)) return null
@@ -63,6 +61,9 @@ Deno.serve(async (req) => {
     },
     invoiceIdForCharge: async (chargeId: string) => {
       try {
+        // Built only here (disputes), after the signature check passed, so a
+        // missing API key can never turn a bad-signature request into a 500.
+        const stripe = getStripeClientForAccount(account as 'east_meadow' | 'shepard_holdings')
         const ch = await stripe.charges.retrieve(chargeId)
         return typeof ch.invoice === 'string' ? ch.invoice : ch.invoice?.id ?? null
       } catch {
