@@ -83,6 +83,7 @@ describe('sendRentInvoices', () => {
           create: async (params, opts) => { callLog.push('customers.create'); return { id: 'cus_new' } },
         },
         invoices: {
+          retrieve: async (id) => ({ id, status: 'draft', total: 110000 }),
           search: async () => { callLog.push('invoices.search'); return { data: [] } },
           create: async (params, opts) => {
             callLog.push('invoices.create')
@@ -119,7 +120,7 @@ describe('sendRentInvoices', () => {
     const deps = {
       stripeFor: () => ({
         customers: { retrieve: async () => { callLog.push('customers.retrieve') }, list: async () => { callLog.push('customers.list'); return { data: [] } }, create: async () => { callLog.push('customers.create'); return { id: 'cus_new' } } },
-        invoices: { search: async () => { callLog.push('invoices.search'); return { data: [] } }, create: async () => { callLog.push('invoices.create'); return { id: 'in_1', status: 'draft' } }, finalizeInvoice: async () => { callLog.push('invoices.finalizeInvoice'); return { id: 'in_1', status: 'open' } }, sendInvoice: async () => { callLog.push('invoices.sendInvoice') }, update: async () => { callLog.push('invoices.update') } },
+        invoices: { retrieve: async (id) => ({ id, status: 'draft', total: 110000 }), search: async () => { callLog.push('invoices.search'); return { data: [] } }, create: async () => { callLog.push('invoices.create'); return { id: 'in_1', status: 'draft' } }, finalizeInvoice: async () => { callLog.push('invoices.finalizeInvoice'); return { id: 'in_1', status: 'open' } }, sendInvoice: async () => { callLog.push('invoices.sendInvoice') }, update: async () => { callLog.push('invoices.update') } },
         invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } },
       }),
       createRecord: async () => { callLog.push('createRecord'); throw new Error('Airtable down') },
@@ -137,7 +138,7 @@ describe('sendRentInvoices', () => {
     const deps = {
       stripeFor: () => ({
         customers: { retrieve: async () => { callLog.push('customers.retrieve'); throw new Error('not found') }, list: async () => { callLog.push('customers.list'); return { data: [] } }, create: async () => { callLog.push('customers.create'); return { id: 'cus_new' } } },
-        invoices: { search: async () => { callLog.push('invoices.search'); return { data: [] } }, create: async () => { callLog.push('invoices.create'); throw new Error('Stripe down') }, finalizeInvoice: async () => { callLog.push('invoices.finalizeInvoice') }, sendInvoice: async () => { callLog.push('invoices.sendInvoice') }, update: async () => { callLog.push('invoices.update') } },
+        invoices: { retrieve: async (id) => ({ id, status: 'draft', total: 110000 }), search: async () => { callLog.push('invoices.search'); return { data: [] } }, create: async () => { callLog.push('invoices.create'); throw new Error('Stripe down') }, finalizeInvoice: async () => { callLog.push('invoices.finalizeInvoice') }, sendInvoice: async () => { callLog.push('invoices.sendInvoice') }, update: async () => { callLog.push('invoices.update') } },
         invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } },
       }),
       createRecord: async () => { callLog.push('createRecord'); return { id: 'recNEW1' } },
@@ -156,7 +157,7 @@ describe('sendRentInvoices', () => {
     const deps = {
       stripeFor: () => ({
         customers: { retrieve: async () => { callLog.push('customers.retrieve'); throw new Error('not found') }, list: async () => { callLog.push('customers.list'); return { data: [] } }, create: async () => { callLog.push('customers.create'); return { id: 'cus_new' } } },
-        invoices: { search: async () => { callLog.push('invoices.search'); return { data: [{ id: 'in_old', status: 'open', hosted_invoice_url: 'https://old' }] } }, create: async () => { callLog.push('invoices.create'); return { id: 'in_1', status: 'draft' } }, finalizeInvoice: async (id) => { callLog.push('invoices.finalizeInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://old', invoice_pdf: 'https://pdf' } }, sendInvoice: async (id) => { callLog.push('invoices.sendInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://old', invoice_pdf: 'https://pdf' } }, update: async () => { callLog.push('invoices.update') } },
+        invoices: { retrieve: async (id) => ({ id, status: 'draft', total: 110000 }), search: async () => { callLog.push('invoices.search'); return { data: [{ id: 'in_old', status: 'open', hosted_invoice_url: 'https://old' }] } }, create: async () => { callLog.push('invoices.create'); return { id: 'in_1', status: 'draft' } }, finalizeInvoice: async (id) => { callLog.push('invoices.finalizeInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://old', invoice_pdf: 'https://pdf' } }, sendInvoice: async (id) => { callLog.push('invoices.sendInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://old', invoice_pdf: 'https://pdf' } }, update: async () => { callLog.push('invoices.update') } },
         invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } },
       }),
       createRecord: async () => { callLog.push('createRecord'); return { id: 'recNEW1' } },
@@ -171,7 +172,7 @@ describe('sendRentInvoices', () => {
   test('Unknown run key → status skipped', async () => {
     const callLog = []
     const deps = {
-      stripeFor: () => ({ customers: { retrieve: async () => { callLog.push('customers.retrieve') } }, invoices: { search: async () => { callLog.push('invoices.search') } }, invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } } }),
+      stripeFor: () => ({ customers: { retrieve: async () => { callLog.push('customers.retrieve') } }, invoices: { retrieve: async (id) => ({ id, status: 'draft', total: 110000 }), search: async () => { callLog.push('invoices.search') } }, invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } } }),
       createRecord: async () => { callLog.push('createRecord'); return { id: 'recNEW1' } },
       updateRecord: async () => { callLog.push('updateRecord') },
     }
@@ -184,7 +185,7 @@ describe('sendRentInvoices', () => {
   test('expectedCents mismatch → skipped with Amount changed', async () => {
     const callLog = []
     const deps = {
-      stripeFor: () => ({ customers: { retrieve: async () => { callLog.push('customers.retrieve') } }, invoices: { search: async () => { callLog.push('invoices.search') } }, invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } } }),
+      stripeFor: () => ({ customers: { retrieve: async () => { callLog.push('customers.retrieve') } }, invoices: { retrieve: async (id) => ({ id, status: 'draft', total: 110000 }), search: async () => { callLog.push('invoices.search') } }, invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } } }),
       createRecord: async () => { callLog.push('createRecord'); return { id: 'recNEW1' } },
       updateRecord: async () => { callLog.push('updateRecord') },
     }
@@ -208,7 +209,7 @@ describe('sendRentInvoices', () => {
     const deps = {
       stripeFor: () => ({
         customers: { retrieve: async () => { callLog.push('customers.retrieve'); throw new Error('not found') }, list: async () => { callLog.push('customers.list'); return { data: [] } }, create: async () => { callLog.push('customers.create'); return { id: 'cus_new' } } },
-        invoices: { search: async () => { callLog.push('invoices.search'); return { data: [] } }, create: async () => { callLog.push('invoices.create'); return { id: 'in_1', status: 'draft' } }, finalizeInvoice: async (id) => { callLog.push('invoices.finalizeInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://pay', invoice_pdf: 'https://pdf' } }, sendInvoice: async (id) => { callLog.push('invoices.sendInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://pay', invoice_pdf: 'https://pdf' } }, update: async () => { callLog.push('invoices.update') } },
+        invoices: { retrieve: async (id) => ({ id, status: 'draft', total: 110000 }), search: async () => { callLog.push('invoices.search'); return { data: [] } }, create: async () => { callLog.push('invoices.create'); return { id: 'in_1', status: 'draft' } }, finalizeInvoice: async (id) => { callLog.push('invoices.finalizeInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://pay', invoice_pdf: 'https://pdf' } }, sendInvoice: async (id) => { callLog.push('invoices.sendInvoice'); return { id, status: 'open', hosted_invoice_url: 'https://pay', invoice_pdf: 'https://pdf' } }, update: async () => { callLog.push('invoices.update') } },
         invoiceItems: { create: async () => { callLog.push('invoiceItems.create') } },
       }),
       createRecord: async () => { callLog.push('createRecord'); return { id: 'recNEW1' } },
@@ -218,5 +219,54 @@ describe('sendRentInvoices', () => {
     assert.equal(result.results[0].ok, true)
     assert.ok(!callLog.includes('createRecord'), 'createRecord should not be called for existing draft')
     assert.ok(updates.some(u => u.id === 'recDraft1'))
+  })
+})
+describe('sendRentInvoices retry safety (lead review)', () => {
+  const today2 = '2026-12-15'
+  function fakeStripe(log, { found = [], total = 110000 } = {}) {
+    return {
+      customers: { retrieve: async (id) => ({ id }), list: async () => ({ data: [] }), create: async () => ({ id: 'cus_1' }) },
+      invoices: {
+        search: async () => ({ data: found }),
+        create: async (params) => { log.push(['create', params]); return { id: 'in_new', status: 'draft', total: 0 } },
+        retrieve: async (id) => { log.push(['retrieve', id]); return { id, status: 'draft', total } },
+        finalizeInvoice: async (id) => { log.push(['finalize', id]); return { id, status: 'open', hosted_invoice_url: 'https://pay' } },
+        sendInvoice: async (id) => { log.push(['send', id]); return { id, status: 'open', hosted_invoice_url: 'https://pay' } },
+      },
+      invoiceItems: { create: async (p) => { log.push(['item', p.invoice]); return {} } },
+    }
+  }
+  const airtable = () => ({ createRecord: async () => ({ id: 'recNEW1' }), updateRecord: async () => {} })
+  const key = () => buildPreview(baseData, today2).rows.find(r => r.scheduleId === 'recL1').runKey
+
+  test('an empty draft found by search gets its items before it is finalized', async () => {
+    const log = []
+    const res = await sendRentInvoices({ runKeys: [key()], data: baseData, today: today2,
+      deps: { stripeFor: () => fakeStripe(log, { found: [{ id: 'in_draft', status: 'draft', total: 0 }] }), ...airtable() } })
+    assert.equal(res.results[0].ok, true)
+    assert.ok(!log.some(([k]) => k === 'create'), 'no new invoice')
+    const itemAt = log.findIndex(([k, v]) => k === 'item' && v === 'in_draft')
+    const finAt = log.findIndex(([k]) => k === 'finalize')
+    assert.ok(itemAt >= 0 && itemAt < finAt, 'items added before finalize')
+  })
+
+  test('a draft whose total does not match is never finalized', async () => {
+    const log = []
+    const res = await sendRentInvoices({ runKeys: [key()], data: baseData, today: today2,
+      deps: { stripeFor: () => fakeStripe(log, { found: [{ id: 'in_draft', status: 'draft', total: 55000 }], total: 55000 }), ...airtable() } })
+    assert.equal(res.results[0].ok, false)
+    assert.equal(res.results[0].status, 'draft')
+    assert.ok(!log.some(([k]) => k === 'finalize' || k === 'send'))
+    assert.ok(!log.some(([k]) => k === 'item'), 'no items added to a non-empty draft')
+  })
+
+  test('due_date is never in the past', async () => {
+    const log = []
+    const late = Date.UTC(2026, 11, 24, 23) // Dec 24 after noon Central, the due day
+    await sendRentInvoices({ runKeys: [buildPreview(baseData, '2026-12-24').rows.find(r => r.scheduleId === 'recL1').runKey],
+      data: baseData, today: '2026-12-24', nowMs: () => late,
+      deps: { stripeFor: () => fakeStripe(log), ...airtable() } })
+    const created = log.find(([k]) => k === 'create')[1]
+    assert.ok(created.due_date >= Math.floor(late / 1000) + 3600)
   })
 })

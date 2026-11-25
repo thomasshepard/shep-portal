@@ -22,7 +22,7 @@ export const TENANT_STRIPE_CUSTOMER_ID = 'fldhczpBALyYrcrdl'
 export const LEASE_INVOICE_TABLE = 'tblvBW1tHvXrjL6Go'
 export const TENANTS_TABLE = 'tblcUBwyCHhyYzUEC'
 
-export async function sendRentInvoices({ runKeys, expectedCents = {}, data, today, deps }) {
+export async function sendRentInvoices({ runKeys, expectedCents = {}, data, today, deps, nowMs = () => Date.now() }) {
   const preview = buildPreview(data, today)
   const rowByKey = new Map(preview.rows.map(r => [r.runKey, r]))
 
@@ -119,7 +119,8 @@ export async function sendRentInvoices({ runKeys, expectedCents = {}, data, toda
         invoice = await stripe.invoices.create({
           customer: customerId,
           collection_method: 'send_invoice',
-          due_date: dueDateUnixNoonCentral(row.dueDate),
+          // Stripe rejects a due_date in the past (sending on the due day after noon Central).
+          due_date: Math.max(dueDateUnixNoonCentral(row.dueDate), Math.floor(nowMs() / 1000) + 3600),
           auto_advance: true,
           pending_invoice_items_behavior: 'exclude',
           payment_settings: { payment_method_types: row.paymentMethods },
@@ -133,6 +134,14 @@ export async function sendRentInvoices({ runKeys, expectedCents = {}, data, toda
             run_key: row.runKey,
           },
         }, { idempotencyKey: `rent-${row.runKey}` })
+      }
+
+      // A draft found by search may be left from a run that died before its
+      // items were added. Add them only to an empty draft (a non-empty one that
+      // doesn't match is stopped below), so a retry never finalizes a $0 invoice
+      // and never doubles the items once Stripe's 24-hour idempotency window is gone.
+      if (!isNewInvoice && invoice.status === 'draft' && !invoice.total) {
+        isNewInvoice = true
       }
 
       if (isNewInvoice) {
@@ -151,6 +160,11 @@ export async function sendRentInvoices({ runKeys, expectedCents = {}, data, toda
       await deps.updateRecord(LEASE_INVOICE_TABLE, leaseInvoiceId, { [LI.stripeInvoiceId]: invoice.id })
 
       if (invoice.status === 'draft') {
+        // Never finalize (and email) an invoice whose total isn't what the preview showed.
+        const check = await stripe.invoices.retrieve(invoice.id)
+        if (check.total !== row.cents) {
+          throw new Error(`Stripe draft ${invoice.id} totals ${check.total} cents, expected ${row.cents}; check it in Stripe before sending`)
+        }
         invoice = await stripe.invoices.finalizeInvoice(invoice.id)
       }
       if (invoice.status === 'open') {
