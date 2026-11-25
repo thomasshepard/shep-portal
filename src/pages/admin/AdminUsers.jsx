@@ -740,6 +740,7 @@ export default function AdminUsers() {
 const BOOKKEEPING_ENTITIES = [
   'Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC',
   'Personal', 'Shepard Holdings LLC', 'Virginia Holdings LLC',
+  'Maple Hill Coffee',
 ]
 
 function EditTagsModal({ user, onClose, onSave }) {

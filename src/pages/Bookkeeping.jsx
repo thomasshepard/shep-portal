@@ -63,6 +63,7 @@ function extractReceiptAmount(ocr) {
 const ACTIVE_ENTITIES = [
   'Happy Cuts LLC', 'East Meadow Consulting LLC', 'Ridge & Anchor LLC',
   'Personal', 'Shepard Holdings LLC', 'Virginia Holdings LLC',
+  'Maple Hill Coffee',
 ]
 
 // Partnership entities get partner-aware equity UI (Partner Capital card,
