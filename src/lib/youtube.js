@@ -56,6 +56,8 @@ export const F = {
     renderDriveLink: 'fld2z1Yw6IatGqONU',  // Render Drive Link
     uploadDescription: 'fldb56Uhb183z7CPp',// Upload Description
     uploadTags: 'fld2cm4OVpC6Jw3N4',       // Upload Tags
+    hookOptions: 'fld1nGiBPPVJHfF21',      // Hook Options
+    hookChoice: 'fldPl4jvu1n2EEai6',       // Hook Choice
     runFolder: 'fldJkNTDE3rCKIlTF',        // Run Folder
     runnerStatus: 'fldczhfQhXfm6EYoj',     // Runner Status
     runnerStep: 'fld9EQucU7LuKlNfl',       // Runner Step
@@ -148,6 +150,7 @@ export const F = {
 export const STAGES = [
   { key: 'Idea', label: 'Idea' },
   { key: 'Researching', label: 'Researching' },
+  { key: 'Hooks', label: 'Hook pick' },
   { key: 'Scripting', label: 'Scripting' },
   { key: 'VA Review', label: 'Review' },
   { key: 'Voiced', label: 'Voiced' },
@@ -160,7 +163,7 @@ export const STAGES = [
 export const stageLabel = (k) => STAGES.find(s => s.key === k)?.label || k || 'Idea'
 export const stageIndex = (k) => Math.max(0, STAGES.findIndex(s => s.key === k))
 
-// The 15 steps, in order. `who` is who does it: 'ai' runs on the PC without
+// The 18 steps, in order. `who` is who does it: 'ai' runs on the PC without
 // you, 'you' needs a person. The page relabels 'you' as "VA" when the helper
 // view is on, which is a preview only — it changes no data.
 export const STEPS = [
@@ -168,17 +171,20 @@ export const STEPS = [
   { n: 2, label: 'Pick the subject', who: 'you', stage: 'Idea' },
   { n: 3, label: 'Research briefs', who: 'ai', stage: 'Researching' },
   { n: 4, label: 'Pick the better brief', who: 'ai', stage: 'Researching' },
-  { n: 5, label: 'Write script', who: 'ai', stage: 'Scripting' },
-  { n: 6, label: 'Titles and thumbnail', who: 'ai', stage: 'Scripting' },
-  { n: 7, label: 'Fact check', who: 'ai', stage: 'Scripting' },
-  { n: 8, label: 'Review flagged claims', who: 'you', stage: 'VA Review' },
-  { n: 9, label: 'Pull photos', who: 'ai', stage: 'VA Review' },
-  { n: 10, label: 'Approve photos', who: 'you', stage: 'VA Review' },
-  { n: 11, label: 'Voice', who: 'ai', stage: 'Voiced' },
-  { n: 12, label: 'Render video', who: 'ai', stage: 'Editing' },
-  { n: 13, label: 'Approve to publish', who: 'you', stage: 'Ready to Approve' },
-  { n: 14, label: 'Upload', who: 'ai', stage: 'Scheduled' },
-  { n: 15, label: 'Day 7 stats', who: 'ai', stage: 'Published' },
+  { n: 5, label: 'Pull and rate photos', who: 'ai', stage: 'Hooks' },
+  { n: 6, label: 'Write and check hooks', who: 'ai', stage: 'Hooks' },
+  { n: 7, label: 'Pick the hook', who: 'you', stage: 'Hooks' },
+  { n: 8, label: 'Write script', who: 'ai', stage: 'Scripting' },
+  { n: 9, label: 'Titles and thumbnail', who: 'ai', stage: 'Scripting' },
+  { n: 10, label: 'Fact check', who: 'ai', stage: 'Scripting' },
+  { n: 11, label: 'Review flagged claims', who: 'you', stage: 'VA Review' },
+  { n: 12, label: 'Pull photos', who: 'ai', stage: 'VA Review' },
+  { n: 13, label: 'Approve photos', who: 'you', stage: 'VA Review' },
+  { n: 14, label: 'Voice', who: 'ai', stage: 'Voiced' },
+  { n: 15, label: 'Render video', who: 'ai', stage: 'Editing' },
+  { n: 16, label: 'Approve to publish', who: 'you', stage: 'Ready to Approve' },
+  { n: 17, label: 'Upload', who: 'ai', stage: 'Scheduled' },
+  { n: 18, label: 'Day 7 stats', who: 'ai', stage: 'Published' },
 ]
 
 export const SEVERITIES = ['High', 'Medium', 'Low']
@@ -186,6 +192,69 @@ export const DECISIONS = ['Keep', 'Use fix', 'Cut']
 export const VA_RATE = 3.5
 export const ON_HOLD = 'On hold'
 export const isOnHold = (v) => v?.runnerStatus === ON_HOLD
+
+export const HOOK_REVIEW = 'Hook review'
+export const RESEARCH_READY = 'Research ready'
+export const isResearchReady = (v) => v?.runnerStatus === RESEARCH_READY
+
+export function parseHookOptions(text) {
+  if (!text) return null
+  let obj
+  try {
+    obj = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!obj || !Array.isArray(obj.hooks)) return null
+  const hooks = []
+  for (const h of obj.hooks) {
+    if (!h || !h.hook || typeof h.hook !== 'string' || !h.hook.trim()) continue
+    hooks.push({
+      kind: h.kind === 'betrayal' ? 'betrayal' : 'mystery',
+      hook: h.hook,
+      question: safeStr(h.question),
+      payoff: safeStr(h.payoff),
+      facts: arr(h.facts).filter(f => typeof f === 'string'),
+      thumbnail: {
+        words: safeStr(h.thumbnail?.words),
+        photoIdea: safeStr(h.thumbnail?.photoIdea),
+        item: safeStr(h.thumbnail?.item),
+        image: safeStr(h.thumbnail?.image),
+        recordId: safeStr(h.thumbnail?.recordId),
+      },
+      check: {
+        ok: h.check?.ok === true,
+        overpromises: h.check?.overpromises === true,
+        missing: h.check?.missing === true,
+        problems: arr(h.check?.problems),
+      },
+    })
+  }
+  return { ...obj, hooks }
+}
+
+export function parseHookChoice(text) {
+  if (!text) return null
+  let obj
+  try {
+    obj = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!obj || !obj.action) return null
+  if (obj.action === 'pick') {
+    if (!Number.isInteger(obj.index) || obj.index < 0) return null
+    return obj
+  }
+  if (obj.action === 'changes') {
+    return obj
+  }
+  if (obj.action === 'custom') {
+    if (!obj.text || typeof obj.text !== 'string' || !obj.text.trim()) return null
+    return obj
+  }
+  return null
+}
 
 // ── safe accessors (per-page style, as the rest of the portal does it) ──────
 export const safeStr = (v, fallback = '') => {
@@ -268,6 +337,8 @@ export function toVideo(rec, seriesById = {}) {
     photosToCheck: safeNum(f['Photos To Check'], 0),
     health: safeStr(f['Health'], ''),
     publishedThisWeek: safeNum(f['Published This Week'], 0),
+    hookOptions: parseHookOptions(safeStr(f['Hook Options'], '')),
+    hookChoice: parseHookChoice(safeStr(f['Hook Choice'], '')),
   }
 }
 
@@ -386,6 +457,12 @@ export function buildTasks(videos) {
     }
     if (v.runnerStatus === 'Failed') {
       tasks.push({ kind: 'retry', video: v, label: `Runner stopped at ${v.runnerStep || 'a step'}`, weight: 2 })
+    }
+    if (v.stage === 'Hooks' && v.runnerStatus === HOOK_REVIEW && v.hookOptions && !v.hookChoice) {
+      tasks.push({ kind: 'hook', video: v, label: 'Pick a hook', weight: 2.5 })
+    }
+    if (isResearchReady(v) && v.hookOptions) {
+      tasks.push({ kind: 'hook', video: v, label: v.hookChoice ? 'Research ready: hook picked, say go' : 'Research ready: pick a hook', weight: 8 })
     }
     if (v.openClaims > 0) {
       tasks.push({ kind: 'claims', video: v, label: `${v.openClaims} claim${v.openClaims === 1 ? '' : 's'} to decide`, weight: 3 })
