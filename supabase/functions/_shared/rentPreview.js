@@ -17,7 +17,16 @@ export function buildPreview(data, today) {
   const unitMap = new Map(data.units.map(r => [r.id, r]))
   const propertyMap = new Map(data.properties.map(r => [r.id, r]))
 
-  const hasLiveInvoice = key => data.invoices.some(inv => inv.fields['Run Key'] === key && inv.fields.Status !== 'void')
+  const hasLiveInvoice = key => data.invoices.some(inv => {
+    const fields = inv.fields
+    const status = fields.Status
+    const runKey = fields['Run Key']
+    const stripeInvoiceId = fields['Stripe Invoice ID']
+    if (runKey !== key) return false
+    if (status === 'void') return false
+    if (status === 'draft' && !stripeInvoiceId) return false
+    return true
+  })
 
   const activeRows = data.schedule.filter(r => r.fields.Active === true)
 
@@ -229,6 +238,15 @@ export function buildPreview(data, today) {
         }
       }
 
+      let resumeDraftId = null
+      const draftInvoice = data.invoices.find(inv => {
+        const fields = inv.fields
+        return fields['Run Key'] === key && fields.Status === 'draft' && !fields['Stripe Invoice ID']
+      })
+      if (draftInvoice) {
+        resumeDraftId = draftInvoice.id
+      }
+
       rows.push({
         runKey: key,
         scheduleId: row.id,
@@ -249,7 +267,8 @@ export function buildPreview(data, today) {
         lines: outputLines,
         paymentMethods: paymentMethodTypes(f['Payment Methods']),
         sendDaysBefore: rawSend ?? 10,
-        problems
+        problems,
+        resumeDraftId
       })
     }
   }

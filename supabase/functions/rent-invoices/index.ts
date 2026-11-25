@@ -1,7 +1,9 @@
-// Admin only, preview reads Airtable only. Deploy with JWT verification on (default).
+// Admin only; preview reads Airtable only; send writes Lease Invoice rows (draft first) and Tenants' Stripe Customer ID, then calls Stripe. Deploy with JWT verification on (default).
 import { requireAdmin, AuthError } from '../_shared/auth.ts'
 import { buildPreview } from '../_shared/rentPreview.js'
 import { centralToday } from '../_shared/rentMath.js'
+import { getStripeClientForAccount, STRIPE_ACCOUNTS } from '../_shared/stripeAccounts.ts'
+import { sendRentInvoices } from '../_shared/rentSend.js'
 
 const AIRTABLE_PAT = Deno.env.get('AIRTABLE_PAT') ?? ''
 const PM_BASE = 'appeuX9BHNgVXxdYZ'
@@ -62,6 +64,52 @@ async function loadData() {
   return { schedule, leases, lineItems, tenants, units, properties, invoices }
 }
 
+async function createRecord(table: string, fields: Record<string, unknown>) {
+  const url = `https://api.airtable.com/v0/${PM_BASE}/${table}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${AIRTABLE_PAT}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields, typecast: true }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Airtable create failed (${res.status}): ${body}`)
+  }
+  const data = await res.json()
+  return { id: data.id }
+}
+
+async function updateRecord(table: string, id: string, fields: Record<string, unknown>) {
+  const url = `https://api.airtable.com/v0/${PM_BASE}/${table}/${id}`
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${AIRTABLE_PAT}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields, typecast: true }),
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Airtable update failed (${res.status}): ${body}`)
+  }
+}
+
+function stripeFor(account: string) {
+  if (!account || !(account in STRIPE_ACCOUNTS)) {
+    throw new Error('No rent Stripe account for this property')
+  }
+  try {
+    return getStripeClientForAccount(account as keyof typeof STRIPE_ACCOUNTS)
+  } catch {
+    const entry = STRIPE_ACCOUNTS[account as keyof typeof STRIPE_ACCOUNTS]
+    throw new Error(`Stripe key not set for this account (${entry.envVar})`)
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -91,6 +139,28 @@ Deno.serve(async (req) => {
     if (action === 'preview') {
       const data = await loadData()
       const result = buildPreview(data, centralToday())
+      return new Response(
+        JSON.stringify(result),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (action === 'send') {
+      const { runKeys, expectedCents } = body
+      if (!Array.isArray(runKeys) || runKeys.length === 0 || runKeys.length > 50 || runKeys.some(k => typeof k !== 'string')) {
+        return new Response(
+          JSON.stringify({ error: 'runKeys must be a list of 1 to 50 run keys' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const data = await loadData()
+      const result = await sendRentInvoices({
+        runKeys,
+        expectedCents: expectedCents ?? {},
+        data,
+        today: centralToday(),
+        deps: { stripeFor, createRecord, updateRecord },
+      })
       return new Response(
         JSON.stringify(result),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
