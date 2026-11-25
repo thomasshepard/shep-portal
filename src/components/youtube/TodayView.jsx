@@ -1,4 +1,4 @@
-import { Play, Pause, AlertTriangle, CheckCircle2, Clock, Image as ImageIcon, Upload, BarChart3, Search, Rocket } from 'lucide-react'
+import { Play, Pause, AlertTriangle, CheckCircle2, Clock, Image as ImageIcon, Upload, BarChart3, Search, Rocket, Sparkles } from 'lucide-react'
 import { paceThisWeek, stageLabel, isOnHold } from '../../lib/youtube'
 
 const ICONS = {
@@ -9,6 +9,7 @@ const ICONS = {
   makepublic: Upload,
   ctr: BarChart3,
   start: Rocket,
+  hook: Sparkles,
   outliers: Search,
 }
 

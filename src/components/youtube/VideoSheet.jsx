@@ -2,12 +2,15 @@ import { useState, useRef } from 'react'
 import {
   X, AlertTriangle, CheckCircle2, Circle, Loader2, ExternalLink, RotateCcw, Rocket, Mic, Upload, Check, PauseCircle,
 } from 'lucide-react'
-import { F, STEPS, STAGES, stageLabel, stageIndex, DECISIONS, fmtMoney, VA_RATE, isOnHold } from '../../lib/youtube'
+import { F, STEPS, STAGES, stageLabel, stageIndex, DECISIONS, fmtMoney, VA_RATE, isOnHold, HOOK_REVIEW, isResearchReady } from '../../lib/youtube'
+import HookPicker from './HookPicker'
 
 /** What this video is waiting on, in one line. */
 function waitingOn(v) {
   if (isOnHold(v)) return { who: 'none', text: 'On hold. The PC leaves this one alone until you take it off hold.' }
   if (v.runnerStatus === 'Failed') return { who: 'you', text: `The PC stopped at ${v.runnerStep || 'a step'}. Retry it or fix the cause first.` }
+  if (isResearchReady(v)) return { who: 'you', text: v.hookChoice ? 'Research ready and a hook is picked. Tap Go below when you want the script written.' : 'Research ready and parked. Pick a hook below; nothing runs until you tap Go.' }
+  if (v.stage === 'Hooks' && v.runnerStatus === HOOK_REVIEW && v.hookOptions && !v.hookChoice) return { who: 'you', text: 'Pick the opening hook below, ask for changes, or write your own.' }
   if (v.openClaims > 0) return { who: 'you', text: `${v.openClaims} flagged claim${v.openClaims === 1 ? '' : 's'} to decide.` }
   if (v.photosToCheck > 0) return { who: 'you', text: `${v.photosToCheck} photo${v.photosToCheck === 1 ? '' : 's'} to approve or drop.` }
   if (v.stage === 'Ready to Approve' && !v.approved) return { who: 'you', text: 'Watch it through, then approve it to publish.' }
@@ -96,6 +99,11 @@ export default function VideoSheet({
             </span>
             {wait.text}
           </div>
+
+          {/* Hook pick (after research, before the script) */}
+          {v.stage === 'Hooks' && (
+            <HookPicker video={v} busy={busy} onWriteVideo={onWriteVideo} />
+          )}
 
           {/* The run */}
           {isOnHold(v) && (
@@ -458,7 +466,7 @@ export default function VideoSheet({
           {/* Steps */}
           <div className="rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-4 py-2.5 border-b border-gray-100">
-              <h3 className="text-sm font-bold text-gray-900">The 15 steps</h3>
+              <h3 className="text-sm font-bold text-gray-900">The {STEPS.length} steps</h3>
             </div>
             <ul className="divide-y divide-gray-50">
               {STEPS.map(s => {
