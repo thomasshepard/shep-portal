@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Calculator, Plus, X, ChevronDown, ChevronUp, Link2, CheckCircle2, Loader2, Landmark, RefreshCw, AlertTriangle, Wallet, Paperclip, BookOpen, Download, ExternalLink } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -163,7 +163,22 @@ export default function Bookkeeping() {
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [missingReceipts, setMissingReceipts] = useState([])
   const [showMissingReceipts, setShowMissingReceipts] = useState(false)
+  const [loadError, setLoadError] = useState(null) // set when the selected entity fails to load; drives the empty state
+  const loadSeq = useRef(0) // a load for an entity you've since switched away from must not overwrite the current one
   const isPartnership = PARTNERSHIP_ENTITIES.has(selectedEntity)
+
+  // Clear the previous entity's numbers at the moment of the switch, not
+  // after the new fetch lands.
+  function selectEntity(name) {
+    if (name === selectedEntity) return
+    setSummary(null)
+    setEntries([])
+    setBankCheck(null)
+    setMissingReceipts([])
+    setLoadError(null)
+    setLoading(true)
+    setSelectedEntity(name)
+  }
 
   // Once we know which entities this user can actually see, make sure the
   // selected one is one of them — the hardcoded 'Happy Cuts LLC' default
@@ -176,6 +191,7 @@ export default function Bookkeeping() {
   useEffect(() => {
     if (myEntities.length === 0) { setLoading(false); return }
     setSelectedMonth(null) // a different entity's history doesn't share the same relevant months
+    setSummary(null); setEntries([]); setBankCheck(null); setMissingReceipts([]); setLoadError(null)
     setEntriesLimit(25); load(25)
   }, [selectedEntity, myEntities.length])
 
@@ -197,6 +213,7 @@ export default function Bookkeeping() {
   }
 
   async function load(limit = entriesLimit) {
+    const seq = ++loadSeq.current
     setLoading(true)
     try {
       const [s, e, b, r] = await Promise.all([
@@ -205,15 +222,25 @@ export default function Bookkeeping() {
         callBookkeeping('get_bank_check', { entityName: selectedEntity }),
         callBookkeeping('list_missing_receipts', { entityName: selectedEntity }),
       ])
+      if (seq !== loadSeq.current) return
       setSummary(s)
       setEntries(e.entries || [])
       setBankCheck(b)
       setStatementInput(b.statementBalance != null ? String(b.statementBalance) : '')
       setMissingReceipts(r.entries || [])
+      setLoadError(null)
     } catch (e) {
+      if (seq !== loadSeq.current) return
+      // Never leave the previous numbers up under a failed load: clear them and
+      // show the empty state. This is the one toast for this entity load.
+      setSummary(null)
+      setEntries([])
+      setBankCheck(null)
+      setMissingReceipts([])
+      setLoadError(e.message)
       toast.error('Failed to load Bookkeeping: ' + e.message)
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }
 
@@ -301,6 +328,31 @@ export default function Bookkeeping() {
 
   if (loading) return <LoadingSpinner />
 
+  // Entity rail, shared by the normal view and the failed-load view so a user
+  // whose entity didn't load can still switch to another one.
+  const entityRail = (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {myEntities.map(name => (
+        <button
+          key={name}
+          onClick={() => selectEntity(name)}
+          className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-sm font-semibold transition-colors ${
+            selectedEntity === name ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-300'
+          }`}
+        >
+          {name}
+        </button>
+      ))}
+      {/* Roadmap pills: admin-only, not useful noise for a scoped VA */}
+      {isAdmin && LOCKED_ENTITIES.map(e => (
+        <div key={e.name} className="flex-shrink-0 flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium border border-gray-200 text-gray-400">
+          {e.name}
+          <span className="text-[10px] font-bold uppercase tracking-wide bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded">{e.phase}</span>
+        </div>
+      ))}
+    </div>
+  )
+
   if (myEntities.length === 0) {
     return (
       <div className="max-w-lg mx-auto mt-12 text-center">
@@ -309,6 +361,31 @@ export default function Bookkeeping() {
         <p className="text-sm text-gray-500">
           You have Bookkeeping access, but no entity has been picked for you to see. Ask an admin to choose which entities you can view — Admin &gt; Users &gt; the pencil icon &gt; Edit Access Settings.
         </p>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <Calculator size={24} className="text-violet-600" />
+            Bookkeeping
+          </h1>
+        </div>
+        {entityRail}
+        <div className="bg-white rounded-xl border border-amber-200 p-6 text-center">
+          <AlertTriangle size={24} className="text-amber-500 mx-auto mb-2" />
+          <p className="text-sm font-semibold text-gray-800">{loadError}</p>
+          <p className="text-xs text-gray-500 mt-1">Pick another entity above, or try again.</p>
+          <button
+            onClick={() => load()}
+            className="mt-4 h-9 px-3.5 rounded-lg text-sm font-medium bg-gray-900 text-white hover:bg-gray-800"
+          >
+            Try again
+          </button>
+        </div>
       </div>
     )
   }
@@ -370,26 +447,7 @@ export default function Bookkeeping() {
       {isAdmin && <BankConnectionsPanel myEntities={myEntities} />}
 
       {/* Entity rail — scoped to what this user can actually see */}
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {myEntities.map(name => (
-          <button
-            key={name}
-            onClick={() => setSelectedEntity(name)}
-            className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-sm font-semibold transition-colors ${
-              selectedEntity === name ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-300'
-            }`}
-          >
-            {name}
-          </button>
-        ))}
-        {/* Roadmap pills — admin-only, not useful noise for a scoped VA */}
-        {isAdmin && LOCKED_ENTITIES.map(e => (
-          <div key={e.name} className="flex-shrink-0 flex items-center gap-2 px-3.5 py-1.5 rounded-full text-sm font-medium border border-gray-200 text-gray-400">
-            {e.name}
-            <span className="text-[10px] font-bold uppercase tracking-wide bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded">{e.phase}</span>
-          </div>
-        ))}
-      </div>
+      {entityRail}
 
       {/* Period picker — drives both the Stats row and the P&L/Balance
           Sheet below. Reviewing a prior month means the P&L covers only
@@ -1529,11 +1587,15 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
   const [suggestions, setSuggestions] = useState({}) // rawTransactionId -> { code, name }
   const [importingId, setImportingId] = useState(null)
   const [split, setSplit] = useState(null) // { id, primaryAccount, secondaryAccount, secondaryAmount } | null — at most one transaction split at a time, this is rare
+  const [loadError, setLoadError] = useState(null)
 
   useEffect(() => { load() }, [])
 
+  // Inline, not a toast: the parent's load of the same entity already toasts
+  // once when it fails, and a second toast here would be the same problem twice.
   async function load() {
     setLoading(true)
+    setLoadError(null)
     try {
       const [mapped, txs] = await Promise.all([
         callBookkeeping('list_feed_accounts', { entityName }),
@@ -1553,7 +1615,7 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
           .catch(() => {})
       })
     } catch (e) {
-      toast.error('Failed to load bank feed: ' + e.message)
+      setLoadError('Bank feed: ' + e.message)
     } finally {
       setLoading(false)
     }
@@ -1669,6 +1731,7 @@ function BankFeedPanel({ entityName, expenseIncomeAccounts, onPosted }) {
       </div>
 
       <div className="p-4 space-y-4">
+        {loadError && <p className="text-xs text-red-600">{loadError}</p>}
         {/* Mapped accounts summary */}
         {mappedAccounts.length > 0 && (
           <div className="space-y-2">

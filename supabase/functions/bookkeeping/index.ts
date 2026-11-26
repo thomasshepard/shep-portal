@@ -100,7 +100,7 @@ function assertEntityScope(entityName: string, ctx?: BkContext) {
 
 async function getEntityId(name: string): Promise<string> {
   const { data, error } = await sb.from('bk_entities').select('id').eq('name', name).single()
-  if (error || !data) throw new Error(`Entity "${name}" not found — has its migration run?`)
+  if (error || !data) throw new Error(`"${name}" isn't set up in the database yet. Run its setup SQL in the Supabase SQL editor.`)
   return data.id
 }
 

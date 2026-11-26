@@ -1,6 +1,9 @@
--- Bookkeeping: Maple Hill Coffee (single-member coffee shop). Chart of
--- accounts plus a nullable bk_accounts.schedule_c_line column (set only on
--- this entity's P&L accounts for now; other entities stay null).
+-- Bookkeeping: Maple Hill Coffee (sole proprietorship owned by Thomas
+-- personally, reported on his Schedule C). Chart of accounts plus a nullable
+-- bk_accounts.schedule_c_line column (set only on this entity's P&L accounts
+-- for now; other entities stay null). The entity is created here with
+-- entity_type 'single_member'; 20261126120000_maple_hill_sole_proprietorship.sql
+-- changes it to 'sole_proprietorship'.
 --
 -- Insert-only and idempotent: entity is check-then-insert by name (same as
 -- 20260816120000), and the account insert runs outside that check with
