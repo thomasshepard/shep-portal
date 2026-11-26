@@ -1,4 +1,5 @@
 import { fetchAllRecords, PM_BASE_ID } from './airtable'
+import { supabase } from './supabase'
 export * from '../../supabase/functions/_shared/rentMath.js'
 
 export const RENT_TABLES = {
@@ -104,4 +105,27 @@ export async function fetchOpenLeaseInvoices() {
       return String(db).localeCompare(String(da))
     })
   return { data: filtered, error: null }
+}
+
+// Calls the admin-only rent-invoices edge function. Reads the real error text
+// off the response on a non-2xx status (same pattern as Bookkeeping.jsx).
+async function callRentInvoices(body) {
+  const { data, error } = await supabase.functions.invoke('rent-invoices', { body })
+  if (error) {
+    let detail = error.message
+    try {
+      const b = await error.context?.json()
+      if (b?.error) detail = b.error
+    } catch { /* not JSON */ }
+    throw new Error(detail || 'Rent invoices request failed')
+  }
+  return data
+}
+
+export function previewRentInvoices() {
+  return callRentInvoices({ action: 'preview' })
+}
+
+export function sendRentInvoices(runKeys, expectedCents) {
+  return callRentInvoices({ action: 'send', runKeys, expectedCents })
 }
