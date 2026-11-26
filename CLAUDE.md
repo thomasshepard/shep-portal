@@ -336,3 +336,18 @@ Push to `main` triggers GitHub Actions (`.github/workflows/deploy.yml`) to build
 **Supabase edge functions and `pg_cron` jobs deploy separately** — they are not part of this GitHub Actions workflow. New/changed edge functions need `supabase functions deploy <name>` (some with `--no-verify-jwt`) and their secrets set via `supabase secrets set` (`AIRTABLE_PAT`, `GOOGLE_MAPS_API_KEY`, `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT`, `DISCORD_BOT_TOKEN`/`DISCORD_PUBLIC_KEY`/`DISCORD_DIGEST_CHANNEL_ID`, `RESEND_API_KEY`, `STRIPE_HAPPY_CUTS_KEY`). `supabase db push` doesn't work in this repo — blocked by a pre-existing remote migration-history mismatch (an old `20260810`-timestamped migration recorded on the server with no matching local file) that has nothing to do with any individual change.
 
 **New SQL migrations go through the Supabase SQL editor by hand** (Dashboard → SQL Editor), since `db push` doesn't work here (see above). There used to be a `run-migration` edge function that accepted arbitrary SQL via a shared-secret header for exactly this — removed 2026-10-31 (security audit BL-1: a standing, unauthenticated-by-session remote SQL console with full read/write access to the database is too much exposure for a convenience that's only needed occasionally). The source is still in git history (`git log -- supabase/functions/run-migration/`) if it's ever worth reviving with tighter scoping.
+
+## Rent invoicing (Stripe)
+
+- What it does: automatic monthly rent invoices sent via Stripe (one tap from the Rent tab), with payment status flowing back through a webhook. Handles full-month, split-payer, and two-payments-a-month payment plans. Routes each invoice to the right Stripe account (East Meadow Properties or Shepard Holdings).
+- Spec: `docs/specs/rent-invoicing.md` — deploy note: `docs/specs/rent-invoicing-deploy.md`
+- Two edge functions:
+  - `rent-invoices` (admin, JWT verified): actions `preview` (read-only) and `send` (writes Lease Invoice draft first, then Stripe)
+  - `stripe-rent-webhook` (no JWT, `--no-verify-jwt`): signature-verified per account, only touches invoices with `metadata.source = 'shep_portal_rent'`
+- Shared modules: `rentMath.js`, `rentPreview.js`, `rentSend.js`, `rentWebhook.js` in `supabase/functions/_shared/`
+- `src/lib/rentInvoices.js` re-exports `rentMath.js` for the portal preview
+- Airtable tables used (PM base): Rent Schedule, Lease Invoice, Lease Agreements, Lease Invoice Line Item, Rental Units, Property, Tenants. Writes **only** to Lease Invoice and Tenants' Stripe Customer ID
+- Order rule: Airtable draft row (Status `draft`, Run Key `{scheduleRowId}:{dueDate}`) created before any Stripe call; idempotency key `rent-{runKey}` on Stripe create
+- Webhook ignores any Stripe invoice without the rent metadata
+- Tests run with `node --test tests/` (no npm script)
+- Rent tab is admin only

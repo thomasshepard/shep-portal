@@ -10,6 +10,7 @@ import PropertyPlaybook from '../components/PropertyPlaybook'
 import MaintenanceForm from '../components/MaintenanceForm'
 import ProjectsPanel from '../components/ProjectsPanel'
 import TenantIssuesQueue from '../components/TenantIssuesQueue'
+import RentInvoicesPanel from '../components/RentInvoicesPanel'
 import toast from 'react-hot-toast'
 
 const STATUS_COLORS = {
@@ -232,7 +233,7 @@ export default function Properties() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200 -mt-2 overflow-x-auto">
-        {['overview', 'maintenance', 'projects', 'playbook', ...((isAdmin || isVA) ? ['issues'] : [])].map(t => (
+        {['overview', 'maintenance', 'projects', 'playbook', ...((isAdmin || isVA) ? ['issues'] : []), ...(isAdmin ? ['rent'] : [])].map(t => (
           <button
             key={t}
             onClick={() => setView(t)}
@@ -245,7 +246,7 @@ export default function Properties() {
         ))}
       </div>
 
-      {view === 'issues' && (isAdmin || isVA) ? (
+      {view === 'rent' && isAdmin ? <RentInvoicesPanel /> : view === 'issues' && (isAdmin || isVA) ? (
         <TenantIssuesQueue properties={properties} />
       ) : view === 'playbook' ? <PropertyPlaybook /> : view === 'maintenance' ? (
         <MaintenanceQueue
