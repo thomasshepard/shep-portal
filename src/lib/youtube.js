@@ -375,6 +375,30 @@ export function toClaim(rec) {
   }
 }
 
+// Picks a preview image for a photo/source row. Order: the Airtable attachment
+// (its large thumbnail when there is one), then a Wikimedia Commons file page
+// turned into a Special:FilePath redirect, then a direct https image link.
+// Never throws; returns '' when nothing usable is found.
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i
+
+export function photoPreviewUrl(attachment, url) {
+  try {
+    if (attachment) return attachment.thumbnails?.large?.url || attachment.url || ''
+    if (typeof url !== 'string' || !url) return ''
+    const u = new URL(url)
+    const isWiki = u.hostname === 'commons.wikimedia.org' || u.hostname.endsWith('.wikipedia.org')
+    if (isWiki && u.protocol === 'https:' && u.pathname.startsWith('/wiki/File:')) {
+      const name = u.pathname.slice('/wiki/File:'.length).replace(/ /g, '_').replace(/%20/gi, '_')
+      if (name) return `https://commons.wikimedia.org/wiki/Special:FilePath/${name}?width=400`
+      return ''
+    }
+    if (url.startsWith('https://') && u.protocol === 'https:' && IMAGE_EXT.test(u.pathname)) return url
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 export function toPhoto(rec) {
   const f = rec.fields || {}
   return {
@@ -388,7 +412,7 @@ export function toPhoto(rec) {
     credit: safeStr(f['Credit Line'], ''),
     approved: f['Approved'] === true,
     removed: f['Removed'] === true,
-    image: arr(f['Image'])[0]?.url || '',
+    image: photoPreviewUrl(arr(f['Image'])[0], safeStr(f['URL'], '')),
     videoId: arr(f['Video Ideas'])[0] || null,
   }
 }

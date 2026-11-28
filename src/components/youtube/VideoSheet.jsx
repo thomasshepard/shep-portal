@@ -396,10 +396,22 @@ export default function VideoSheet({
               <h3 className="text-sm font-bold text-gray-900">Photos to check</h3>
               {openPhotos.map(p => (
                 <div key={p.id} className="rounded-xl border border-gray-200 p-3 flex items-start gap-3">
-                  {p.image && <img src={p.image} alt="" className="w-20 h-14 object-cover rounded-lg bg-gray-100 flex-shrink-0" />}
+                  {p.image && (
+                    <img
+                      src={p.image}
+                      alt=""
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={e => { e.currentTarget.style.display = 'none' }}
+                      className="w-20 h-14 object-cover rounded-lg bg-gray-100 flex-shrink-0"
+                    />
+                  )}
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-gray-900 break-words">{p.item}</p>
                     <p className="text-xs text-gray-500">{[p.archive, p.rights].filter(Boolean).join(' · ')}</p>
+                    {!p.image && p.url && (
+                      <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Open source</a>
+                    )}
                   </div>
                   <div className="flex flex-col gap-1.5 flex-shrink-0">
                     <button
